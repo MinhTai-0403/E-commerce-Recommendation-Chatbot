@@ -37,7 +37,7 @@ from google import genai
 from google.genai import types
 
 # ⚙️ API KEY
-GEMINI_API_KEY = "AIzaSyBFOrDrmFfLC5eUSQ-c156TCSvbwnFU1Y4"
+GEMINI_API_KEY = "GEMINI-API"
 
 client = None
 translation_client = None
