@@ -43,7 +43,7 @@ faq_flows = {
         ]
     },
     "others": {
-        "intro": "🤖 Rất tiếc, hiện tại chưa có thông tin về sản phẩm này. Mong bạn thông cảm 😓",
+        "intro": "Rất tiếc, hiện tại chưa có thông tin về sản phẩm này. Mong bạn thông cảm 😓",
         "suggestions": []
     }
 }

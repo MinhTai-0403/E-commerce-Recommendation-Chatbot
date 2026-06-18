@@ -165,12 +165,19 @@
       font-weight: 600;
     }
     .chatbot-header button {
-      background: transparent;
-      color: white;
-      border: none;
-      font-size: 16px;
-      cursor: pointer;
-    }
+  background: transparent;
+  color: white;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  margin-left: 10px;
+  transition: 0.2s;
+}
+
+.chatbot-header button:hover {
+  color: #ffdada;
+  transform: scale(1.15);
+}
     .chatbot-messages {
       flex: 1;
       padding: 10px;
@@ -226,7 +233,7 @@
     }
 
     /* * ===============================================
-     * ✅ (MỚI) CSS CHO CÁC NÚT GỢI Ý (FAQ FLOW)
+     * CSS CHO CÁC NÚT GỢI Ý (FAQ FLOW)
      * ===============================================
      */
     .bot-message .suggest-btn {
@@ -348,9 +355,12 @@
 
   <div class="chatbot-window" id="chatbotWindow">
     <div class="chatbot-header">
-      <span>Chatbot TTD</span>
-      <button onclick="toggleChat()">✖</button>
-    </div>
+  <span>Chatbot TTD</span>
+  <div>
+    <button onclick="clearChat()">🗑</button>
+    <button onclick="toggleChat()">✖</button>
+  </div>
+</div>
     <div class="chatbot-messages" id="chatbotMessages">
       <div class="message bot-message">Xin chào! Tôi có thể giúp gì cho bạn?</div>
     </div>
@@ -372,6 +382,19 @@
       chatWindow.style.display = (chatWindow.style.display === "flex") ? "none" : "flex";
       chatWindow.style.flexDirection = "column";
     }
+
+    function saveChatHistory() {
+  const messages = document.getElementById("chatbotMessages").innerHTML;
+  localStorage.setItem("chat_history", messages);
+}
+
+function clearChat() {
+  localStorage.removeItem("chat_history");
+
+  document.getElementById("chatbotMessages").innerHTML =
+    '<div class="message bot-message">Xin chào! Tôi có thể giúp gì cho bạn?</div>';
+}
+
 
     // --- Hàm trợ giúp thêm tin nhắn vào UI ---
     function addMessageToUI(htmlContent, messageClass) {
@@ -404,10 +427,10 @@
     msgDiv.textContent = htmlContent;
   }
 
-  messages.appendChild(msgDiv);
-  messages.scrollTop = messages.scrollHeight;
-  }
-
+ messages.appendChild(msgDiv);
+messages.scrollTop = messages.scrollHeight;
+saveChatHistory();
+    }
     // --- HÀM GỬI TIN NHẮN (VĂN BẢN) ---
     async function sendMessage() {
       const input = document.getElementById("chatInput");
@@ -432,36 +455,67 @@
     }
 
     // --- HÀM GỬI ẢNH ---
-    async function sendImage() {
-      const input = document.getElementById("imageInput");
-      const file = input.files[0];
-      if (!file) return;
+async function sendImage() {
 
-      // Hiển thị ảnh xem trước (preview)
-      const reader = new FileReader();
-      reader.onload = function(e) {
-          const imgPreviewHtml = `<img src="${e.target.result}" alt="Ảnh tải lên" style="width:150px; border-radius: 8px;">`;
-          addMessageToUI(imgPreviewHtml, "user-image");
-      }
-      reader.readAsDataURL(file);
+  const imageInput = document.getElementById("imageInput");
+  const textInput = document.getElementById("chatInput");
 
-      const formData = new FormData();
-      formData.append("file", file);
+  const file = imageInput.files[0];
+  const message = textInput.value.trim();
 
-      try {
-        const res = await fetch("/upload", {
-          method: "POST",
-          body: formData 
-        });
-        const data = await res.json();
-        addMessageToUI(data.reply, "bot-message");
-      } catch (error) {
-        console.error("Error uploading image:", error);
-        addMessageToUI("Rất tiếc, đã có lỗi khi tải ảnh lên.", "bot-message");
-      }
-      
-      input.value = '';
-    }
+  if (!file) return;
+
+  // hiện text
+  if (message !== "") {
+    addMessageToUI(message, "user-message");
+  }
+
+  // preview ảnh
+  const reader = new FileReader();
+
+  reader.onload = function(e) {
+
+    const imgPreviewHtml = `
+      <img src="${e.target.result}"
+           alt="Ảnh tải lên"
+           style="width:150px;border-radius:8px;">
+    `;
+
+    addMessageToUI(imgPreviewHtml, "user-image");
+  };
+
+  reader.readAsDataURL(file);
+
+  const formData = new FormData();
+
+  formData.append("file", file);
+  formData.append("message", message);
+
+  textInput.value = "";
+
+  try {
+
+    const res = await fetch("/upload", {
+      method: "POST",
+      body: formData
+    });
+
+    const data = await res.json();
+
+    addMessageToUI(data.reply, "bot-message");
+
+  } catch (error) {
+
+    console.error("Error uploading image:", error);
+
+    addMessageToUI(
+      "Rất tiếc, đã có lỗi khi tải ảnh lên.",
+      "bot-message"
+    );
+  }
+
+  imageInput.value = "";
+}
 
     // Thêm sự kiện Enter để gửi tin nhắn
     document.getElementById("chatInput").addEventListener("keypress", function(event) {
@@ -480,9 +534,15 @@
 
     // Hiển thị chatbot khi trang tải xong
     window.onload = function() {
-      const chatIcon = document.querySelector(".chatbot-icon");
-      chatIcon.style.display = "block";
-    };
+  const savedChat = localStorage.getItem("chat_history");
+
+  if (savedChat) {
+    document.getElementById("chatbotMessages").innerHTML = savedChat;
+  }
+
+  const chatIcon = document.querySelector(".chatbot-icon");
+  chatIcon.style.display = "block";
+};
 
     // --- (MỚI) Xử lý click vào nút gợi ý ---
     document.addEventListener("click", function (e) {
@@ -511,4 +571,3 @@
   </script>
 </body>
 </html>
-
