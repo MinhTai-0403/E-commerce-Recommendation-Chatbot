@@ -1,0 +1,239 @@
+{
+  "exportedAt": "2026-06-18T17:50:35.326Z",
+  "source": "cellphones",
+  "database": "cosarii",
+  "collection": "cellphones_products",
+  "totalProducts": 15671,
+  "sampleSize": 8,
+  "products": [
+    {
+      "url": "https://cellphones.com.vn/chuot-gaming-khong-day-logitech-pro-x-superlight-2c.html",
+      "availability": {
+        "raw": "https://schema.org/InStock",
+        "status": "InStock"
+      },
+      "brand": "Logitech",
+      "categories": [
+        "Phụ kiện",
+        "Chuột | Bàn Phím",
+        "Chuột",
+        "Chuột Logitech",
+        "Chuột Logitech MX Series"
+      ],
+      "images": [
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/c/h/chuot-gaming-khong-day-logitech-pro-x-superlight-2c.png",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/c/h/chuot-gaming-khong-day-logitech-pro-x-superlight-2c_1_.png",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/c/h/chuot-gaming-khong-day-logitech-pro-x-superlight-2c_2_.png"
+      ],
+      "name": "Chuột Gaming không dây Logitech Pro X Superlight 2C",
+      "price": 3040000,
+      "priceCurrency": "VND",
+      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/c/h/chuot-gaming-khong-day-logitech-pro-x-superlight-2c.png",
+      "scrapedAt": "2026-06-18T17:42:28.702Z",
+      "sku": "chuot-gaming-khong-day-logitech-pro-x-superlight-2c",
+      "source": "cellphones",
+      "sourceUrls": [
+        "https://cellphones.com.vn/chuot-gaming-khong-day-logitech-pro-x-superlight-2c.html"
+      ]
+    },
+    {
+      "url": "https://cellphones.com.vn/tai-nghe-bluetooth-xiaomi-redmi-buds-6-active.html",
+      "availability": {
+        "raw": "https://schema.org/InStock",
+        "status": "InStock"
+      },
+      "brand": "Xiaomi",
+      "categories": [
+        "Âm thanh",
+        "Tai nghe",
+        "Tai nghe không dây"
+      ],
+      "images": [
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/t/a/tai-nghe-bluetooth-xiaomi-redmi-buds-6-active-spa.png",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/t/a/tai-nghe-bluetooth-xiaomi-redmi-buds-6-active_5_.png",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/t/a/tai-nghe-bluetooth-xiaomi-redmi-buds-6-active_1_.png"
+      ],
+      "name": "Tai nghe Bluetooth True Wireless Xiaomi Redmi Buds 6 Active",
+      "price": 425000,
+      "priceCurrency": "VND",
+      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/t/a/tai-nghe-bluetooth-xiaomi-redmi-buds-6-active-spa.png",
+      "scrapedAt": "2026-06-18T17:42:27.250Z",
+      "sku": "tai-nghe-bluetooth-xiaomi-redmi-buds-6-active",
+      "source": "cellphones",
+      "sourceUrls": [
+        "https://cellphones.com.vn/tai-nghe-bluetooth-xiaomi-redmi-buds-6-active.html"
+      ]
+    },
+    {
+      "url": "https://cellphones.com.vn/laptop-lenovo-ideapad-5-pro-14arh7-82sj0026vn.html",
+      "availability": {
+        "raw": "https://schema.org/OutOfStock",
+        "status": "OutOfStock"
+      },
+      "brand": "Lenovo",
+      "categories": [
+        "Laptop",
+        "Lenovo",
+        "Ideapad"
+      ],
+      "images": [
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/1/_/1_373.png",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/1/_/1_373.png",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/2/_/2_350.png"
+      ],
+      "name": "Laptop Lenovo Ideapad 5 Pro 14ARH7 82SJ0026VN",
+      "price": 20990000,
+      "priceCurrency": "VND",
+      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/1/_/1_373.png",
+      "scrapedAt": "2026-06-18T17:42:27.152Z",
+      "sku": "laptop-lenovo-ideapad-5-pro-14arh7-82sj0026vn",
+      "source": "cellphones",
+      "sourceUrls": [
+        "https://cellphones.com.vn/laptop-lenovo-ideapad-5-pro-14arh7-82sj0026vn.html"
+      ]
+    },
+    {
+      "url": "https://cellphones.com.vn/chuot-gaming-khong-day-logitech-pro-x-superlight-2-se.html",
+      "availability": {
+        "raw": "https://schema.org/InStock",
+        "status": "InStock"
+      },
+      "brand": "Logitech",
+      "categories": [
+        "Phụ kiện",
+        "Chuột | Bàn Phím",
+        "Chuột",
+        "Chuột Logitech",
+        "Chuột Logitech MX Series"
+      ],
+      "images": [
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/c/h/chuot-gaming-khong-day-logitech-pro-x-superlight-2-se.png",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/c/h/chuot-gaming-khong-day-logitech-pro-x-superlight-2-se_1_.png",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/c/h/chuot-gaming-khong-day-logitech-pro-x-superlight-2-se_2_.png"
+      ],
+      "name": "Chuột Gaming không dây Logitech Pro X Superlight 2 SE",
+      "price": 2690000,
+      "priceCurrency": "VND",
+      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/c/h/chuot-gaming-khong-day-logitech-pro-x-superlight-2-se.png",
+      "scrapedAt": "2026-06-18T17:42:23.716Z",
+      "sku": "chuot-gaming-khong-day-logitech-pro-x-superlight-2-se",
+      "source": "cellphones",
+      "sourceUrls": [
+        "https://cellphones.com.vn/chuot-gaming-khong-day-logitech-pro-x-superlight-2-se.html"
+      ]
+    },
+    {
+      "url": "https://cellphones.com.vn/mieng-dan-chong-va-dap-cho-apple-watch-42-mm-full-man-hinh-4d-5d.html",
+      "availability": {
+        "raw": "https://schema.org/OutOfStock",
+        "status": "OutOfStock"
+      },
+      "brand": null,
+      "categories": [
+        "Phụ kiện",
+        "Dán điện thoại | Laptop",
+        "Apple Watch"
+      ],
+      "images": [
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/4/9/4985733912_dan-cuong-luc-apple-watch-42mm.jpg",
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/productnull",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/4/9/4985733912_dan-cuong-luc-apple-watch-42mm.jpg"
+      ],
+      "name": "Miếng Dán chống va đập cho Apple Watch 42mm - Full màn hình 4D/5D",
+      "price": 120000,
+      "priceCurrency": "VND",
+      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/4/9/4985733912_dan-cuong-luc-apple-watch-42mm.jpg",
+      "scrapedAt": "2026-06-18T17:42:22.468Z",
+      "sku": "A11K.002.B",
+      "source": "cellphones",
+      "sourceUrls": [
+        "https://cellphones.com.vn/mieng-dan-chong-va-dap-cho-apple-watch-42-mm-full-man-hinh-4d-5d.html"
+      ]
+    },
+    {
+      "url": "https://cellphones.com.vn/laptop-lenovo-ideapad-5-14aba7-82se007evn.html",
+      "availability": {
+        "raw": "https://schema.org/OutOfStock",
+        "status": "OutOfStock"
+      },
+      "brand": "Lenovo",
+      "categories": [
+        "Laptop",
+        "Lenovo",
+        "Ideapad"
+      ],
+      "images": [
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/1/_/1_374.png",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/1/_/1_374.png",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/2/_/2_351.png"
+      ],
+      "name": "Laptop Lenovo Ideapad 5 14ABA7 82SE007EVN",
+      "price": 17490000,
+      "priceCurrency": "VND",
+      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/1/_/1_374.png",
+      "scrapedAt": "2026-06-18T17:42:22.190Z",
+      "sku": "laptop-lenovo-ideapad-5-14aba7-82se007evn",
+      "source": "cellphones",
+      "sourceUrls": [
+        "https://cellphones.com.vn/laptop-lenovo-ideapad-5-14aba7-82se007evn.html"
+      ]
+    },
+    {
+      "url": "https://cellphones.com.vn/tai-nghe-bluetooth-pisen-buds-p1-plus.html",
+      "availability": {
+        "raw": "https://schema.org/OutOfStock",
+        "status": "OutOfStock"
+      },
+      "brand": "Pisen",
+      "categories": [
+        "Âm thanh",
+        "Tai nghe",
+        "Pisen"
+      ],
+      "images": [
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/t/a/tai-nghe-bluetooth-pisen-buds-p1-plus.png",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/t/a/tai-nghe-bluetooth-pisen-buds-p1-plus_1_.png",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/t/a/tai-nghe-bluetooth-pisen-buds-p1-plus_2_.png"
+      ],
+      "name": "Tai nghe Bluetooth True Wireless Pisen Buds P1 Plus",
+      "price": 490000,
+      "priceCurrency": "VND",
+      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/t/a/tai-nghe-bluetooth-pisen-buds-p1-plus.png",
+      "scrapedAt": "2026-06-18T17:42:20.545Z",
+      "sku": "tai-nghe-bluetooth-pisen-buds-p1-plus",
+      "source": "cellphones",
+      "sourceUrls": [
+        "https://cellphones.com.vn/tai-nghe-bluetooth-pisen-buds-p1-plus.html"
+      ]
+    },
+    {
+      "url": "https://cellphones.com.vn/cap-belkin-type-c-to-c-60w-2-0-1m-vo-du.html",
+      "availability": {
+        "raw": "https://schema.org/InStock",
+        "status": "InStock"
+      },
+      "brand": "Belkin",
+      "categories": [
+        "Phụ kiện",
+        "Sạc - Cáp",
+        "Cáp",
+        "USB-C"
+      ],
+      "images": [
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/c/a/cap-belkin-type-c-to-c-60w-2-0-1m-vo-du_1_.png",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/c/a/cap-belkin-type-c-to-c-60w-2-0-1m-vo-du.jpg",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/c/a/cap-belkin-type-c-to-c-60w-2-0-1m-vo-du_2_.png"
+      ],
+      "name": "Cáp Belkin USB-C to C 60W CBL 2.0 dài 1m vỏ dù",
+      "price": 300000,
+      "priceCurrency": "VND",
+      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/c/a/cap-belkin-type-c-to-c-60w-2-0-1m-vo-du_1_.png",
+      "scrapedAt": "2026-06-18T17:42:20.029Z",
+      "sku": "cap-belkin-type-c-to-c-60w-2-0-1m-vo-du",
+      "source": "cellphones",
+      "sourceUrls": [
+        "https://cellphones.com.vn/cap-belkin-type-c-to-c-60w-2-0-1m-vo-du.html"
+      ]
+    }
+  ]
+}
