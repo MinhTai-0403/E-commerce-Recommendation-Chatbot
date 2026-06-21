@@ -1,0 +1,219 @@
+/* ===== FLASH SALE ===== */
+.flash-sale-wrapper {
+  background: var(--bg-white);
+  border-radius: var(--border-radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+}
+
+/* Main Tabs */
+.flash-sale-main-tabs {
+  display: flex;
+  background: #f5f5f5;
+}
+
+.fs-main-tab {
+  flex: 1;
+  padding: 15px;
+  border: none;
+  background: transparent;
+  font-size: 16px;
+  font-weight: 800;
+  color: #666;
+  text-transform: uppercase;
+  cursor: pointer;
+  position: relative;
+  transition: all var(--transition-fast);
+  text-align: center;
+}
+
+.fs-main-tab:hover {
+  color: var(--primary-red);
+}
+
+.fs-main-tab.active {
+  background: #d70018; /* cellphones red */
+  color: white;
+  border-radius: 10px 10px 0 0;
+}
+
+.fs-main-tab.active::after {
+  content: '';
+  position: absolute;
+  bottom: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 10px solid transparent;
+  border-right: 10px solid transparent;
+  border-top: 10px solid #d70018;
+  z-index: 2;
+}
+
+/* Content Area */
+.flash-sale-content {
+  background: #d70018; /* Red background for content */
+  padding: 20px;
+  border-radius: 0 0 10px 10px;
+}
+
+/* Header */
+.flash-sale-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.fs-dates {
+  display: flex;
+  gap: 10px;
+}
+
+.fs-date-btn {
+  padding: 8px 16px;
+  border: 1px solid rgba(255,255,255,0.5);
+  background: transparent;
+  color: white;
+  border-radius: 20px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.fs-date-btn.active {
+  background: white;
+  color: #d70018;
+  border-color: white;
+}
+
+.fs-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.countdown-label {
+  color: white;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.countdown-timer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.time-box {
+  background: white;
+  color: #d70018;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.time-colon {
+  color: white;
+  font-weight: 700;
+}
+
+/* Time Slots */
+.fs-time-slots {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.fs-time-btn {
+  padding: 8px 20px;
+  border: 1px solid rgba(255,255,255,0.5);
+  background: transparent;
+  color: white;
+  border-radius: 20px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.fs-time-btn.active {
+  background: white;
+  color: #d70018;
+  border-color: white;
+}
+
+/* Products */
+.flash-sale-products {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  padding-bottom: 10px;
+}
+
+.flash-sale-products::-webkit-scrollbar {
+  height: 6px;
+}
+
+.flash-sale-products::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.3);
+  border-radius: 4px;
+}
+
+.fs-product-wrapper {
+  min-width: 215px;
+  scroll-snap-align: start;
+  background: white;
+  border-radius: var(--border-radius-lg);
+  display: flex;
+  flex-direction: column;
+}
+
+/* Progress */
+.fs-progress {
+  padding: 0 12px 12px;
+  position: relative;
+  margin-top: auto;
+}
+
+.progress-bar {
+  height: 20px;
+  background: #ffb8b8;
+  border-radius: 10px;
+  position: relative;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ff4e50 0%, #f9d423 100%);
+  border-radius: 10px;
+}
+
+.progress-text {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: white;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+  z-index: 1;
+}
+
+.progress-icon {
+  position: absolute;
+  left: 10px;
+  top: -2px;
+  font-size: 14px;
+  z-index: 2;
+}

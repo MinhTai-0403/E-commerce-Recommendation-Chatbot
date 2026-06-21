@@ -1,0 +1,91 @@
+/* ===== USED PRODUCTS ===== */
+.used-products-wrapper {
+  background: var(--bg-white);
+  border-radius: var(--border-radius-lg);
+  padding: 16px;
+  box-shadow: var(--shadow-card);
+}
+
+.used-products-header {
+  margin-bottom: 14px;
+}
+
+.used-products-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.used-products-title svg {
+  color: var(--installment-green);
+}
+
+.used-products-subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.used-products-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10px;
+}
+
+.used-product-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: var(--border-radius);
+  border: 1px solid var(--border-light);
+  transition: all var(--transition-fast);
+  text-decoration: none;
+}
+
+.used-product-item:hover {
+  border-color: var(--primary-red);
+  box-shadow: 0 2px 8px rgba(215, 0, 24, 0.1);
+  transform: translateY(-1px);
+}
+
+.used-product-icon {
+  font-size: 28px;
+  flex-shrink: 0;
+}
+
+.used-product-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.used-product-name {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.used-product-discount {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--primary-red);
+  margin-top: 2px;
+}
+
+.used-product-arrow {
+  color: #ccc;
+  flex-shrink: 0;
+  transition: color var(--transition-fast);
+}
+
+.used-product-item:hover .used-product-arrow {
+  color: var(--primary-red);
+}
