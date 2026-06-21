@@ -56,6 +56,7 @@ Các lệnh chính:
 - `npm run scrape:cellphones:sample`: crawl thử một sample nhỏ.
 - `npm run scrape:cellphones`: chạy scraper tùy biến bằng tham số CLI.
 - `npm run verify:cellphones`: kiểm tra URL trong sitemap đã có trong MongoDB chưa.
+- `npm run verify:cellphones -- --sample-missing=0 --report-sitemaps`: xem số URL còn thiếu theo từng sitemap để chia worker crawl.
 
 ## Dữ liệu
 

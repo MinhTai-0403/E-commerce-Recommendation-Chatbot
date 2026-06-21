@@ -16,6 +16,7 @@ function parseArgs(argv) {
     sitemapStart: 0,
     sitemapLimit: null,
     sampleMissing: 20,
+    reportSitemaps: false,
   };
 
   for (const arg of argv) {
@@ -23,6 +24,7 @@ function parseArgs(argv) {
     if (name === "--sitemap-start") args.sitemapStart = Number(value || 0);
     else if (name === "--sitemap-limit") args.sitemapLimit = numberOrNull(value);
     else if (name === "--sample-missing") args.sampleMissing = Number(value || 20);
+    else if (name === "--report-sitemaps") args.reportSitemaps = true;
   }
 
   args.sitemapStart = Math.max(0, args.sitemapStart || 0);
@@ -105,6 +107,7 @@ async function collectSitemapUrls(args) {
     args.sitemapLimit ? args.sitemapStart + args.sitemapLimit : undefined
   );
   const urls = [];
+  const sitemapDetails = [];
 
   if (selectedSitemaps.length === 0) {
     throw new Error(
@@ -112,7 +115,7 @@ async function collectSitemapUrls(args) {
     );
   }
 
-  for (const sitemap of selectedSitemaps) {
+  for (const [offset, sitemap] of selectedSitemaps.entries()) {
     const xml = await fetchText(sitemap);
     const productUrls = parseProductSitemap(xml);
 
@@ -123,15 +126,23 @@ async function collectSitemapUrls(args) {
     }
 
     urls.push(...productUrls);
+    sitemapDetails.push({
+      index: args.sitemapStart + offset,
+      sitemap,
+      urls: productUrls,
+    });
     console.log(`[sitemap] ${sitemap} -> ${productUrls.length} URLs`);
   }
 
-  return [...new Set(urls)];
+  return {
+    urls: [...new Set(urls)],
+    sitemapDetails,
+  };
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const sitemapUrls = await collectSitemapUrls(args);
+  const { urls: sitemapUrls, sitemapDetails } = await collectSitemapUrls(args);
   const sitemapUrlSet = new Set(sitemapUrls);
   const client = createMongoClient();
   const { dbName, productsCollection } = getMongoConfig();
@@ -161,23 +172,34 @@ async function main() {
       products.countDocuments({ source: SOURCE_SITE }),
       errors.countDocuments({ source: SOURCE_SITE }),
     ]);
+    const report = {
+      dbName,
+      productsCollection,
+      sitemapUrls: sitemapUrls.length,
+      coveredUrls: covered.size,
+      missingUrls: missing.length,
+      productDocuments: productCount,
+      scrapeErrors: errorCount,
+      sampleMissing: missing.slice(0, args.sampleMissing),
+    };
 
-    console.log(
-      JSON.stringify(
-        {
-          dbName,
-          productsCollection,
-          sitemapUrls: sitemapUrls.length,
-          coveredUrls: covered.size,
-          missingUrls: missing.length,
-          productDocuments: productCount,
-          scrapeErrors: errorCount,
-          sampleMissing: missing.slice(0, args.sampleMissing),
-        },
-        null,
-        2
-      )
-    );
+    if (args.reportSitemaps) {
+      report.missingBySitemap = sitemapDetails
+        .map((detail) => {
+          const missingCount = detail.urls.filter((url) => !covered.has(url)).length;
+
+          return {
+            index: detail.index,
+            sitemap: detail.sitemap,
+            urls: detail.urls.length,
+            covered: detail.urls.length - missingCount,
+            missing: missingCount,
+          };
+        })
+        .filter((detail) => detail.missing > 0);
+    }
+
+    console.log(JSON.stringify(report, null, 2));
 
     if (missing.length > 0 || errorCount > 0) {
       process.exitCode = 1;

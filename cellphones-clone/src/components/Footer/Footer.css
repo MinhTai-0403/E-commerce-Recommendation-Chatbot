@@ -1,0 +1,160 @@
+/* ===== FOOTER ===== */
+.footer {
+  margin-top: 24px;
+}
+
+/* Top Strip */
+.footer-top {
+  background: var(--bg-white);
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.footer-top-inner {
+  display: flex;
+  justify-content: center;
+  gap: 60px;
+}
+
+.footer-hotline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-primary);
+}
+
+.footer-hotline svg {
+  color: var(--primary-red);
+  flex-shrink: 0;
+}
+
+.hotline-label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.hotline-number {
+  display: block;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--primary-red);
+}
+
+/* Main Footer */
+.footer-main {
+  background: var(--bg-white);
+  padding: 30px 0;
+}
+
+.footer-main-inner {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 30px;
+}
+
+.footer-col-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+
+.footer-links {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.footer-links a {
+  font-size: 13px;
+  color: var(--text-secondary);
+  transition: color var(--transition-fast);
+  line-height: 1.4;
+}
+
+.footer-links a:hover {
+  color: var(--primary-red);
+}
+
+/* Social */
+.footer-social {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.social-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #f5f5f5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  transition: all var(--transition-fast);
+}
+
+.social-icon:hover {
+  background: var(--primary-red);
+  color: white;
+}
+
+/* Payments */
+.footer-payments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.payment-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: #f5f5f5;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-light);
+}
+
+/* Bottom */
+.footer-bottom {
+  background: #f8f8f8;
+  padding: 16px 0;
+  border-top: 1px solid var(--border-light);
+}
+
+.footer-bottom-inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.company-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.company-info {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.footer-badges {
+  display: flex;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.govt-badge {
+  opacity: 0.8;
+  transition: opacity var(--transition-fast);
+}
+
+.govt-badge:hover {
+  opacity: 1;
+}
