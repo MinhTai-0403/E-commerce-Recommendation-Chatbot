@@ -11,13 +11,17 @@ export default function CategoryBlock({
   campaignBanner 
 }) {
   const [activeTab, setActiveTab] = useState(0);
+  const [activeFilter, setActiveFilter] = useState('all');
+  const visibleProducts = products.filter((product) => (
+    activeFilter === 'all' || !product.brand || product.brand === activeFilter
+  ));
 
   return (
-    <section className="category-block section-gap">
+    <section className={`category-block section-gap ${campaignBanner ? 'has-campaign' : ''}`}>
       <div className="container">
         <div className="category-block-header">
           <div className="cb-title-tabs">
-            <h2 className="cb-title">{title}</h2>
+            <h2 className={`cb-title ${tabs && tabs.length > 1 ? 'visually-hidden' : ''}`}>{title}</h2>
             {tabs && tabs.length > 1 && (
               <div className="cb-tabs">
                 {tabs.map((tab, idx) => (
@@ -25,6 +29,7 @@ export default function CategoryBlock({
                     key={idx}
                     className={`cb-tab-btn ${activeTab === idx ? 'active' : ''}`}
                     onClick={() => setActiveTab(idx)}
+                    aria-pressed={activeTab === idx}
                   >
                     {tab}
                   </button>
@@ -68,7 +73,12 @@ export default function CategoryBlock({
             {filters && (
               <div className="cb-filters">
                 {filters.map((filter, idx) => (
-                  <button key={filter.id || idx} className="cb-filter-btn">
+                  <button
+                    key={filter.id || idx}
+                    className={`cb-filter-btn ${activeFilter === (filter.id || idx) ? 'active' : ''}`}
+                    onClick={() => setActiveFilter(filter.id || idx)}
+                    aria-pressed={activeFilter === (filter.id || idx)}
+                  >
                     {filter.name || filter}
                   </button>
                 ))}
@@ -77,7 +87,7 @@ export default function CategoryBlock({
 
             {/* Product Grid/List */}
             <div className="cb-products">
-              {products.map((product) => (
+              {visibleProducts.map((product) => (
                 <div key={product.id} className="cb-product-wrapper">
                   <ProductCard product={product} />
                 </div>

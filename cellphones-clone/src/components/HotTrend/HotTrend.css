@@ -1,7 +1,10 @@
 /* ===== HOT TREND ===== */
+.hot-trend { margin-top: 24px; }
+
 .hot-trend-wrapper {
   background: #f0f7ff; /* light blue background */
-  border-radius: var(--border-radius-lg);
+  border: 2px solid #4a90ff;
+  border-radius: 14px;
   overflow: hidden;
   box-shadow: var(--shadow-card);
 }
@@ -11,41 +14,44 @@
   display: flex;
   align-items: flex-end;
   border-bottom: 2px solid #3b82f6;
-  padding-top: 10px;
-}
-
-.hot-trend-title-banner {
-  padding: 0 20px;
-  margin-bottom: 10px;
-}
-
-.hot-trend-gif {
-  height: 40px;
-  object-fit: contain;
+  padding-top: 0;
 }
 
 .hot-trend-tabs-wrapper {
   flex: 1;
   display: flex;
-  justify-content: flex-start;
+  justify-content: center;
 }
 
 .hot-trend-tabs {
   display: flex;
-  gap: 10px;
+  gap: 0;
+  width: 100%;
 }
 
 .hot-trend-tab-btn {
-  padding: 12px 24px;
+  height: 62px;
+  padding: 6px 24px;
   border: none;
   background: transparent;
   font-size: 18px;
   font-weight: 800;
-  color: #666;
+  color: #1689eb;
   text-transform: uppercase;
   cursor: pointer;
   position: relative;
   transition: all var(--transition-fast);
+  flex: 1;
+  background: #fff;
+  border-radius: 12px 12px 0 0;
+}
+
+.hot-trend-tab-btn img {
+  width: auto;
+  max-width: 100%;
+  height: 50px;
+  margin: 0 auto;
+  object-fit: contain;
 }
 
 .hot-trend-tab-btn:hover {
@@ -54,24 +60,26 @@
 
 .hot-trend-tab-btn.active {
   color: #3b82f6;
+  background: #eef6ff;
 }
 
 /* Content Area */
 .hot-trend-content {
-  padding: 20px;
+  padding: 20px 20px 18px;
 }
 
 /* Category Filters */
 .hot-trend-category-filters {
   display: flex;
   gap: 12px;
-  margin-bottom: 15px;
+  margin-bottom: 3px;
   flex-wrap: wrap;
   justify-content: center;
 }
 
 .ht-cat-filter {
-  padding: 6px 16px;
+  height: 32px;
+  padding: 5px 16px;
   border: 1px solid #ccc;
   background: white;
   border-radius: 20px;
@@ -100,7 +108,8 @@
   margin-bottom: 20px;
   background: white;
   border-radius: 8px;
-  padding: 5px;
+  height: 44px;
+  padding: 4px 5px;
 }
 
 .hot-trend-sub-filters {
@@ -120,7 +129,8 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
+  height: 36px;
+  padding: 0 12px;
   border: 1px solid #eee;
   background: white;
   border-radius: 6px;
@@ -142,7 +152,9 @@
 }
 
 .ht-sub-filter-icon {
-  font-size: 14px;
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
 }
 
 .ht-sub-filter-next {
@@ -183,4 +195,16 @@
 .ht-product-wrapper {
   min-width: 215px;
   scroll-snap-align: start;
+}
+
+@media (max-width: 640px) {
+  .hot-trend { margin-top: 12px; }
+  .hot-trend-tab-btn { height: 48px; padding: 4px 6px; }
+  .hot-trend-tab-btn img { height: 38px; }
+  .hot-trend-content { padding: 10px; }
+  .hot-trend-category-filters { justify-content: flex-start; flex-wrap: nowrap; overflow-x: auto; gap: 7px; }
+  .ht-cat-filter { padding: 5px 11px; font-size: 11px; white-space: nowrap; }
+  .hot-trend-sub-filters-container { margin-bottom: 10px; }
+  .ht-sub-filter-icon { width: 28px; height: 28px; }
+  .ht-product-wrapper { min-width: 166px; }
 }

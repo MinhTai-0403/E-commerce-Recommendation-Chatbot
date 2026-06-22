@@ -1,135 +1,134 @@
 import './Footer.css';
-import { footerLinks, paymentPartners } from '../../data/mockData';
+import {
+  footerLinks,
+  footerMemberSites,
+  footerSocials,
+  paymentPartners,
+} from '../../data/mockData';
 
 export default function Footer() {
   return (
-    <footer className="footer section-gap" id="footer">
-      {/* Top Strip */}
-      <div className="footer-top">
-        <div className="container footer-top-inner">
-          <div className="footer-hotline">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
-            </svg>
-            <div>
-              <span className="hotline-label">Gọi mua hàng (miễn phí)</span>
-              <strong className="hotline-number">1800.2097</strong>
-            </div>
+    <footer className="footer" id="footer">
+      <div className="footer-primary">
+        <div className="container footer-primary-grid">
+          <div className="footer-column footer-support-column">
+            <section>
+              <h2 className="footer-heading">Tổng đài hỗ trợ miễn phí</h2>
+              <p>Mua hàng - bảo hành <a className="footer-hotline" href="tel:18002097">1800.2097</a> (7h30 - 22h00)</p>
+              <p>Khiếu nại <a className="footer-hotline" href="tel:18002063">1800.2063</a> (8h00 - 21h30)</p>
+            </section>
+
+            <section>
+              <h2 className="footer-heading">Phương thức thanh toán</h2>
+              <div className="footer-payments">
+                {paymentPartners.map((partner) => (
+                  <a href="#" aria-label={partner.name} key={partner.id}>
+                    <img src={partner.image} alt={partner.name} width="46" height="30" loading="lazy" />
+                  </a>
+                ))}
+              </div>
+            </section>
+
+            <section className="footer-newsletter">
+              <h2 className="footer-heading footer-newsletter-heading">Đăng ký nhận tin khuyến mãi</h2>
+              <div className="footer-voucher">
+                <strong>Nhận ngay voucher 10%</strong>
+                <span>Voucher sẽ được gửi sau 24h, chỉ áp dụng cho khách hàng mới</span>
+              </div>
+              <label htmlFor="footer-email">Email</label>
+              <input id="footer-email" type="email" placeholder="Nhập email của bạn" />
+              <label htmlFor="footer-phone">Số điện thoại</label>
+              <input id="footer-phone" type="tel" placeholder="Nhập số điện thoại của bạn" />
+              <label className="footer-consent">
+                <input type="checkbox" defaultChecked />
+                <span>Tôi đồng ý với điều khoản của CellphoneS</span>
+              </label>
+              <button type="button">Đăng ký ngay</button>
+            </section>
           </div>
-          <div className="footer-hotline">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-            </svg>
-            <div>
-              <span className="hotline-label">Khiếu nại, góp ý</span>
-              <strong className="hotline-number">1800.2063</strong>
-            </div>
+
+          <nav className="footer-column" aria-label="Thông tin về chính sách">
+            <h2 className="footer-heading">Thông tin về chính sách</h2>
+            <ul className="footer-link-list">
+              {footerLinks.policies.map((link) => (
+                <li key={link}><a href="#">{link}</a></li>
+              ))}
+            </ul>
+          </nav>
+
+          <div className="footer-column">
+            <nav aria-label="Dịch vụ và thông tin khác">
+              <h2 className="footer-heading">Dịch vụ và thông tin khác</h2>
+              <ul className="footer-link-list">
+                {footerLinks.services.map((link) => (
+                  <li key={link}><a href="#">{link}</a></li>
+                ))}
+              </ul>
+            </nav>
+
+            <section className="footer-app-download">
+              <h2 className="footer-heading">Mua sắm dễ dàng – Ưu đãi ngập tràn cùng app CellphoneS</h2>
+              <div className="footer-app-assets">
+                <img
+                  className="footer-app-qr"
+                  src="https://cdn2.cellphones.com.vn/200x,webp/media/wysiwyg/Web/Logo/QR_appGeneral-v2.png"
+                  alt="QR tải app CellphoneS"
+                  width="113"
+                  height="113"
+                  loading="lazy"
+                />
+                <div>
+                  <a href="#"><img src="https://cdn2.cellphones.com.vn/200x,webp/media/wysiwyg/downloadANDROID.png" alt="Tải app từ Google Play" width="161" height="48" loading="lazy" /></a>
+                  <a href="#"><img src="https://cdn2.cellphones.com.vn/200x,webp/media/wysiwyg/downloadiOS.png" alt="Tải app từ App Store" width="161" height="54" loading="lazy" /></a>
+                </div>
+              </div>
+            </section>
           </div>
-          <div className="footer-hotline">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="2" y="7" width="20" height="14" rx="2" ry="2"/>
-              <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
-            </svg>
-            <div>
-              <span className="hotline-label">Doanh nghiệp (B2B)</span>
-              <strong className="hotline-number">1800.2098</strong>
-            </div>
+
+          <div className="footer-column footer-connect-column">
+            <section>
+              <h2 className="footer-heading">Kết nối với CellphoneS</h2>
+              <div className="footer-socials">
+                {footerSocials.map((social) => (
+                  <a href="#" aria-label={social.name} key={social.id}>
+                    <img src={social.image} alt={social.name} width="40" height="28" loading="lazy" />
+                  </a>
+                ))}
+              </div>
+            </section>
+
+            <section>
+              <h2 className="footer-heading">Website thành viên</h2>
+              <div className="footer-member-sites">
+                {footerMemberSites.map((site) => (
+                  <a href="#" key={site.id}>
+                    <span>{site.description}</span>
+                    <img src={site.image} alt={site.description} height="30" loading="lazy" />
+                  </a>
+                ))}
+              </div>
+            </section>
           </div>
         </div>
       </div>
 
-      {/* Main Footer */}
-      <div className="footer-main">
-        <div className="container footer-main-inner">
-          {/* Column 1: About */}
-          <div className="footer-col">
-            <h3 className="footer-col-title">Về CellphoneS</h3>
-            <ul className="footer-links">
-              {footerLinks.about.map((link, i) => (
-                <li key={i}><a href="#">{link}</a></li>
-              ))}
-            </ul>
-          </div>
-
-          {/* Column 2: Policy */}
-          <div className="footer-col">
-            <h3 className="footer-col-title">Chính sách</h3>
-            <ul className="footer-links">
-              {footerLinks.policy.map((link, i) => (
-                <li key={i}><a href="#">{link}</a></li>
-              ))}
-            </ul>
-          </div>
-
-          {/* Column 3: Member Sites */}
-          <div className="footer-col">
-            <h3 className="footer-col-title">Thành viên</h3>
-            <ul className="footer-links">
-              {footerLinks.memberSites.map((site, i) => (
-                <li key={i}><a href={site.url}>{site.name}</a></li>
-              ))}
-            </ul>
-          </div>
-
-          {/* Column 4: Connect */}
-          <div className="footer-col">
-            <h3 className="footer-col-title">Kết nối với chúng tôi</h3>
-            <div className="footer-social">
-              <a href="#" className="social-icon" aria-label="Facebook">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/>
-                </svg>
-              </a>
-              <a href="#" className="social-icon" aria-label="YouTube">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M22.54 6.42a2.78 2.78 0 0 0-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.46a2.78 2.78 0 0 0-1.94 2A29 29 0 0 0 1 11.75a29 29 0 0 0 .46 5.33A2.78 2.78 0 0 0 3.4 19.1c1.72.46 8.6.46 8.6.46s6.88 0 8.6-.46a2.78 2.78 0 0 0 1.94-2 29 29 0 0 0 .46-5.25 29 29 0 0 0-.46-5.43z"/>
-                  <polygon points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02" fill="white"/>
-                </svg>
-              </a>
-              <a href="#" className="social-icon" aria-label="TikTok">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1 0-5.78 2.92 2.92 0 0 1 .88.13V9.04a6.37 6.37 0 0 0-.88-.07 6.26 6.26 0 0 0 0 12.52 6.26 6.26 0 0 0 6.26-6.26V8.76a8.26 8.26 0 0 0 3.84.96V6.69z"/>
-                </svg>
-              </a>
-              <a href="#" className="social-icon" aria-label="Zalo">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                  <circle cx="12" cy="12" r="10"/>
-                  <text x="12" y="16" textAnchor="middle" fontSize="10" fill="white" fontWeight="bold">Z</text>
-                </svg>
-              </a>
-            </div>
-
-            <h3 className="footer-col-title" style={{ marginTop: 16 }}>Thanh toán</h3>
-            <div className="footer-payments">
-              {paymentPartners.map(p => (
-                <span key={p.id} className="payment-badge">{p.name}</span>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Bottom */}
       <div className="footer-bottom">
-        <div className="container footer-bottom-inner">
-          <div className="footer-company">
-            <p className="company-name">Công ty TNHH Thương Mại và Dịch Vụ Kỹ Thuật Số CellphoneS</p>
-            <p className="company-info">Địa chỉ: 33 Trần Quang Khải, P. Tân Định, Quận 1, TP. Hồ Chí Minh</p>
-            <p className="company-info">GPKD số 0316689045 do sở KH và ĐT TP.HCM cấp ngày 01/03/2021</p>
+        <div className="container">
+          <div className="footer-popular-grid">
+            {footerLinks.popular.map((group, index) => (
+              <nav aria-label={`Liên kết sản phẩm ${index + 1}`} className="footer-popular-group" key={group[0]}>
+                {group.map((link) => <a href="#" key={link}>{link}</a>)}
+              </nav>
+            ))}
           </div>
-          <div className="footer-badges">
-            <div className="govt-badge">
-              <svg width="60" height="24" viewBox="0 0 60 24" fill="none">
-                <rect width="60" height="24" rx="4" fill="#c4161c"/>
-                <text x="30" y="16" textAnchor="middle" fontSize="8" fill="white" fontWeight="bold">ĐÃ ĐĂNG KÝ</text>
-              </svg>
-            </div>
-            <div className="govt-badge">
-              <svg width="60" height="24" viewBox="0 0 60 24" fill="none">
-                <rect width="60" height="24" rx="4" fill="#0066b3"/>
-                <text x="30" y="16" textAnchor="middle" fontSize="7" fill="white" fontWeight="bold">BỘ CÔNG THƯƠNG</text>
-              </svg>
-            </div>
+
+          <p className="footer-company-info">
+            Công ty Cổ phần Thương Mại và Dịch Vụ Kỹ Thuật DIỆU PHÚC - GPDKKD: 0316172372 cấp tại Sở KH &amp; ĐT TP. HCM. Địa chỉ văn phòng: 350-352 Võ Văn Kiệt, Phường Cầu Ông Lãnh, Thành phố Hồ Chí Minh, Việt Nam. Điện thoại: 028.7108.9666.
+          </p>
+
+          <div className="footer-certificates">
+            <a href="#"><img src="https://cdn2.cellphones.com.vn/80x,webp/media/logo/logoSaleNoti.png" alt="Đã thông báo Bộ Công Thương" width="80" height="30" loading="lazy" /></a>
+            <a href="#"><img src="https://images.dmca.com/Badges/dmca_copyright_protected150c.png?ID=158f5667-cce3-4a18-b2d1-826225e6b022" alt="DMCA.com Protection Status" width="112" height="30" loading="lazy" /></a>
           </div>
         </div>
       </div>

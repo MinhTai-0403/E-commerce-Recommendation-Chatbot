@@ -5,7 +5,7 @@ export default function ProductCard({ product }) {
   if (!product) return null;
 
   return (
-    <a href="#" className="product-card">
+    <a href={product.url || '#'} className="product-card">
       {/* Badges */}
       {product.discount > 0 && (
         <div className="badge-discount">Giảm {product.discount}%</div>
@@ -16,7 +16,7 @@ export default function ProductCard({ product }) {
 
       {/* Image */}
       <div className="product-image-container">
-        <img src={product.image} alt={product.name} className="product-image" />
+        <img src={product.image} alt={product.name} className="product-image" loading="lazy" />
       </div>
 
       {/* Content */}
@@ -56,16 +56,15 @@ export default function ProductCard({ product }) {
                   <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
                 </svg>
               ))}
+              {product.ratingCount && <span className="rating-count">({product.ratingCount})</span>}
             </div>
           )}
           
           <div className="product-delivery">
             <span className="delivery-icon">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="1" y="3" width="15" height="13"/>
-                <polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/>
-                <circle cx="5.5" cy="18.5" r="2.5"/>
-                <circle cx="18.5" cy="18.5" r="2.5"/>
+              <svg width="14" height="14" viewBox="0 0 17 16" fill="none" aria-hidden="true">
+                <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M3.833 11.333a1.333 1.333 0 1 0 2.667 0 1.333 1.333 0 0 0-2.667 0ZM10.5 11.333a1.333 1.333 0 1 0 2.667 0 1.333 1.333 0 0 0-2.667 0Z" />
+                <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M3.833 11.333H2.5V8.667m-.667-5.334h7.334v8m-2.667 0h4m2.667 0H14.5v-4m0 0H9.167m5.333 0L12.5 4H9.167M2.5 6h2.667" />
               </svg>
             </span>
             <span className="delivery-text">Giao nhanh {product.city || 'toàn quốc'}</span>

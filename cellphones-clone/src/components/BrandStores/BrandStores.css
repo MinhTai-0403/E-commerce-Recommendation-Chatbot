@@ -90,3 +90,11 @@
 .brand-store-item:hover .brand-store-badge {
   background: rgba(255,255,255,0.3);
 }
+
+@media (max-width: 640px) {
+  .brand-stores-wrapper { padding: 12px; }
+  .brand-stores-title { font-size: 16px; }
+  .brand-stores-grid { grid-template-columns: repeat(2, 1fr); gap: 7px; }
+  .brand-store-item { padding: 12px 10px; }
+  .brand-store-name { font-size: 14px; }
+}
