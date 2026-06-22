@@ -2,45 +2,106 @@ import { useState } from 'react';
 import './Header.css';
 import { categories } from '../../data/mockData';
 
+function AwardIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path stroke="#fff" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M4.5 6a4 4 0 1 0 8 0 4 4 0 0 0-8 0Z" />
+      <path stroke="#fff" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="m8.5 10 2.267 3.927 1.065-2.156 2.399.155L11.964 8M5.035 8l-2.267 3.927 2.399-.156 1.065 2.155L8.499 10" />
+    </svg>
+  );
+}
+
+function DeliveryIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 17 16" fill="none" aria-hidden="true">
+      <path stroke="#fff" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M3.833 11.333a1.333 1.333 0 1 0 2.667 0 1.333 1.333 0 0 0-2.667 0ZM10.5 11.333a1.333 1.333 0 1 0 2.667 0 1.333 1.333 0 0 0-2.667 0Z" />
+      <path stroke="#fff" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M3.833 11.333H2.5V8.667m-.667-5.334h7.334v8m-2.667 0h4m2.667 0H14.5v-4m0 0H9.167m5.333 0L12.5 4H9.167M2.5 6h2.667" />
+    </svg>
+  );
+}
+
+function TradeInIcon() {
+  return (
+    <svg width="17" height="16" viewBox="0 0 17 16" fill="none" aria-hidden="true">
+      <path stroke="#fff" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M3.167 8V6a2 2 0 0 1 2-2h8.666m0 0-2-2m2 2-2 2M13.833 8v2a2 2 0 0 1-2 2H3.167m0 0 2 2m-2-2 2-2" />
+    </svg>
+  );
+}
+
+function StoreIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 25 25" fill="none" aria-hidden="true">
+      <path stroke="white" strokeLinecap="round" strokeWidth="1.5" d="M8.32 22.66h8.36c2.31 0 4.18-1.786 4.18-3.99v-4.877c0-.708.296-1.387.82-1.888 1.216-1.16 1.058-3.083-.332-4.048l-6.39-4.434a4.343 4.343 0 0 0-4.917 0L3.653 7.857c-1.391.965-1.55 2.888-.333 4.048.524.5.82 1.18.82 1.888v4.878c0 2.203 1.87 3.989 4.18 3.989Z" />
+      <path fill="white" d="M8.9 12.916V9.66h7v2.816l-.987-1.222h-4.419V12l2.004 2.175-.128.183-3.47-1.441ZM8.9 18.778v-2.922l1.097 1.327h4.309V15.83l-1.95-2.236.135-.179 3.409 1.61v3.754h-7Z" />
+    </svg>
+  );
+}
+
+function OrderIcon() {
+  return (
+    <svg width="17" height="16" fill="none" aria-hidden="true">
+      <path stroke="#fff" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9.833 2v2.667a.667.667 0 0 0 .667.666h2.667" />
+      <path stroke="#fff" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M13.167 8v4.667a1.187 1.187 0 0 1-2.067.933 1.1 1.1 0 0 0-1.733 0 1.1 1.1 0 0 1-1.734 0 1.1 1.1 0 0 0-1.733 0 1.187 1.187 0 0 1-2.067-.933V3.333A1.333 1.333 0 0 1 5.167 2h4.666l3.334 3.333v2.834" />
+    </svg>
+  );
+}
+
+function PhoneIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true">
+      <path d="M144.27,45.93a8,8,0,0,1,9.8-5.66,86.22,86.22,0,0,1,61.66,61.66,8,8,0,0,1-5.66,9.8A8.23,8.23,0,0,1,208,112a8,8,0,0,1-7.73-5.94,70.35,70.35,0,0,0-50.33-50.33A8,8,0,0,1,144.27,45.93Zm-2.33,41.8c13.79,3.68,22.65,12.54,26.33,26.33A8,8,0,0,0,176,120a8.23,8.23,0,0,0,2.07-.27,8,8,0,0,0,5.66-9.8c-5.12-19.16-18.5-32.54-37.66-37.66a8,8,0,1,0-4.13,15.46Zm81.94,95.35A56.26,56.26,0,0,1,168,232C88.6,232,24,167.4,24,88A56.26,56.26,0,0,1,72.92,32.12a16,16,0,0,1,16.62,9.52l21.12,47.15A16,16,0,0,1,109.39,104c-.18.27-.37.52-.57.77L88,129.45c7.49,15.22,23.41,31,38.83,38.51l24.34-20.71a8.12,8.12,0,0,1,.75-.56,16,16,0,0,1,15.17-1.4l47.24,21.17A16,16,0,0,1,223.88,183.08ZM208,181.07l-47.11-21.1-24.35,20.71a8.44,8.44,0,0,1-.74.56,16,16,0,0,1-15.75,1.14c-18.73-9.05-37.4-27.58-46.46-46.11a16,16,0,0,1,1-15.7,6.13,6.13,0,0,1,.57-.77L96,95.15l-21-47A40.2,40.2,0,0,0,40,88,128.14,128.14,0,0,0,168,216,40.21,40.21,0,0,0,208,181.07Z" />
+    </svg>
+  );
+}
+
+const topbarBenefits = [
+  {
+    id: 'official',
+    Icon: AwardIcon,
+    content: <><span>Sản phẩm</span> <strong>Chính hãng - Xuất VAT</strong> đầy đủ</>,
+  },
+  {
+    id: 'delivery',
+    Icon: DeliveryIcon,
+    content: <><strong>Giao nhanh - Miễn phí</strong> cho đơn 300k</>,
+  },
+  {
+    id: 'trade-in',
+    Icon: TradeInIcon,
+    content: <><strong>Thu cũ</strong> giá ngon - <strong>Lên đời</strong> tiết kiệm</>,
+  },
+];
+
 export function TopBar() {
   return (
     <div className="topbar">
       <div className="container topbar-inner">
-        <div className="topbar-left">
+        <div className="topbar-marquee">
           <div className="topbar-marquee-track">
-            <div className="topbar-marquee-content">
-              <span className="topbar-item">
-                <span className="topbar-icon">📋</span>
-                Cuất VAT <strong>đầy đủ</strong>
-              </span>
-              <span className="topbar-dot">•</span>
-              <span className="topbar-item">
-                <span className="topbar-icon">🚚</span>
-                Giao nhanh - Miễn phí <strong>cho đơn 300k</strong>
-              </span>
-              <span className="topbar-dot">•</span>
-              <span className="topbar-item">
-                <span className="topbar-icon">♻️</span>
-                Thu cũ <strong>giá ngon</strong> - Lên đời <strong>tiết kiệm</strong>
-              </span>
-              <span className="topbar-dot">•</span>
-              <span className="topbar-item">
-                <span className="topbar-icon">✅</span>
-                Sản phẩm <strong>Chính hãng - X</strong>
-              </span>
-              <span className="topbar-dot">•</span>
-              <span className="topbar-item">
-                <span className="topbar-icon">📍</span>
-                Cửa hàng gần bạn
-              </span>
-              <span className="topbar-dot">•</span>
-              <span className="topbar-item">
-                <span className="topbar-icon">📝</span>
-                Tra cứu đơn hàng
-              </span>
-            </div>
+            {[0, 1].map((groupIndex) => (
+              <div
+                className="topbar-benefit-group"
+                key={groupIndex}
+                aria-hidden={groupIndex === 1 ? 'true' : undefined}
+              >
+                {topbarBenefits.map(({ id, Icon, content }, index) => (
+                  <div className="topbar-benefit-pair" key={`${groupIndex}-${id}`}>
+                    <span className="topbar-item">
+                      <span className="topbar-icon"><Icon /></span>
+                      {content}
+                    </span>
+                    {index < topbarBenefits.length - 1 && <span className="topbar-separator" />}
+                  </div>
+                ))}
+              </div>
+            ))}
           </div>
         </div>
+        <nav className="topbar-links" aria-label="Liên kết hỗ trợ">
+          <a href="#stores"><StoreIcon /> Cửa hàng gần bạn</a>
+          <a href="#orders"><OrderIcon /> Tra cứu đơn hàng</a>
+          <a href="tel:18002097"><PhoneIcon /> 1800 2097</a>
+        </nav>
       </div>
     </div>
   );
@@ -54,16 +115,23 @@ export function MainHeader() {
       <div className="container header-inner">
         {/* Logo */}
         <a href="/" className="header-logo">
-          <span className="logo-cellphone">cellphone</span>
-          <span className="logo-s">S</span>
+          <img
+            className="header-logo-image"
+            src="https://cdn2.cellphones.com.vn/x/media/wysiwyg/Web/Logo/Logo_CPS.png"
+            alt="CellphoneS"
+          />
         </a>
 
         {/* Category Button */}
         <div className="header-category-wrapper"
           onMouseEnter={() => setShowCategories(true)}
           onMouseLeave={() => setShowCategories(false)}
+          onFocus={() => setShowCategories(true)}
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) setShowCategories(false);
+          }}
         >
-          <button className="header-outlined-btn" id="category-menu-btn">
+          <button className="header-outlined-btn" id="category-menu-btn" aria-haspopup="menu" aria-expanded={showCategories}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <rect x="3" y="3" width="7" height="7" rx="1"/>
               <rect x="14" y="3" width="7" height="7" rx="1"/>
@@ -76,10 +144,10 @@ export function MainHeader() {
             </svg>
           </button>
           {showCategories && (
-            <div className="header-category-dropdown">
+            <div className="header-category-dropdown" role="menu">
               {categories.map(cat => (
-                <a key={cat.id} href="#" className="category-dropdown-item">
-                  <img src={cat.icon} alt="" className="category-dropdown-icon" onError={(e) => { e.target.style.display = 'none'; }} />
+                <a key={cat.id} href="#" className="category-dropdown-item" role="menuitem">
+                  <img className="category-dropdown-icon" src={cat.icon} alt="" />
                   <span className="category-name">{cat.name}</span>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <polyline points="9 18 15 12 9 6"/>
@@ -118,7 +186,7 @@ export function MainHeader() {
         {/* Right Actions */}
         <div className="header-actions">
           <a href="#" className="header-cart-btn" id="header-cart-btn">
-            <span>Giỏ hàng</span>
+            <span className="header-action-label">Giỏ hàng</span>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="9" cy="21" r="1"/>
               <circle cx="20" cy="21" r="1"/>
@@ -127,7 +195,7 @@ export function MainHeader() {
           </a>
 
           <a href="#" className="header-login-btn" id="header-login-btn">
-            <span>Đăng nhập</span>
+            <span className="header-action-label">Đăng nhập</span>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
               <circle cx="12" cy="7" r="4"/>

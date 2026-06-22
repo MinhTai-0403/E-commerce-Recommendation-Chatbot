@@ -40,7 +40,7 @@
   --border-radius-lg: 15px;
   
   /* Layout */
-  --container-max: 1200px;
+  --container-max: 1220px;
   --header-height: 64px;
   
   /* Transitions */
@@ -58,6 +58,7 @@
 
 html {
   scroll-behavior: smooth;
+  overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -182,4 +183,11 @@ input {
 
 .animate-fadeIn {
   animation: fadeIn 0.4s ease forwards;
+}
+
+@media (max-width: 640px) {
+  :root { --border-radius-lg: 12px; }
+  .container { width: 100%; padding: 0 9px; }
+  .section-gap { margin-top: 12px; }
+  body { overflow-x: hidden; }
 }

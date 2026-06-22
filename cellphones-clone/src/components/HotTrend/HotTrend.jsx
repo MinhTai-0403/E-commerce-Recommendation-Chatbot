@@ -4,6 +4,7 @@ import { hotTrendCategoryFilters, hotTrendSubFilters, hotTrendProducts } from '.
 import ProductCard from '../ProductCard/ProductCard';
 
 export default function HotTrend() {
+  const [activeMainTab, setActiveMainTab] = useState('deal');
   const [activeCategory, setActiveCategory] = useState('phu-kien');
   const [activeSubFilter, setActiveSubFilter] = useState('all');
 
@@ -13,17 +14,16 @@ export default function HotTrend() {
         <div className="hot-trend-wrapper">
           {/* Top Banner & Tabs */}
           <div className="hot-trend-header">
-            <div className="hot-trend-title-banner">
-              <img src="https://dashboard.cellphones.com.vn/storage/deal-soc-moi-ngay-cate-home.gif" alt="Deal sốc mỗi ngày" className="hot-trend-gif" />
-            </div>
-            
             <div className="hot-trend-tabs-wrapper">
               <div className="hot-trend-tabs">
-                <button className="hot-trend-tab-btn active">
-                  SẢN PHẨM HOT TREND
+                <button className={`hot-trend-tab-btn ${activeMainTab === 'deal' ? 'active' : ''}`} onClick={() => setActiveMainTab('deal')} aria-pressed={activeMainTab === 'deal'}>
+                  <img src="https://cdn2.cellphones.com.vn/x/media/wysiwyg/Web/landing-page/hang-moi-ve/hotDueHome03.png" alt="Deal sốc mỗi ngày" />
                 </button>
-                <button className="hot-trend-tab-btn">
-                  HÀNG MỚI VỀ
+                <button className={`hot-trend-tab-btn ${activeMainTab === 'hot' ? 'active' : ''}`} onClick={() => setActiveMainTab('hot')} aria-pressed={activeMainTab === 'hot'}>
+                  <img src="https://cdn2.cellphones.com.vn/x/media/wysiwyg/Web/landing-page/hang-moi-ve/hotTrendHome02.png" alt="Sản phẩm hot trend" />
+                </button>
+                <button className={`hot-trend-tab-btn ${activeMainTab === 'new' ? 'active' : ''}`} onClick={() => setActiveMainTab('new')} aria-pressed={activeMainTab === 'new'}>
+                  <img src="https://cdn2.cellphones.com.vn/x/media/wysiwyg/Web/landing-page/hang-moi-ve/newArrivalHome.png" alt="Hàng mới về" />
                 </button>
               </div>
             </div>
@@ -37,6 +37,7 @@ export default function HotTrend() {
                   key={filter.id}
                   className={`ht-cat-filter ${activeCategory === filter.id ? 'active' : ''}`}
                   onClick={() => setActiveCategory(filter.id)}
+                  aria-pressed={activeCategory === filter.id}
                 >
                   {filter.name}
                 </button>
@@ -51,13 +52,14 @@ export default function HotTrend() {
                     key={filter.id}
                     className={`ht-sub-filter ${activeSubFilter === filter.id ? 'active' : ''}`}
                     onClick={() => setActiveSubFilter(filter.id)}
+                    aria-pressed={activeSubFilter === filter.id}
                   >
-                    {filter.icon && <span className="ht-sub-filter-icon">{filter.icon}</span>}
+                    {filter.icon && <img className="ht-sub-filter-icon" src={filter.icon} alt="" />}
                     {filter.name}
                   </button>
                 ))}
               </div>
-              <button className="ht-sub-filter-next">
+              <button className="ht-sub-filter-next" aria-label="Xem thêm bộ lọc">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <polyline points="9 18 15 12 9 6"/>
                 </svg>

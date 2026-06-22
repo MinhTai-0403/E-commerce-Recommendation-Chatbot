@@ -169,7 +169,7 @@
   background: #edf4ff;
 }
 .tag.sstudent::before {
-  content: '🎓';
+  content: 'S';
   background: #00539b;
   border-radius: 4px 0 0 4px;
 }
@@ -197,7 +197,10 @@
 .product-rating {
   display: flex;
   gap: 2px;
+  align-items: center;
 }
+
+.rating-count { font-size: 9px; color: var(--text-muted); margin-left: 2px; }
 
 .product-delivery {
   display: flex;
@@ -210,4 +213,23 @@
 .delivery-icon {
   display: flex;
   align-items: center;
+}
+
+@media (max-width: 640px) {
+  .product-card { padding: 8px; border-radius: 10px; }
+  .badge-discount,
+  .badge-installment { top: 7px; font-size: 9px; padding: 3px 5px; }
+  .product-image-container { padding: 5px; margin-bottom: 4px; }
+  .product-image { top: 5px; left: 5px; width: calc(100% - 10px); height: calc(100% - 10px); }
+  .product-name { font-size: 12px; height: 34px; margin-bottom: 5px; }
+  .product-price { align-items: flex-start; flex-direction: column; gap: 0; margin-bottom: 5px; }
+  .current-price { font-size: 13px; }
+  .original-price { font-size: 10px; }
+  .tag-text { font-size: 9px; line-height: 19px; padding-left: 23px; }
+  .tag { min-height: 19px; }
+  .tag::before { width: 18px; font-size: 10px; }
+  .extra-info { font-size: 9px; margin-top: 3px; }
+  .product-footer { margin-top: 6px; padding-top: 6px; display: block; }
+  .product-delivery { margin-top: 4px; font-size: 9px; }
+  .product-rating svg { width: 9px; height: 9px; }
 }
