@@ -2,6 +2,19 @@
 
 AI chatbot hỗ trợ gợi ý sản phẩm thương mại điện tử bằng hình ảnh và ngôn ngữ tự nhiên.
 
+## Giới thiệu
+
+Đây là hệ thống chatbot gợi ý sản phẩm thương mại điện tử sử dụng trí tuệ nhân tạo nhằm hỗ trợ người dùng tìm kiếm và đề xuất sản phẩm thông qua văn bản hoặc hình ảnh.
+
+Hệ thống kết hợp nhiều công nghệ AI hiện đại như:
+
+- Gemini API để hội thoại
+- OpenCLIP để trích xuất đặc trưng hình ảnh
+- FAISS để tìm kiếm sản phẩm tương đồng
+- MongoDB để lưu trữ dữ liệu sản phẩm
+- Flask để xây dựng API Backend
+
+
 ## Tổng quan
 
 Dự án gồm hai phần chính:
