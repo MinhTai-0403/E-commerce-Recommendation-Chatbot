@@ -83,6 +83,16 @@ data/cellphones-products.sample.json
 
 Mỗi sản phẩm được chuẩn hóa theo các field như `url`, `name`, `brand`, `price`, `priceCurrency`, `availability`, `categories`, `primaryImage`, `sourceUrls`, `scrapedAt`.
 
+## Chức năng chính
+
+- Tìm kiếm sản phẩm bằng văn bản.
+- Tìm kiếm sản phẩm bằng hình ảnh.
+- Gợi ý sản phẩm tương tự.
+- Hỗ trợ hội thoại với AI.
+- Tìm kiếm nhanh bằng FAISS.
+- Quản lý dữ liệu sản phẩm bằng MongoDB.
+
+
 ## Ghi chú crawl
 
 CellphoneS có bot protection/rate limit. Khi crawl nhiều luồng quá nhanh, scraper sẽ dừng thay vì ghi dữ liệu lỗi vào MongoDB. Nên ưu tiên chạy `scripts/scrape-cellphones-adaptive.ps1` để tự cooldown và resume theo sitemap.
