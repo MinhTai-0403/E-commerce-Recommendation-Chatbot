@@ -3,11 +3,14 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "api:start": "node src/api-server.js",
+    "api:dev": "node src/api-server.js",
     "mongo:test": "node src/connect-mongodb.js",
     "mongo:cellphones:summary": "node src/inspect-cellphones-products.js",
     "mongo:cellphones:export-sample": "node src/export-cellphones-sample.js",
     "scrape:cellphones": "node src/scrape-cellphones.js",
     "scrape:cellphones:full:windows": "powershell -ExecutionPolicy Bypass -File scripts/scrape-cellphones-full.ps1",
+    "scrape:cellphones:proxy": "powershell -ExecutionPolicy Bypass -File scripts/scrape-cellphones-proxy-parallel.ps1",
     "scrape:cellphones:sample": "node src/scrape-cellphones.js --sitemap-limit=1 --limit=10 --concurrency=2 --delay-ms=500",
     "verify:cellphones": "node src/verify-cellphones-coverage.js"
   },

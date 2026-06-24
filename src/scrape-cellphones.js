@@ -1,5 +1,6 @@
 const cheerio = require("cheerio");
 const { XMLParser } = require("fast-xml-parser");
+const { ProxyAgent } = require("undici");
 const { createMongoClient, getMongoConfig } = require("./mongodb");
 const { repairMojibake, repairObjectText } = require("./text-utils");
 
@@ -9,6 +10,8 @@ const SITE_ORIGIN = "https://cellphones.com.vn";
 const SOURCE_SITE = "cellphones";
 const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (compatible; cosarii-cellphones-scraper/1.0)";
+const proxyAgents = new Map();
+let proxyCursor = Math.floor(Math.random() * 10000);
 
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
@@ -93,6 +96,48 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function parseProxyEntry(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  if (/^https?:\/\//i.test(raw)) return raw;
+
+  const parts = raw.split(":");
+  if (parts.length < 2) return null;
+
+  const [host, port, username, ...passwordParts] = parts;
+  if (!host || !port) return null;
+
+  if (!username) {
+    return `http://${host}:${port}`;
+  }
+
+  const password = passwordParts.join(":");
+  return `http://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${host}:${port}`;
+}
+
+function getProxyUrls() {
+  return uniqueStrings(
+    String(process.env.SCRAPER_PROXIES || "")
+      .split(/[\r\n,;\s]+/)
+      .map(parseProxyEntry)
+      .filter(Boolean)
+  );
+}
+
+function getNextProxyAgent() {
+  const proxies = getProxyUrls();
+  if (!proxies.length) return null;
+
+  const proxyUrl = proxies[proxyCursor % proxies.length];
+  proxyCursor += 1;
+
+  if (!proxyAgents.has(proxyUrl)) {
+    proxyAgents.set(proxyUrl, new ProxyAgent(proxyUrl));
+  }
+
+  return proxyAgents.get(proxyUrl);
+}
+
 async function retryOperation(label, operation, retries = 3) {
   let lastError;
 
@@ -149,6 +194,15 @@ function createBotChallengeError(url, status) {
   return error;
 }
 
+function formatErrorMessage(error) {
+  if (!error) return null;
+
+  const parts = [error.message, error.cause && error.cause.message].filter(Boolean);
+  return parts
+    .join(" / ")
+    .replace(/\/\/([^:\s/@]+):([^@\s]+)@/g, "//***:***@");
+}
+
 async function fetchText(url, args, accept = "text/html,application/xhtml+xml") {
   let lastError;
 
@@ -160,6 +214,7 @@ async function fetchText(url, args, accept = "text/html,application/xhtml+xml") 
           "accept-language": "vi,en;q=0.8",
           "user-agent": process.env.SCRAPER_USER_AGENT || DEFAULT_USER_AGENT,
         },
+        dispatcher: getNextProxyAgent() || undefined,
         signal: AbortSignal.timeout(args.timeoutMs),
       });
 
@@ -182,6 +237,9 @@ async function fetchText(url, args, accept = "text/html,application/xhtml+xml") 
         error.transient || !error.status || error.status === 429 || error.status >= 500;
 
       if (attempt < args.retries && retryable) {
+        console.warn(
+          `[retry] ${url} failed: ${formatErrorMessage(error)}. Retrying...`
+        );
         await sleep(800 * (attempt + 1));
         continue;
       }
@@ -605,6 +663,13 @@ async function filterExisting(entries, collection) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  const proxyCount = getProxyUrls().length;
+  console.log(
+    proxyCount
+      ? `[network] Proxy rotation enabled: ${proxyCount} proxies`
+      : "[network] Proxy rotation disabled"
+  );
+
   const entries = await collectProductEntries(args);
   const slicedEntries = entries.slice(
     args.start,
@@ -667,7 +732,7 @@ async function main() {
             url: entry.url,
             sitemapUrl: entry.sitemapUrl,
             sitemapLastmod: entry.sitemapLastmod,
-            message: result.reason && result.reason.message,
+            message: formatErrorMessage(result.reason),
             status: result.reason && result.reason.status,
           });
           stats.failed += 1;
@@ -703,6 +768,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error("[fatal]", error.message);
+  console.error("[fatal]", formatErrorMessage(error));
   process.exit(1);
 });

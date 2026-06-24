@@ -11,6 +11,45 @@
   padding-bottom: 12px;
 }
 
+.main-content.product-detail-main {
+  background: #f3f4f6;
+}
+
+.route-state-card {
+  padding: 22px 0 50px;
+}
+
+.route-state-box {
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: var(--shadow-card);
+  padding: 28px;
+  text-align: center;
+}
+
+.route-state-box h1 {
+  color: var(--text-primary);
+  font-size: 24px;
+  margin-bottom: 10px;
+}
+
+.route-state-box p {
+  color: var(--text-secondary);
+  margin-bottom: 18px;
+}
+
+.route-state-box a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 18px;
+  border-radius: 10px;
+  background: var(--primary-red);
+  color: #fff;
+  font-weight: 700;
+}
+
 /* Floating support actions */
 .floating-actions {
   position: fixed;

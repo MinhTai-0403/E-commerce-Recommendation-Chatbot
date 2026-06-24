@@ -1,238 +1,296 @@
 {
-  "exportedAt": "2026-06-18T17:50:35.326Z",
+  "exportedAt": "2026-06-22T07:54:51.976Z",
   "source": "cellphones",
   "database": "cosarii",
   "collection": "cellphones_products",
-  "totalProducts": 15671,
-  "sampleSize": 8,
+  "totalProducts": 38860,
+  "sampleSize": 10,
   "products": [
     {
-      "url": "https://cellphones.com.vn/chuot-gaming-khong-day-logitech-pro-x-superlight-2c.html",
+      "url": "https://cellphones.com.vn/asus-rog-phone-5s-16gb-512gb-cu-dep.html",
       "availability": {
-        "raw": "https://schema.org/InStock",
-        "status": "InStock"
+        "raw": "https://schema.org/OutOfStock",
+        "status": "OutOfStock"
       },
-      "brand": "Logitech",
+      "brand": "ASUS",
       "categories": [
-        "Phụ kiện",
-        "Chuột | Bàn Phím",
-        "Chuột",
-        "Chuột Logitech",
-        "Chuột Logitech MX Series"
+        "Hàng cũ",
+        "Điện thoại cũ",
+        "Android cũ"
       ],
       "images": [
-        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/c/h/chuot-gaming-khong-day-logitech-pro-x-superlight-2c.png",
-        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/c/h/chuot-gaming-khong-day-logitech-pro-x-superlight-2c_1_.png",
-        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/c/h/chuot-gaming-khong-day-logitech-pro-x-superlight-2c_2_.png"
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/h/7/h732_1_1_1_1.png",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/a/s/asus-rog-phone-5_0002_gsmarena_001_3_1_2_2.jpg",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/h/7/h732_1__1_1_1_1.png"
       ],
-      "name": "Chuột Gaming không dây Logitech Pro X Superlight 2C",
-      "price": 3040000,
+      "name": "ASUS ROG Phone 5S 16GB 512GB - Cũ đẹp",
+      "price": 10890000,
       "priceCurrency": "VND",
-      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/c/h/chuot-gaming-khong-day-logitech-pro-x-superlight-2c.png",
-      "scrapedAt": "2026-06-18T17:42:28.702Z",
-      "sku": "chuot-gaming-khong-day-logitech-pro-x-superlight-2c",
+      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/h/7/h732_1_1_1_1.png",
+      "scrapedAt": "2026-06-22T07:54:50.849Z",
+      "sku": "asus-rog-phone-5s-16gb-512gb-cu-dep",
       "source": "cellphones",
       "sourceUrls": [
-        "https://cellphones.com.vn/chuot-gaming-khong-day-logitech-pro-x-superlight-2c.html"
+        "https://cellphones.com.vn/asus-rog-phone-5s-16gb-512gb-cu-dep.html"
       ]
     },
     {
-      "url": "https://cellphones.com.vn/tai-nghe-bluetooth-xiaomi-redmi-buds-6-active.html",
+      "url": "https://cellphones.com.vn/bao-da-samsung-galaxy-s22-plus-araree-mustang-diary.html",
       "availability": {
-        "raw": "https://schema.org/InStock",
-        "status": "InStock"
+        "raw": "https://schema.org/OutOfStock",
+        "status": "OutOfStock"
       },
-      "brand": "Xiaomi",
+      "brand": "Araree",
+      "categories": [
+        "Phụ kiện",
+        "Ốp lưng | Bao da",
+        "Samsung",
+        "S22 | S22 Plus | S22 Ultra"
+      ],
+      "images": [
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/t/h/thumb-op-lung_9__2.png",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/t/h/thumb-op-lung_9__2.png",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/3/_/3_54_43.jpg"
+      ],
+      "name": "Bao da Samsung Galaxy S22 Plus Araree Mustang Diary",
+      "price": 59000,
+      "priceCurrency": "VND",
+      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/t/h/thumb-op-lung_9__2.png",
+      "scrapedAt": "2026-06-22T07:54:50.264Z",
+      "sku": "OP.S22P.06",
+      "source": "cellphones",
+      "sourceUrls": [
+        "https://cellphones.com.vn/bao-da-samsung-galaxy-s22-plus-araree-mustang-diary.html"
+      ]
+    },
+    {
+      "url": "https://cellphones.com.vn/op-lung-spigen-ultra-hybrid-cho-iphone-12-pro-max.html",
+      "availability": {
+        "raw": "https://schema.org/OutOfStock",
+        "status": "OutOfStock"
+      },
+      "brand": "Spigen",
+      "categories": [
+        "Phụ kiện",
+        "Ốp lưng | Bao da",
+        "iPhone",
+        "iPhone 12 | Mini | Pro | Pro Max"
+      ],
+      "images": [
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/s/c/screenshot_5_19_1_1.png",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/s/c/screenshot_1_42_2.png",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/s/c/screenshot_2_32_2.png"
+      ],
+      "name": "Ốp lưng Spigen Ultra Hybrid cho iPhone 12 Pro Max",
+      "price": 560000,
+      "priceCurrency": "VND",
+      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/s/c/screenshot_5_19_1_1.png",
+      "scrapedAt": "2026-06-22T07:54:50.043Z",
+      "sku": "op-lung-spigen-ultra-hybrid-cho-iphone-12-pro-max",
+      "source": "cellphones",
+      "sourceUrls": [
+        "https://cellphones.com.vn/op-lung-spigen-ultra-hybrid-cho-iphone-12-pro-max.html"
+      ]
+    },
+    {
+      "url": "https://cellphones.com.vn/apple-airpods-pro-2022.html",
+      "availability": {
+        "raw": "https://schema.org/OutOfStock",
+        "status": "OutOfStock"
+      },
+      "brand": "Apple Chính hãng",
       "categories": [
         "Âm thanh",
         "Tai nghe",
-        "Tai nghe không dây"
+        "Apple",
+        "Airpods Pro"
       ],
       "images": [
-        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/t/a/tai-nghe-bluetooth-xiaomi-redmi-buds-6-active-spa.png",
-        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/t/a/tai-nghe-bluetooth-xiaomi-redmi-buds-6-active_5_.png",
-        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/t/a/tai-nghe-bluetooth-xiaomi-redmi-buds-6-active_1_.png"
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/g/r/group_111_5_.png",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/a/p/apple-airpods-pro-2022-ksp-1.png",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/1/_/1_264.jpg"
       ],
-      "name": "Tai nghe Bluetooth True Wireless Xiaomi Redmi Buds 6 Active",
-      "price": 425000,
+      "name": "Tai nghe Bluetooth Apple AirPods Pro 2022 | Chính hãng Apple Việt Nam",
+      "price": 5690000,
       "priceCurrency": "VND",
-      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/t/a/tai-nghe-bluetooth-xiaomi-redmi-buds-6-active-spa.png",
-      "scrapedAt": "2026-06-18T17:42:27.250Z",
-      "sku": "tai-nghe-bluetooth-xiaomi-redmi-buds-6-active",
+      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/g/r/group_111_5_.png",
+      "scrapedAt": "2026-06-22T07:54:49.938Z",
+      "sku": "apple-airpods-pro-2022",
       "source": "cellphones",
       "sourceUrls": [
-        "https://cellphones.com.vn/tai-nghe-bluetooth-xiaomi-redmi-buds-6-active.html"
+        "https://cellphones.com.vn/apple-airpods-pro-2022.html"
       ]
     },
     {
-      "url": "https://cellphones.com.vn/laptop-lenovo-ideapad-5-pro-14arh7-82sj0026vn.html",
+      "url": "https://cellphones.com.vn/ban-phim-magic-keyboard-ipad-pro-11.html",
       "availability": {
         "raw": "https://schema.org/OutOfStock",
         "status": "OutOfStock"
       },
-      "brand": "Lenovo",
-      "categories": [
-        "Laptop",
-        "Lenovo",
-        "Ideapad"
-      ],
-      "images": [
-        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/1/_/1_373.png",
-        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/1/_/1_373.png",
-        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/2/_/2_350.png"
-      ],
-      "name": "Laptop Lenovo Ideapad 5 Pro 14ARH7 82SJ0026VN",
-      "price": 20990000,
-      "priceCurrency": "VND",
-      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/1/_/1_373.png",
-      "scrapedAt": "2026-06-18T17:42:27.152Z",
-      "sku": "laptop-lenovo-ideapad-5-pro-14arh7-82sj0026vn",
-      "source": "cellphones",
-      "sourceUrls": [
-        "https://cellphones.com.vn/laptop-lenovo-ideapad-5-pro-14arh7-82sj0026vn.html"
-      ]
-    },
-    {
-      "url": "https://cellphones.com.vn/chuot-gaming-khong-day-logitech-pro-x-superlight-2-se.html",
-      "availability": {
-        "raw": "https://schema.org/InStock",
-        "status": "InStock"
-      },
-      "brand": "Logitech",
+      "brand": "Apple Chính hãng",
       "categories": [
         "Phụ kiện",
         "Chuột | Bàn Phím",
-        "Chuột",
-        "Chuột Logitech",
-        "Chuột Logitech MX Series"
+        "Bàn phím",
+        "Bàn phím iPad"
       ],
       "images": [
-        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/c/h/chuot-gaming-khong-day-logitech-pro-x-superlight-2-se.png",
-        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/c/h/chuot-gaming-khong-day-logitech-pro-x-superlight-2-se_1_.png",
-        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/c/h/chuot-gaming-khong-day-logitech-pro-x-superlight-2-se_2_.png"
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/m/x/mxqt2ll.jpg",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/m/x/mxqt2ll.jpg",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/m/j/mjqj3ll.jpg"
       ],
-      "name": "Chuột Gaming không dây Logitech Pro X Superlight 2 SE",
-      "price": 2690000,
+      "name": "Bàn phím iPad Air 11 M2/ Pro 11 M2 Apple Magic Keyboard + Trackpad",
+      "price": 7690000,
       "priceCurrency": "VND",
-      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/c/h/chuot-gaming-khong-day-logitech-pro-x-superlight-2-se.png",
-      "scrapedAt": "2026-06-18T17:42:23.716Z",
-      "sku": "chuot-gaming-khong-day-logitech-pro-x-superlight-2-se",
+      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/m/x/mxqt2ll.jpg",
+      "scrapedAt": "2026-06-22T07:54:49.254Z",
+      "sku": "ban-phim-magic-keyboard-ipad-pro-11",
       "source": "cellphones",
       "sourceUrls": [
-        "https://cellphones.com.vn/chuot-gaming-khong-day-logitech-pro-x-superlight-2-se.html"
+        "https://cellphones.com.vn/ban-phim-magic-keyboard-ipad-pro-11.html"
       ]
     },
     {
-      "url": "https://cellphones.com.vn/mieng-dan-chong-va-dap-cho-apple-watch-42-mm-full-man-hinh-4d-5d.html",
+      "url": "https://cellphones.com.vn/camera-hanhtrinh-vietmap-g40-guong-tran-vien-cu.html",
       "availability": {
         "raw": "https://schema.org/OutOfStock",
         "status": "OutOfStock"
       },
-      "brand": null,
+      "brand": "Vietmap",
+      "categories": [
+        "Hàng cũ",
+        "Phụ kiện cũ",
+        "Camera"
+      ],
+      "images": [
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/c/a/camera-hanhtrinh-vietmap-g40-guong-tran-vien_1_1.jpg",
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/c/a/camera-hanhtrinh-vietmap-g40-guong-tran-vien_3.png",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/c/a/camera-hanhtrinh-vietmap-g40-guong-tran-vien_1_1.jpg"
+      ],
+      "name": "Camera hành trình Vietmap G40 Gương tràn viền - Cũ",
+      "price": 1490000,
+      "priceCurrency": "VND",
+      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/c/a/camera-hanhtrinh-vietmap-g40-guong-tran-vien_1_1.jpg",
+      "scrapedAt": "2026-06-22T07:54:48.017Z",
+      "sku": "camera-hanhtrinh-vietmap-g40-guong-tran-vien-cu",
+      "source": "cellphones",
+      "sourceUrls": [
+        "https://cellphones.com.vn/camera-hanhtrinh-vietmap-g40-guong-tran-vien-cu.html"
+      ]
+    },
+    {
+      "url": "https://cellphones.com.vn/op-lung-spigen-liquid-crystal-cho-iphone-12-max-pro.html",
+      "availability": {
+        "raw": "https://schema.org/OutOfStock",
+        "status": "OutOfStock"
+      },
+      "brand": "Spigen",
       "categories": [
         "Phụ kiện",
-        "Dán điện thoại | Laptop",
-        "Apple Watch"
+        "Ốp lưng | Bao da | Ốp AirPods",
+        "iPhone",
+        "iPhone 12 | Mini | Pro | Pro Max"
       ],
       "images": [
-        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/4/9/4985733912_dan-cuong-luc-apple-watch-42mm.jpg",
-        "https://cdn2.cellphones.com.vn/200x/media/catalog/productnull",
-        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/4/9/4985733912_dan-cuong-luc-apple-watch-42mm.jpg"
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/s/-/s-l400_3.jpg",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/s/c/screenshot_4_23_2.png",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/s/c/screenshot_7_12_3.png"
       ],
-      "name": "Miếng Dán chống va đập cho Apple Watch 42mm - Full màn hình 4D/5D",
-      "price": 120000,
+      "name": "Ốp lưng Spigen Liquid Crystal Cho iPhone 12 / 12 Pro",
+      "price": 410000,
       "priceCurrency": "VND",
-      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/4/9/4985733912_dan-cuong-luc-apple-watch-42mm.jpg",
-      "scrapedAt": "2026-06-18T17:42:22.468Z",
-      "sku": "A11K.002.B",
+      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/s/-/s-l400_3.jpg",
+      "scrapedAt": "2026-06-22T07:54:46.898Z",
+      "sku": "op-lung-spigen-liquid-crystal-cho-iphone-12-max-pro",
       "source": "cellphones",
       "sourceUrls": [
-        "https://cellphones.com.vn/mieng-dan-chong-va-dap-cho-apple-watch-42-mm-full-man-hinh-4d-5d.html"
+        "https://cellphones.com.vn/op-lung-spigen-liquid-crystal-cho-iphone-12-max-pro.html"
       ]
     },
     {
-      "url": "https://cellphones.com.vn/laptop-lenovo-ideapad-5-14aba7-82se007evn.html",
+      "url": "https://cellphones.com.vn/camera-hanh-trinh-insta360-ace-pro-cu.html",
       "availability": {
         "raw": "https://schema.org/OutOfStock",
         "status": "OutOfStock"
       },
-      "brand": "Lenovo",
+      "brand": "Insta360",
       "categories": [
-        "Laptop",
-        "Lenovo",
-        "Ideapad"
+        "Hàng cũ",
+        "Phụ kiện cũ",
+        "Camera"
       ],
       "images": [
-        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/1/_/1_374.png",
-        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/1/_/1_374.png",
-        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/2/_/2_351.png"
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/c/a/camera-hanh-trinh-insta360-ace-pro_5__1_1_2.png",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/c/a/camera-hanh-trinh-insta360-ace-pro_10__1_2.png",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/c/a/camera-hanh-trinh-insta360-ace-pro_6__1_2.png"
       ],
-      "name": "Laptop Lenovo Ideapad 5 14ABA7 82SE007EVN",
-      "price": 17490000,
+      "name": "Camera Insta360 ACE Pro - Cũ",
+      "price": 6590000,
       "priceCurrency": "VND",
-      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/1/_/1_374.png",
-      "scrapedAt": "2026-06-18T17:42:22.190Z",
-      "sku": "laptop-lenovo-ideapad-5-14aba7-82se007evn",
+      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/c/a/camera-hanh-trinh-insta360-ace-pro_5__1_1_2.png",
+      "scrapedAt": "2026-06-22T07:54:46.880Z",
+      "sku": "camera-hanh-trinh-insta360-ace-pro-cu",
       "source": "cellphones",
       "sourceUrls": [
-        "https://cellphones.com.vn/laptop-lenovo-ideapad-5-14aba7-82se007evn.html"
+        "https://cellphones.com.vn/camera-hanh-trinh-insta360-ace-pro-cu.html"
       ]
     },
     {
-      "url": "https://cellphones.com.vn/tai-nghe-bluetooth-pisen-buds-p1-plus.html",
+      "url": "https://cellphones.com.vn/op-lung-spigen-liquid-crystal-cho-iphone-12-pro-max.html",
       "availability": {
         "raw": "https://schema.org/OutOfStock",
         "status": "OutOfStock"
       },
-      "brand": "Pisen",
-      "categories": [
-        "Âm thanh",
-        "Tai nghe",
-        "Pisen"
-      ],
-      "images": [
-        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/t/a/tai-nghe-bluetooth-pisen-buds-p1-plus.png",
-        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/t/a/tai-nghe-bluetooth-pisen-buds-p1-plus_1_.png",
-        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/t/a/tai-nghe-bluetooth-pisen-buds-p1-plus_2_.png"
-      ],
-      "name": "Tai nghe Bluetooth True Wireless Pisen Buds P1 Plus",
-      "price": 490000,
-      "priceCurrency": "VND",
-      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/t/a/tai-nghe-bluetooth-pisen-buds-p1-plus.png",
-      "scrapedAt": "2026-06-18T17:42:20.545Z",
-      "sku": "tai-nghe-bluetooth-pisen-buds-p1-plus",
-      "source": "cellphones",
-      "sourceUrls": [
-        "https://cellphones.com.vn/tai-nghe-bluetooth-pisen-buds-p1-plus.html"
-      ]
-    },
-    {
-      "url": "https://cellphones.com.vn/cap-belkin-type-c-to-c-60w-2-0-1m-vo-du.html",
-      "availability": {
-        "raw": "https://schema.org/InStock",
-        "status": "InStock"
-      },
-      "brand": "Belkin",
+      "brand": "Spigen",
       "categories": [
         "Phụ kiện",
-        "Sạc - Cáp",
-        "Cáp",
-        "USB-C"
+        "Ốp lưng | Bao da | Ốp AirPods",
+        "iPhone",
+        "iPhone 12 | Mini | Pro | Pro Max"
       ],
       "images": [
-        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/c/a/cap-belkin-type-c-to-c-60w-2-0-1m-vo-du_1_.png",
-        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/c/a/cap-belkin-type-c-to-c-60w-2-0-1m-vo-du.jpg",
-        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/c/a/cap-belkin-type-c-to-c-60w-2-0-1m-vo-du_2_.png"
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/s/-/s-l400_1.jpg",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/s/c/screenshot_4_23_1.png",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/s/c/screenshot_7_12_2.png"
       ],
-      "name": "Cáp Belkin USB-C to C 60W CBL 2.0 dài 1m vỏ dù",
-      "price": 300000,
+      "name": "Ốp lưng Spigen Liquid Crystal Cho iPhone 12 Pro Max",
+      "price": 460000,
       "priceCurrency": "VND",
-      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/c/a/cap-belkin-type-c-to-c-60w-2-0-1m-vo-du_1_.png",
-      "scrapedAt": "2026-06-18T17:42:20.029Z",
-      "sku": "cap-belkin-type-c-to-c-60w-2-0-1m-vo-du",
+      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/s/-/s-l400_1.jpg",
+      "scrapedAt": "2026-06-22T07:54:46.408Z",
+      "sku": "op-lung-spigen-liquid-crystal-cho-iphone-12-pro-max",
       "source": "cellphones",
       "sourceUrls": [
-        "https://cellphones.com.vn/cap-belkin-type-c-to-c-60w-2-0-1m-vo-du.html"
+        "https://cellphones.com.vn/op-lung-spigen-liquid-crystal-cho-iphone-12-pro-max.html"
+      ]
+    },
+    {
+      "url": "https://cellphones.com.vn/op-lung-spigen-ultra-hybrid-cho-iphone-12-max-pro.html",
+      "availability": {
+        "raw": "https://schema.org/OutOfStock",
+        "status": "OutOfStock"
+      },
+      "brand": "Spigen",
+      "categories": [
+        "Phụ kiện",
+        "Ốp lưng | Bao da",
+        "iPhone",
+        "iPhone 12 | Mini | Pro | Pro Max"
+      ],
+      "images": [
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/t/i/title_ip67pro_lc_cc_02_1.jpg",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/d/e/detail_iphone_6.7_2020__lc_clear_03.png",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/d/e/detail_iphone_6.7_2020__lc_clear_04.jpg"
+      ],
+      "name": "Ốp lưng Spigen Ultra Hybrid cho iPhone 12 / 12 Pro",
+      "price": 560000,
+      "priceCurrency": "VND",
+      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/t/i/title_ip67pro_lc_cc_02_1.jpg",
+      "scrapedAt": "2026-06-22T07:54:46.334Z",
+      "sku": "op-lung-spigen-ultra-hybrid-cho-iphone-12-max-pro",
+      "source": "cellphones",
+      "sourceUrls": [
+        "https://cellphones.com.vn/op-lung-spigen-ultra-hybrid-cho-iphone-12-max-pro.html"
       ]
     }
   ]

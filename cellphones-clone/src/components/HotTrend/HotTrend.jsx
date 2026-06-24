@@ -3,7 +3,7 @@ import './HotTrend.css';
 import { hotTrendCategoryFilters, hotTrendSubFilters, hotTrendProducts } from '../../data/mockData';
 import ProductCard from '../ProductCard/ProductCard';
 
-export default function HotTrend() {
+export default function HotTrend({ products = hotTrendProducts }) {
   const [activeMainTab, setActiveMainTab] = useState('deal');
   const [activeCategory, setActiveCategory] = useState('phu-kien');
   const [activeSubFilter, setActiveSubFilter] = useState('all');
@@ -68,7 +68,7 @@ export default function HotTrend() {
 
             {/* Products */}
             <div className="hot-trend-products">
-              {hotTrendProducts.map((product) => (
+              {products.map((product) => (
                 <div key={product.id} className="ht-product-wrapper">
                   <ProductCard product={product} />
                 </div>
