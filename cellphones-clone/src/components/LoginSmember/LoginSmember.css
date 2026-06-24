@@ -1,0 +1,383 @@
+.login-full-page-wrapper {
+  position: fixed;
+  inset: 0;
+  background: #ffffff !important;
+  z-index: 9999;
+  overflow-y: auto;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.login-main-row {
+  display: flex;
+  width: 100%;
+  max-width: 1140px;
+  height: 100vh;
+  background: #ffffff;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+
+/* ================= CSS CỘT ƯU ĐÃI TRÁI ================= */
+.login-left-content-panel {
+  flex: 1.1;
+  background: #ffffff;
+  padding: 60px 50px 20px 20px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ĐÃ ĐIỀU CHỈNH: Tăng lên 45px để đẩy 2 khối logo đỏ vào sâu bên trong, nằm cân đối so với dòng chữ dài phía dưới */
+.brand-logos-header-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 35px;
+  padding-left: 45px; /* Giúp logo không bị lệch hẳn ra ngoài mép trái */
+}
+
+.logo-red-card {
+  background-color: #d70018;
+  padding: 6px 14px;
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  box-sizing: border-box;
+}
+
+.logo-red-card img {
+  height: 18px;
+  object-fit: contain;
+}
+
+.smember-heading-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: #222222;
+  margin: 0 0 8px 0;
+}
+
+.smember-heading-title span {
+  color: #d70018;
+}
+
+.smember-sub-title {
+  font-size: 16px;
+  font-weight: 500;
+  color: #222222;
+  margin: 0 0 35px 0;
+}
+
+/* Khung ngoặc đỏ dày góc cạnh đối xứng */
+.smember-bracket-container {
+  position: relative;
+  padding: 30px 25px;
+  background: transparent;
+  margin-bottom: 20px;
+}
+
+.bracket-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 16px;
+  border: 4px solid #d70018;
+  pointer-events: none;
+}
+
+.left-side-bracket {
+  left: 0;
+  border-right: 0;
+  border-radius: 16px 0 0 16px;
+}
+
+.right-side-bracket {
+  right: 0;
+  border-left: 0;
+  border-radius: 0 16px 16px 0;
+}
+
+.benefit-bullets-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 20px 0;
+}
+
+.benefit-bullets-list li {
+  font-size: 13.5px;
+  color: #27272a;
+  line-transform: none;
+  line-height: 1.7;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.benefit-bullets-list li b {
+  color: #000000;
+  font-weight: 700;
+}
+
+.benefit-bullets-list li img {
+  width: 15px;
+  height: 14px;
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
+.policy-link-anchor {
+  font-size: 14px;
+  color: #d70018;
+  text-decoration: none;
+  font-weight: 700;
+  display: block;
+  text-align: center;
+}
+
+/* Giữ nguyên kích thước bự rõ nét cho khối Kiến và Voucher lượn sóng */
+.smember-footer-mascot-wrapper {
+  margin-top: auto;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  height: 195px;
+}
+
+.smember-footer-mascot-wrapper img {
+  width: 118%;
+  height: 195px;
+  object-fit: contain;
+}
+
+/* ================= CSS CỘT BÊN PHẢI FORM PANEL ================= */
+.login-right-form-panel {
+  flex: 0.9;
+  background: #ffffff;
+  padding: 60px 20px 40px 60px;
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+}
+
+.form-page-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: #d70018;
+  text-align: center;
+  margin: 0 0 35px 0;
+}
+
+.smember-form-element {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.error-alert-text {
+  background: #fef2f2;
+  border: 1px solid #fee2e2;
+  color: #d70018;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.form-group-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-group-item label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.form-group-item input {
+  height: 46px;
+  padding: 0 16px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 14.5px;
+  color: #111827;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.form-group-item input:focus {
+  border-color: #d70018;
+  box-shadow: 0 0 0 1px #d70018;
+}
+
+.form-group-item input::placeholder {
+  color: #9ca3af;
+}
+
+.password-input-container {
+  position: relative;
+  display: flex;
+  width: 100%;
+}
+
+.password-input-container input {
+  width: 100%;
+  padding-right: 45px;
+}
+
+.password-toggle-eye {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: 0;
+}
+
+.smember-submit-btn {
+  height: 48px;
+  background: #d70018;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 15.5px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-top: 10px;
+  transition: background 0.15s;
+}
+
+.smember-submit-btn:hover {
+  background: #b50012;
+}
+
+.forgot-pass-link-center {
+  text-align: center;
+  margin-top: 16px;
+}
+
+.forgot-pass-link-center a {
+  font-size: 14px;
+  color: #2563eb;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.forgot-pass-link-center a:hover {
+  text-decoration: underline;
+}
+
+.or-social-divider {
+  text-align: center;
+  position: relative;
+  margin: 35px 0 20px 0;
+}
+
+.or-social-divider::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 100%;
+  height: 1px;
+  background: #e5e7eb;
+  z-index: 1;
+}
+
+.or-social-divider span {
+  background: #ffffff;
+  padding: 0 16px;
+  font-size: 13.5px;
+  color: #6b7280;
+  position: relative;
+  z-index: 2;
+}
+
+.social-login-grid {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 35px;
+}
+
+.social-login-btn {
+  flex: 1;
+  height: 46px;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: #374151;
+  cursor: pointer;
+}
+
+.social-login-btn:hover {
+  background: #f9fafb;
+}
+
+.social-login-btn img {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
+.signup-hint-text {
+  text-align: center;
+  font-size: 14px;
+  color: #4b5563;
+}
+
+.signup-hint-text a {
+  color: #d70018;
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.footer-copyright-text {
+  margin-top: auto;
+  text-align: center;
+  font-size: 12px;
+  color: #9ca3af;
+  line-height: 1.7;
+}
+
+.footer-copyright-text a {
+  color: #d70018;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.footer-copyright-text a:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 868px) {
+  .login-left-content-panel {
+    display: none;
+  }
+  .login-main-row {
+    width: 100%;
+    max-width: 440px;
+    height: auto;
+    padding: 20px;
+  }
+  .login-right-form-panel {
+    padding: 20px 0;
+    width: 100%;
+  }
+}

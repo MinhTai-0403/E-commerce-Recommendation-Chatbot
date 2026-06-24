@@ -11,6 +11,16 @@
   padding-bottom: 12px;
 }
 
+/* === LỚP NỀN MỜ PHỦ ĐEN TOÀN DỰ ÁN (MỚI BỔ SUNG) === */
+.global-backdrop-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.6); /* Độ tối mờ phủ đen giống hình 2 */
+  z-index: 998; /* Nằm dưới Main Header (1000) nhưng nằm trên toàn bộ nội dung body */
+  pointer-events: auto;
+  animation: fadeIn 0.2s ease forwards;
+}
+
 /* Floating support actions */
 .floating-actions {
   position: fixed;
@@ -93,15 +103,43 @@
   background: #b8000f;
 }
 
+/* Responsive Media Queries */
 @media (max-width: 1023px) {
-  .main-content { padding-top: 85px; }
+  .main-content {
+    padding-top: 85px;
+  }
 }
 
 @media (max-width: 640px) {
-  .main-content { padding-top: 98px; padding-bottom: 10px; }
-  .floating-actions { right: 10px; bottom: 12px; align-items: flex-end; }
-  .floating-app { width: 93px; height: 93px; margin-right: 14px; }
-  .floating-app img { width: 93px; height: 93px; }
-  .floating-action-button { width: 48px; height: 48px; border-radius: 9px; }
-  .floating-action-button span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+  .main-content {
+    padding-top: 98px;
+    padding-bottom: 10px;
+  }
+  .floating-actions {
+    right: 10px;
+    bottom: 12px;
+    align-items: flex-end;
+  }
+  .floating-app {
+    width: 93px;
+    height: 93px;
+    margin-right: 14px;
+  }
+  .floating-app img {
+    width: 93px;
+    height: 93px;
+  }
+  .floating-action-button {
+    width: 48px;
+    height: 48px;
+    border-radius: 9px;
+  }
+  .floating-action-button span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
 }
