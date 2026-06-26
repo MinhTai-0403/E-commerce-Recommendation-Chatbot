@@ -1,8 +1,9 @@
 import { useState } from "react";
+import { loginSmember } from "../../services/apiAuth";
 import "./LoginSmember.css";
 
-export default function LoginSmember({ onBackToHome }) {
-  const [phone, setPhone] = useState("");
+export default function LoginSmember({ onBackToHome, onGoRegister, onAuthSuccess }) {
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -13,37 +14,21 @@ export default function LoginSmember({ onBackToHome }) {
     e.preventDefault();
     setErrorMessage("");
 
-    if (!phone || !password) {
-      setErrorMessage("Vui lòng điền đầy đủ số điện thoại và mật khẩu!");
+    if (!identifier || !password) {
+      setErrorMessage("Vui lòng điền email/số điện thoại và mật khẩu!");
       return;
     }
 
     setIsLoading(true);
 
     try {
-      const BACKEND_API_URL = "http://localhost:5000/api/auth/login";
-      const response = await fetch(BACKEND_API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone, password }),
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        alert("Đăng nhập tài khoản Smember thành công!");
-        if (data.token) {
-          localStorage.setItem("smember_token", data.token);
-        }
-        onBackToHome();
-      } else {
-        setErrorMessage(
-          data.message || "Tài khoản hoặc mật khẩu không chính xác!",
-        );
-      }
+      const payload = await loginSmember({ identifier: identifier.trim(), password });
+      alert("Đăng nhập tài khoản Smember thành công!");
+      if (onAuthSuccess) onAuthSuccess(payload.data?.user || payload.user || null);
+      else onBackToHome();
     } catch (error) {
       console.error("Lỗi kết nối Backend:", error);
-      setErrorMessage("Không thể kết nối tới máy chủ backend!");
+      setErrorMessage(error.message || "Không thể kết nối tới máy chủ backend!");
     } finally {
       setIsLoading(false);
     }
@@ -176,13 +161,12 @@ export default function LoginSmember({ onBackToHome }) {
             )}
 
             <div className="form-group-item">
-              <label>Số điện thoại</label>
+              <label>Email hoặc số điện thoại</label>
               <input
-                type="tel"
-                placeholder="Nhập số điện thoại của bạn"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                maxLength={10}
+                type="text"
+                placeholder="Nhập email hoặc số điện thoại của bạn"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
               />
             </div>
 
@@ -264,7 +248,10 @@ export default function LoginSmember({ onBackToHome }) {
           </div>
 
           <div className="signup-hint-text">
-            Bạn chưa có tài khoản? <a href="#register">Đăng ký ngay</a>
+            Bạn chưa có tài khoản?{" "}
+            <button type="button" className="inline-auth-link" onClick={onGoRegister}>
+              Đăng ký ngay
+            </button>
           </div>
 
           <div className="footer-copyright-text">

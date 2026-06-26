@@ -348,6 +348,20 @@
   font-weight: 700;
 }
 
+.inline-auth-link {
+  border: none;
+  background: transparent;
+  color: #d70018;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+}
+
+.inline-auth-link:hover {
+  text-decoration: underline;
+}
+
 .footer-copyright-text {
   margin-top: auto;
   text-align: center;

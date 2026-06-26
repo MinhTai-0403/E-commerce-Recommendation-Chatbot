@@ -1,11 +1,22 @@
 import './ProductCard.css';
 import { formatPrice } from '../../data/mockData';
+import { getProductDomId, getProductId, getProductPath, getProductSlug } from '../../data/productCatalog';
 
 export default function ProductCard({ product }) {
   if (!product) return null;
 
+  const productId = getProductId(product);
+  const productSlug = getProductSlug(product);
+
   return (
-    <a href={product.url || '#'} className="product-card">
+    <a
+      id={getProductDomId(product)}
+      href={getProductPath(product)}
+      className="product-card"
+      data-product-id={productId}
+      data-product-slug={productSlug}
+      data-product-sku={product.sku || productSlug}
+    >
       {/* Badges */}
       {product.discount > 0 && (
         <div className="badge-discount">Giảm {product.discount}%</div>

@@ -10,6 +10,10 @@ async function main() {
     const products = db.collection(productsCollection);
     const errors = db.collection(`${productsCollection}_errors`);
     const productCount = await products.countDocuments({ source: "cellphones" });
+    const labeledCount = await products.countDocuments({
+      source: "cellphones",
+      trainingLabels: { $exists: true },
+    });
     const errorCount = await errors.countDocuments({ source: "cellphones" });
     const sample = await products.findOne(
       { source: "cellphones" },
@@ -26,6 +30,7 @@ async function main() {
           primaryImage: 1,
           sourceUrls: 1,
           scrapedAt: 1,
+          trainingLabels: 1,
         },
       }
     );
@@ -33,6 +38,7 @@ async function main() {
     console.log(`Database: ${dbName}`);
     console.log(`Products collection: ${productsCollection}`);
     console.log(`CellphoneS products: ${productCount}`);
+    console.log(`CellphoneS labeled products: ${labeledCount}`);
     console.log(`CellphoneS scrape errors: ${errorCount}`);
     console.log("Sample product:");
     console.log(JSON.stringify(sample, null, 2));

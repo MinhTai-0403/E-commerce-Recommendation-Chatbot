@@ -38,6 +38,7 @@ async function main() {
             images: { $slice: 3 },
             sourceUrls: 1,
             scrapedAt: 1,
+            trainingLabels: 1,
           },
         }
       )

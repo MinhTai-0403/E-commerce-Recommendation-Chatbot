@@ -71,6 +71,39 @@ Các lệnh chính:
 - `npm run verify:cellphones`: kiểm tra URL trong sitemap đã có trong MongoDB chưa.
 - `npm run verify:cellphones -- --sample-missing=0 --report-sitemaps`: xem số URL còn thiếu theo từng sitemap để chia worker crawl.
 
+## Chạy API backend
+
+API backend Node.js đọc `.env` ở root repo và truy vấn trực tiếp MongoDB. Mặc định chạy tại `http://localhost:5050`.
+
+```bash
+npm run api:start
+```
+
+Frontend clone gọi API qua `VITE_API_BASE_URL`. Khi chạy local, có thể copy env mẫu rồi bật Vite:
+
+```bash
+copy cellphones-clone\.env.example cellphones-clone\.env.local
+cd cellphones-clone
+npm run dev
+```
+
+Endpoint chính:
+
+- `GET /api/health`: kiểm tra MongoDB và collection hiện tại.
+- `GET /api/products?limit=20&page=1&q=iphone&category=Điện thoại&brand=Apple`: danh sách sản phẩm.
+- `GET /api/products/:slug`: chi tiết sản phẩm theo slug/SKU/ObjectId.
+- `GET /api/products/:slug/related?limit=8`: sản phẩm liên quan.
+- `POST /api/products`: tạo sản phẩm mới cho admin.
+- `PATCH /api/products/:slug`: sửa một phần sản phẩm.
+- `PUT /api/products/:slug`: cập nhật sản phẩm.
+- `DELETE /api/products/:slug`: xóa sản phẩm.
+
+Nếu đặt `ADMIN_API_KEY` trong `.env`, các route ghi (`POST`, `PUT`, `PATCH`, `DELETE`) cần gửi header:
+
+```text
+Authorization: Bearer <ADMIN_API_KEY>
+```
+
 ## Dữ liệu
 
 Dữ liệu CellphoneS đầy đủ đang nằm trong MongoDB collection `cellphones_products`.

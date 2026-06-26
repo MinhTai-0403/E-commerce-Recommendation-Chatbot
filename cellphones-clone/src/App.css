@@ -11,14 +11,53 @@
   padding-bottom: 12px;
 }
 
-/* === LỚP NỀN MỜ PHỦ ĐEN TOÀN DỰ ÁN (MỚI BỔ SUNG) === */
+.main-content.product-detail-main {
+  background: #f3f4f6;
+}
+
+/* === Lớp nền mờ phủ đen toàn dự án === */
 .global-backdrop-overlay {
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.6); /* Độ tối mờ phủ đen giống hình 2 */
-  z-index: 998; /* Nằm dưới Main Header (1000) nhưng nằm trên toàn bộ nội dung body */
+  background-color: rgba(0, 0, 0, 0.6);
+  z-index: 998;
   pointer-events: auto;
   animation: fadeIn 0.2s ease forwards;
+}
+
+.route-state-card {
+  padding: 22px 0 50px;
+}
+
+.route-state-box {
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: var(--shadow-card);
+  padding: 28px;
+  text-align: center;
+}
+
+.route-state-box h1 {
+  color: var(--text-primary);
+  font-size: 24px;
+  margin-bottom: 10px;
+}
+
+.route-state-box p {
+  color: var(--text-secondary);
+  margin-bottom: 18px;
+}
+
+.route-state-box a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 18px;
+  border-radius: 10px;
+  background: var(--primary-red);
+  color: #fff;
+  font-weight: 700;
 }
 
 /* Floating support actions */
@@ -103,43 +142,15 @@
   background: #b8000f;
 }
 
-/* Responsive Media Queries */
 @media (max-width: 1023px) {
-  .main-content {
-    padding-top: 85px;
-  }
+  .main-content { padding-top: 85px; }
 }
 
 @media (max-width: 640px) {
-  .main-content {
-    padding-top: 98px;
-    padding-bottom: 10px;
-  }
-  .floating-actions {
-    right: 10px;
-    bottom: 12px;
-    align-items: flex-end;
-  }
-  .floating-app {
-    width: 93px;
-    height: 93px;
-    margin-right: 14px;
-  }
-  .floating-app img {
-    width: 93px;
-    height: 93px;
-  }
-  .floating-action-button {
-    width: 48px;
-    height: 48px;
-    border-radius: 9px;
-  }
-  .floating-action-button span {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-  }
+  .main-content { padding-top: 98px; padding-bottom: 10px; }
+  .floating-actions { right: 10px; bottom: 12px; align-items: flex-end; }
+  .floating-app { width: 93px; height: 93px; margin-right: 14px; }
+  .floating-app img { width: 93px; height: 93px; }
+  .floating-action-button { width: 48px; height: 48px; border-radius: 9px; }
+  .floating-action-button span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
 }

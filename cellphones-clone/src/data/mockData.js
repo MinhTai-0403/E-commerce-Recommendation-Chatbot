@@ -228,16 +228,18 @@ export const hotTrendSubFilters = [
 
 export const hotTrendProducts = [
   {
-    id: 201,
-    name: 'Camera DJI Osmo Pocket 3',
+    id: 'prod_dji_osmo_pocket_3_creator_combo',
+    sku: 'may-quay-chong-rung-dji-osmo-pocket-3-advanced-4k',
+    slug: 'may-quay-chong-rung-dji-osmo-pocket-3-advanced-4k',
+    name: 'Camera DJI Osmo Pocket 3 Creator Combo',
     image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:300:300/q:100/plain/https://cellphones.com.vn/media/catalog/product/m/a/may-quay-chong-rung-dji-osmo-pocket-3-advanced-4k_2.png',
-    currentPrice: 11019000,
+    currentPrice: 12800000,
     originalPrice: 17990000,
-    discount: 39,
+    discount: 29,
     rating: 4.9,
     ratingCount: 15,
     installment: true,
-    smember: 'Smember giảm đến 110.000đ',
+    smember: 'Smember giảm đến 128.000đ',
     category: 'phu-kien',
     tag2h: true,
     city: 'Hồ Chí Minh',

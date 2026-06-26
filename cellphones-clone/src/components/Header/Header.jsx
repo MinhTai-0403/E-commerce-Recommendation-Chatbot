@@ -110,7 +110,11 @@ export function TopBar() {
   );
 }
 
-export function MainHeader({ activePopup, setActivePopup, selectedLocation }) {
+export function MainHeader({ activePopup, setActivePopup, selectedLocation, currentUser }) {
+  const accountLabel = currentUser?.fullName
+    ? currentUser.fullName.split(" ").slice(-2).join(" ")
+    : currentUser?.email || "Đăng nhập";
+
   return (
     <header className="main-header">
       <div className="container header-inner">
@@ -239,7 +243,7 @@ export function MainHeader({ activePopup, setActivePopup, selectedLocation }) {
               setActivePopup(activePopup === "auth" ? null : "auth");
             }}
           >
-            <span className="header-action-label">Đăng nhập</span>
+            <span className="header-action-label">{accountLabel}</span>
             <svg
               width="20"
               height="20"

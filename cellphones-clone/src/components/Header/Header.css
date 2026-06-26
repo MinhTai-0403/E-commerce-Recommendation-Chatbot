@@ -242,6 +242,13 @@
   padding: 8px 14px;
   background: rgba(255, 255, 255, 0.15);
   font-weight: 600;
+  max-width: 180px;
+}
+
+.header-login-btn .header-action-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ===== LỚP PHỦ MỜ ĐEN DANH MỤC TRANG CHỦ ===== */
@@ -475,6 +482,27 @@
   display: flex;
   width: 100%;
   gap: 12px;
+}
+
+.auth-modal-actions.stacked {
+  flex-direction: column;
+}
+
+.auth-modal-user-meta {
+  width: 100%;
+  display: grid;
+  gap: 8px;
+  margin: -8px 0 18px;
+}
+
+.auth-modal-user-meta span {
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
 }
 
 .auth-btn {

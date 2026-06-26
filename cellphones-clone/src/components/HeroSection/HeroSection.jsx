@@ -7,8 +7,9 @@ import {
   subBanners,
 } from "../../data/mockData";
 
-export default function HeroSection() {
+export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
   const [currentSlide, setCurrentSlide] = useState(0);
+  const displayName = currentUser?.fullName || currentUser?.username || currentUser?.email;
 
   // Tự động chạy Slider Banner chính
   useEffect(() => {
@@ -141,14 +142,30 @@ export default function HeroSection() {
                   src="https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:50/plain/https://cellphones.com.vn/media/wysiwyg/ant-smile.png"
                   alt=""
                 />
-                Chào mừng bạn đến với CellphoneS
+                {currentUser ? `Xin chào, ${displayName}` : "Chào mừng bạn đến với CellphoneS"}
               </div>
-              <p>
-                Nhập hội thành viên Smember để không bỏ lỡ các ưu đãi hấp dẫn.
-              </p>
-              <a href="#login">
-                Đăng nhập <span>hoặc</span> Đăng ký
-              </a>
+              {currentUser ? (
+                <>
+                  <p>
+                    Tài khoản Smember đã đăng nhập. Bạn có thể dùng ưu đãi và theo dõi đơn hàng.
+                  </p>
+                  <div className="welcome-user-tags">
+                    <span>{currentUser.email || currentUser.username}</span>
+                    <span>{currentUser.role || "customer"}</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p>
+                    Nhập hội thành viên Smember để không bỏ lỡ các ưu đãi hấp dẫn.
+                  </p>
+                  <div className="welcome-auth-actions">
+                    <button type="button" onClick={onGoLogin}>Đăng nhập</button>
+                    <span>hoặc</span>
+                    <button type="button" onClick={onGoRegister}>Đăng ký</button>
+                  </div>
+                </>
+              )}
             </div>
             <div className="benefit-group education-benefit">
               <h3>Ưu đãi cho giáo dục</h3>

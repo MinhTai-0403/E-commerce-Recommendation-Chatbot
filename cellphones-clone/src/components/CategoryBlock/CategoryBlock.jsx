@@ -12,9 +12,19 @@ export default function CategoryBlock({
 }) {
   const [activeTab, setActiveTab] = useState(0);
   const [activeFilter, setActiveFilter] = useState('all');
-  const visibleProducts = products.filter((product) => (
-    activeFilter === 'all' || !product.brand || product.brand === activeFilter
-  ));
+  const productItems = Array.isArray(products) ? products : [];
+  const visibleProducts = productItems.filter((product) => {
+    const productBrand = product.brandKey || product.brand;
+    const productBrandName = String(product.brandName || product.brand || '').toLowerCase();
+    const filterKey = String(activeFilter).toLowerCase();
+
+    return (
+      activeFilter === 'all' ||
+      !productBrand ||
+      productBrand === activeFilter ||
+      productBrandName.includes(filterKey)
+    );
+  });
 
   return (
     <section className={`category-block section-gap ${campaignBanner ? 'has-campaign' : ''}`}>
