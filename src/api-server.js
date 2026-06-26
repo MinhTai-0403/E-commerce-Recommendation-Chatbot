@@ -1,5 +1,7 @@
 const http = require("http");
 const { ObjectId } = require("mongodb");
+const { handleAdminRequest, isAdminAuthorized } = require("./admin-service");
+const { handleAuthRequest } = require("./auth-service");
 const { createMongoClient, getMongoConfig } = require("./mongodb");
 
 const API_PORT = Number(process.env.API_PORT || 5050);
@@ -22,6 +24,7 @@ function sendJson(res, statusCode, payload) {
 function sendError(res, statusCode, message, details) {
   sendJson(res, statusCode, {
     ok: false,
+    message,
     error: {
       message,
       ...(details ? { details } : {}),
@@ -323,16 +326,7 @@ function sanitizeProductInput(input, { isCreate = false } = {}) {
 }
 
 function isWriteAuthorized(req) {
-  const expectedKey = process.env.ADMIN_API_KEY;
-  if (!expectedKey) return true;
-
-  const authHeader = req.headers.authorization || "";
-  const bearerToken = authHeader.startsWith("Bearer ")
-    ? authHeader.slice("Bearer ".length).trim()
-    : "";
-  const apiKeyHeader = req.headers["x-admin-api-key"];
-
-  return bearerToken === expectedKey || apiKeyHeader === expectedKey;
+  return isAdminAuthorized(req);
 }
 
 async function getDb() {
@@ -359,6 +353,27 @@ async function handleHealth(_req, res) {
     database: dbName,
     productsCollection,
     totalProducts,
+  });
+}
+
+async function handleApiIndex(_req, res) {
+  const { dbName, productsCollection } = getMongoConfig();
+  sendJson(res, 200, {
+    ok: true,
+    message: "CellphoneS clone API is running.",
+    database: dbName,
+    productsCollection,
+    endpoints: {
+      health: "/api/health",
+      products: "/api/products",
+      productDetail: "/api/products/:slug",
+      requestRegisterOtp: "/api/auth/request-register-otp",
+      verifyRegisterOtp: "/api/auth/verify-register-otp",
+      login: "/api/auth/login",
+      me: "/api/auth/me",
+      adminSummary: "/api/admin/summary",
+      adminUsers: "/api/admin/users",
+    },
   });
 }
 
@@ -572,13 +587,49 @@ async function routeRequest(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const pathParts = url.pathname.split("/").filter(Boolean);
 
+  if (pathParts.length === 0 && req.method === "GET") {
+    await handleApiIndex(req, res);
+    return;
+  }
+
   if (pathParts[0] !== "api") {
     sendError(res, 404, "Route not found.");
     return;
   }
 
+  if (!pathParts[1] && req.method === "GET") {
+    await handleApiIndex(req, res);
+    return;
+  }
+
   if (pathParts[1] === "health" && req.method === "GET") {
     await handleHealth(req, res);
+    return;
+  }
+
+  if (pathParts[1] === "auth") {
+    await handleAuthRequest({
+      req,
+      res,
+      pathParts,
+      parseJsonBody,
+      sendJson,
+      sendError,
+      getDb,
+    });
+    return;
+  }
+
+  if (pathParts[1] === "admin") {
+    await handleAdminRequest({
+      req,
+      res,
+      pathParts,
+      parseJsonBody,
+      sendJson,
+      sendError,
+      getDb,
+    });
     return;
   }
 

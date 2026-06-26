@@ -10,6 +10,9 @@ import UsedProducts from './components/UsedProducts/UsedProducts';
 import TechNews from './components/TechNews/TechNews';
 import Footer from './components/Footer/Footer';
 import ProductDetail from './components/ProductDetail/ProductDetail';
+import LoginSmember from './components/LoginSmember/LoginSmember';
+import RegisterSmember from './components/RegisterSmember/RegisterSmember';
+import AdminDashboard from './components/AdminDashboard/AdminDashboard';
 import { extractProductSlug, findProductDetailByPathname } from './data/productCatalog';
 import {
   phoneSubCategories, phoneBrandFilters, phoneProducts,
@@ -21,6 +24,7 @@ import {
   hotTrendProducts,
 } from './data/mockData';
 import { useApiProductDetail, useApiProducts } from './hooks/useApiProducts';
+import { clearAuthSession, fetchCurrentSmember, getStoredUser } from './services/apiAuth';
 
 const homeProductQueries = {
   hotTrend: { category: 'Phụ kiện', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
@@ -33,6 +37,24 @@ const homeProductQueries = {
   coldAppliances: { q: 'Tủ lạnh', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
 };
 
+const authRouteMap = {
+  '/login': 'login',
+  '/register': 'register',
+  '/smember/login': 'login',
+  '/smember/register': 'register',
+};
+
+const getAuthPageFromPathname = (pathname = '') => {
+  const cleaned = pathname.replace(/\/+$/g, '') || '/';
+  return authRouteMap[cleaned] || '';
+};
+
+const getAppPageFromPathname = (pathname = '') => {
+  const cleaned = pathname.replace(/\/+$/g, '') || '/';
+  if (cleaned === '/admin') return 'admin';
+  return getAuthPageFromPathname(cleaned);
+};
+
 const audioBrandFilters = [
   { id: 'all', name: 'Tất cả' },
   { id: 'apple', name: 'Apple' },
@@ -41,6 +63,57 @@ const audioBrandFilters = [
   { id: 'jbl', name: 'JBL' },
   { id: 'anker', name: 'Anker' },
 ];
+
+const CELLPHONES_47_PROVINCES = [
+  'An Giang',
+  'Bà Rịa - Vũng Tàu',
+  'Bắc Giang',
+  'Bắc Ninh',
+  'Bến Tre',
+  'Bình Định',
+  'Bình Dương',
+  'Bình Phước',
+  'Bình Thuận',
+  'Cà Mau',
+  'Cần Thơ',
+  'Đà Nẵng',
+  'Đắk Lắk',
+  'Đồng Nai',
+  'Đồng Tháp',
+  'Hà Nam',
+  'Hà Nội',
+  'Hà Tĩnh',
+  'Hải Dương',
+  'Hải Phòng',
+  'Hậu Giang',
+  'Hòa Bình',
+  'Hồ Chí Minh',
+  'Hưng Yên',
+  'Khánh Hòa',
+  'Kiên Giang',
+  'Lạng Sơn',
+  'Lâm Đồng',
+  'Lào Cai',
+  'Long An',
+  'Nam Định',
+  'Nghệ An',
+  'Ninh Bình',
+  'Ninh Thuận',
+  'Phú Thọ',
+  'Quảng Bình',
+  'Quảng Nam',
+  'Quảng Ngãi',
+  'Quảng Ninh',
+  'Tây Ninh',
+  'Thái Bình',
+  'Thái Nguyên',
+  'Thanh Hóa',
+  'Thừa Thiên - Huế',
+  'Tiền Giang',
+  'Trà Vinh',
+  'Vĩnh Long',
+  'Vĩnh Phúc',
+].sort((a, b) => a.localeCompare(b, 'vi'));
 
 function FloatingActions() {
   const [visible, setVisible] = useState(false);
@@ -116,7 +189,7 @@ function ProductRoute({ slug }) {
   );
 }
 
-function HomePage() {
+function HomePage({ currentUser, onGoLogin, onGoRegister }) {
   const hotTrend = useApiProducts(homeProductQueries.hotTrend, hotTrendProducts);
   const phones = useApiProducts(homeProductQueries.phones, phoneProducts);
   const laptops = useApiProducts(homeProductQueries.laptops, laptopProducts);
@@ -128,7 +201,11 @@ function HomePage() {
 
   return (
     <>
-      <HeroSection />
+      <HeroSection
+        currentUser={currentUser}
+        onGoLogin={onGoLogin}
+        onGoRegister={onGoRegister}
+      />
 
       <HotTrend products={hotTrend.products} />
 
@@ -206,21 +283,282 @@ function HomePage() {
 }
 
 function App() {
-  const productSlug = extractProductSlug(window.location.pathname);
-  const isProductRoute = Boolean(productSlug);
+  const appPage = getAppPageFromPathname(window.location.pathname);
+  const productSlug = appPage ? '' : extractProductSlug(window.location.pathname);
+  const isProductRoute = Boolean(productSlug) && !appPage;
+  const [activePopup, setActivePopup] = useState(null);
+  const [currentPage, setCurrentPage] = useState(() => (
+    appPage || 'home'
+  ));
+  const [currentUser, setCurrentUser] = useState(() => getStoredUser());
+  const [selectedLocation, setSelectedLocation] = useState('Hồ Chí Minh');
+  const [locationSearch, setLocationSearch] = useState('');
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function restoreUserSession() {
+      try {
+        const user = await fetchCurrentSmember();
+        if (!ignore && user) setCurrentUser(user);
+      } catch {
+        clearAuthSession();
+        if (!ignore) setCurrentUser(null);
+      }
+    }
+
+    if (getStoredUser()) restoreUserSession();
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  const filteredProvinces = CELLPHONES_47_PROVINCES.filter((province) => (
+    province.toLowerCase().includes(locationSearch.toLowerCase())
+  ));
+
+  const handleCloseAllPopups = () => {
+    setActivePopup(null);
+    setLocationSearch('');
+  };
+
+  const goHome = () => {
+    window.history.pushState(null, '', '/');
+    setCurrentPage('home');
+  };
+
+  const goLogin = () => {
+    window.history.pushState(null, '', '/smember/login');
+    setCurrentPage('login');
+  };
+
+  const goRegister = () => {
+    window.history.pushState(null, '', '/smember/register');
+    setCurrentPage('register');
+  };
+
+  const goAdmin = () => {
+    window.history.pushState(null, '', '/admin');
+    setCurrentPage('admin');
+  };
+
+  const handleAuthSuccess = (user) => {
+    if (user) setCurrentUser(user);
+    if (user?.role === 'admin') {
+      goAdmin();
+      return;
+    }
+    goHome();
+  };
+
+  const handleLogout = () => {
+    clearAuthSession();
+    setCurrentUser(null);
+    handleCloseAllPopups();
+    goHome();
+  };
+
+  if (currentPage === 'login') {
+    return (
+      <LoginSmember
+        onBackToHome={goHome}
+        onGoRegister={goRegister}
+        onAuthSuccess={handleAuthSuccess}
+      />
+    );
+  }
+
+  if (currentPage === 'register') {
+    return (
+      <RegisterSmember
+        onBackToHome={goHome}
+        onGoLogin={goLogin}
+        onAuthSuccess={handleAuthSuccess}
+      />
+    );
+  }
+
+  if (currentPage === 'admin') {
+    return (
+      <AdminDashboard
+        currentUser={currentUser}
+        onBackHome={goHome}
+        onLogout={handleLogout}
+        onGoLogin={goLogin}
+      />
+    );
+  }
 
   return (
     <div className="app">
+      {activePopup === 'category' && (
+        <div
+          className="global-backdrop-overlay"
+          onClick={handleCloseAllPopups}
+          role="presentation"
+        />
+      )}
+
+      {(activePopup === 'location' || activePopup === 'auth') && (
+        <div
+          className="location-global-overlay"
+          onClick={handleCloseAllPopups}
+          role="presentation"
+        />
+      )}
+
       <TopBar />
-      <MainHeader />
+      <MainHeader
+        activePopup={activePopup}
+        setActivePopup={setActivePopup}
+        selectedLocation={selectedLocation}
+        currentUser={currentUser}
+      />
 
       <main className={`main-content ${isProductRoute ? 'product-detail-main' : ''}`}>
-        {isProductRoute ? <ProductRoute slug={productSlug} /> : <HomePage />}
+        {isProductRoute ? (
+          <ProductRoute slug={productSlug} />
+        ) : (
+          <HomePage
+            currentUser={currentUser}
+            onGoLogin={goLogin}
+            onGoRegister={goRegister}
+          />
+        )}
       </main>
 
       <Footer />
 
       <FloatingActions />
+
+      {activePopup === 'location' && (
+        <div className="location-modal-box">
+          <div className="location-modal-header-bar">
+            <div className="location-modal-search-wrapper">
+              <svg
+                className="modal-search-icon"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="#999"
+                strokeWidth="2.5"
+                aria-hidden="true"
+              >
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+              <input
+                type="text"
+                placeholder="Nhập tên tỉnh thành"
+                value={locationSearch}
+                onChange={(event) => setLocationSearch(event.target.value)}
+                autoFocus
+              />
+            </div>
+            <button
+              className="location-modal-close-btn"
+              onClick={handleCloseAllPopups}
+              type="button"
+            >
+              Đóng ×
+            </button>
+          </div>
+
+          <div className="location-modal-hint">
+            Vui lòng chọn tỉnh, thành phố để biết chính xác giá, khuyến mãi và tồn kho
+          </div>
+
+          <div className="location-modal-body">
+            {filteredProvinces.length > 0 ? (
+              <div className="location-grid-layout">
+                {filteredProvinces.map((province) => (
+                  <button
+                    key={province}
+                    className={`location-grid-item ${selectedLocation === province ? 'active' : ''}`}
+                    onClick={() => {
+                      setSelectedLocation(province);
+                      handleCloseAllPopups();
+                    }}
+                    type="button"
+                  >
+                    <span>{province}</span>
+                    {selectedLocation === province && <span className="check-mark">✓</span>}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="location-no-data">Không tìm thấy tỉnh thành phù hợp</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activePopup === 'auth' && (
+        <div className="auth-modal-box">
+          <button className="auth-modal-close-x" onClick={handleCloseAllPopups} type="button">
+            ×
+          </button>
+          <h2 className="auth-modal-title">Smember</h2>
+          <div className="auth-modal-mascot">
+            <img
+              src="https://cellphones.com.vn/media/wysiwyg/ant-smile.png"
+              alt="Smember Mascot"
+            />
+          </div>
+          {currentUser ? (
+            <>
+              <p className="auth-modal-desc">
+                Xin chào <strong>{currentUser.fullName || currentUser.email}</strong>.
+                Tài khoản của bạn đã đăng nhập và sẵn sàng dùng ưu đãi Smember.
+              </p>
+              <div className="auth-modal-user-meta">
+                <span>{currentUser.email}</span>
+                <span>{currentUser.phone}</span>
+                <span>Role: {currentUser.role || 'customer'}</span>
+              </div>
+              <div className="auth-modal-actions stacked">
+                <button
+                  className="auth-btn btn-register"
+                  onClick={handleLogout}
+                  type="button"
+                >
+                  Đăng xuất
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="auth-modal-desc">
+                Vui lòng đăng nhập tài khoản Smember để xem ưu đãi và thanh toán dễ dàng hơn.
+              </p>
+              <div className="auth-modal-actions">
+                <button
+                  className="auth-btn btn-register"
+                  onClick={() => {
+                    handleCloseAllPopups();
+                    goRegister();
+                  }}
+                  type="button"
+                >
+                  Đăng ký
+                </button>
+                <button
+                  className="auth-btn btn-login"
+                  onClick={() => {
+                    handleCloseAllPopups();
+                    goLogin();
+                  }}
+                  type="button"
+                >
+                  Đăng nhập
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -314,7 +314,8 @@ export async function fetchApiJson(path, params = {}, signal) {
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload.ok === false) {
-    throw new Error(payload.error || `API request failed: ${response.status}`);
+    const message = payload.message || payload.error?.message || payload.error;
+    throw new Error(message || `API request failed: ${response.status}`);
   }
 
   return payload;
