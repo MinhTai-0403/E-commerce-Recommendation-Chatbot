@@ -1,9 +1,12 @@
+import { iphone17ProMaxDetail } from './iphone17ProMaxDetail';
+
 const djiPocketMediaBase = 'https://cdn2.cellphones.com.vn/x/media/catalog/product/m/a';
 
 // Shape này cố ý bám sát document MongoDB sau này:
 // _id của MongoDB có thể đi kèm, nhưng frontend luôn có fallback id/slug/sku ổn định.
 // Admin chỉ cần CRUD các mảng media, variants, colors, specifications, articleSections.
 export const productDetails = [
+  iphone17ProMaxDetail,
   {
     id: 'prod_dji_osmo_pocket_3_creator_combo',
     sku: 'may-quay-chong-rung-dji-osmo-pocket-3-advanced-4k',

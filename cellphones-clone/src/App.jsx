@@ -167,9 +167,10 @@ function ProductRoute({ slug }) {
     findProductDetailByPathname(window.location.pathname)
   ), []);
   const { product, loading, error } = useApiProductDetail(slug, fallbackProduct);
+  const resolvedProduct = fallbackProduct?.preferLocalDetail ? fallbackProduct : product;
 
-  if (product) {
-    return <ProductDetail product={product} />;
+  if (resolvedProduct) {
+    return <ProductDetail product={resolvedProduct} />;
   }
 
   return (

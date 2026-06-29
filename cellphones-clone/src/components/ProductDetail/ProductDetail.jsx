@@ -63,6 +63,12 @@ function ArticleSection({ section }) {
         <p key={paragraph}>{paragraph}</p>
       ))}
 
+      {section.list?.length > 0 && (
+        <ul className="pdp-article-list">
+          {section.list.map((item) => <li key={item}>{item}</li>)}
+        </ul>
+      )}
+
       {section.table && (
         <div className="pdp-article-table-wrap">
           <table className="pdp-article-table">
@@ -84,6 +90,92 @@ function ArticleSection({ section }) {
 
       {section.image && (
         <img className="pdp-article-image" src={section.image} alt={section.imageAlt || section.heading} loading="lazy" />
+      )}
+    </section>
+  );
+}
+
+function OfferListCard({ title, items = [], className = '' }) {
+  if (!items.length) return null;
+
+  return (
+    <section className={`pdp-offer-card ${className}`}>
+      <h2>{title}</h2>
+      <div className="pdp-offer-list">
+        {items.map((item, index) => (
+          <div className="pdp-offer-item" key={item.id || item.title}>
+            <span className="pdp-offer-icon">{index + 1}</span>
+            <div>
+              <strong>{item.title}</strong>
+              <p>{item.description}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function NewsListCard({ news = [] }) {
+  if (!news.length) return null;
+
+  return (
+    <section className="pdp-news-card">
+      <h2>Tin tức về sản phẩm</h2>
+      <div className="pdp-news-list">
+        {news.map((item) => (
+          <a href={item.href || '#'} key={item.id} className="pdp-news-item">
+            <span>{item.title}</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </a>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ReviewSummaryCard({ summary, productName }) {
+  if (!summary) return null;
+
+  const total = Number(summary.total || 0);
+
+  return (
+    <section className="pdp-review-card" id="pdp-reviews">
+      <h2>Đánh giá &amp; nhận xét {productName}</h2>
+      <div className="pdp-review-overview">
+        <div className="pdp-review-score">
+          <strong>{summary.rating?.toFixed ? summary.rating.toFixed(1) : summary.rating || 5}</strong>
+          <RatingStars rating={summary.rating || 5} />
+          <span>{total} đánh giá</span>
+        </div>
+        <div className="pdp-review-bars">
+          {summary.distribution?.map((row) => {
+            const percent = total ? Math.round((row.count / total) * 100) : 0;
+            return (
+              <div className="pdp-review-bar-row" key={row.stars}>
+                <span>{row.stars} sao</span>
+                <div><i style={{ width: `${percent}%` }} /></div>
+                <span>{row.count}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      <button type="button" className="pdp-review-action">Đánh giá ngay</button>
+      {summary.samples?.length > 0 && (
+        <div className="pdp-review-samples">
+          {summary.samples.map((item) => (
+            <article key={item.id} className="pdp-review-sample">
+              <div>
+                <strong>{item.author}</strong>
+                <RatingStars rating={item.rating || 5} />
+              </div>
+              <p>{item.content}</p>
+            </article>
+          ))}
+        </div>
       )}
     </section>
   );
@@ -137,6 +229,8 @@ export default function ProductDetail({ product }) {
         </section>
 
         <div className="pdp-top-layout">
+          <div className="pdp-main-column">
+            <div className="pdp-primary-row">
           <section className="pdp-gallery-card">
             <div className="pdp-main-media">
               {activeMedia?.type === 'video' ? (
@@ -189,6 +283,30 @@ export default function ProductDetail({ product }) {
             </div>
             {saving > 0 && <p className="pdp-saving">Tiết kiệm {formatPrice(saving)} so với giá niêm yết</p>}
 
+            {product.priceBenefits?.length > 0 && (
+              <div className="pdp-member-benefits">
+                {product.priceBenefits.map((item) => (
+                  <div className="pdp-member-benefit" key={item.id}>
+                    <span>{item.label}</span>
+                    <strong>{item.value}</strong>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {product.stockNote && (
+              <div className="pdp-stock-note">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+                <span>{product.stockNote}</span>
+              </div>
+            )}
+
+            {product.shortNotice && (
+              <div className="pdp-short-notice">{product.shortNotice}</div>
+            )}
+
             {product.variants?.length > 0 && (
               <div className="pdp-option-group">
                 <h2>Phiên bản</h2>
@@ -232,6 +350,12 @@ export default function ProductDetail({ product }) {
               ))}
             </div>
 
+            <OfferListCard
+              title="Đặc quyền khi mua sản phẩm tại CellphoneS"
+              items={product.privileges}
+              className="pdp-privilege-card"
+            />
+
             <div className="pdp-action-stack">
               <button type="button" className="pdp-primary-action">
                 {product.statusLabel === 'Đặt trước' ? 'ĐẶT TRƯỚC NGAY' : 'MUA NGAY'}
@@ -240,6 +364,7 @@ export default function ProductDetail({ product }) {
               <button type="button" className="pdp-secondary-action">Thêm vào giỏ hàng</button>
             </div>
           </section>
+            </div>
 
           {product.relatedProducts?.length > 0 && (
             <section className="pdp-related-card" aria-labelledby="pdp-related-heading">
@@ -254,6 +379,7 @@ export default function ProductDetail({ product }) {
               </div>
             </section>
           )}
+          </div>
 
           <aside className="pdp-side-column">
             <section className="pdp-policy-card">
@@ -273,12 +399,18 @@ export default function ProductDetail({ product }) {
               ))}
             </section>
 
+            <OfferListCard
+              title="Ưu đãi thanh toán"
+              items={product.paymentOffers}
+              className="pdp-payment-card"
+            />
+
             <section className="pdp-spec-card" id="pdp-specifications">
               <div className="pdp-card-heading">
                 <h2>Thông số kỹ thuật</h2>
                 <a href="#pdp-spec-full">Xem tất cả</a>
               </div>
-              {product.specifications?.slice(0, 4).map((group) => (
+              {product.specifications?.map((group) => (
                 <div className="pdp-spec-group" key={group.id}>
                   <h3>{group.groupName}</h3>
                   {group.rows.map((row) => (
@@ -290,22 +422,27 @@ export default function ProductDetail({ product }) {
                 </div>
               ))}
             </section>
+
+            <NewsListCard news={product.news} />
           </aside>
         </div>
 
         <div className="pdp-lower-layout">
           <section className="pdp-article-card" id="pdp-article">
-            <h2>Đặc điểm nổi bật</h2>
+            <h2>{product.articleTitle || 'Đặc điểm nổi bật'}</h2>
             {product.articleSections?.map((section) => (
               <ArticleSection key={section.id} section={section} />
             ))}
           </section>
 
-          <aside className="pdp-qa-card" id="pdp-qa">
+          <aside className="pdp-lower-side">
+            <ReviewSummaryCard summary={product.reviewSummary} productName={product.name} />
+
+            <section className="pdp-qa-card" id="pdp-qa">
             <h2>Hỏi và đáp</h2>
             <div className="pdp-question-box">
               <img src="https://cdn2.cellphones.com.vn/insecure/rs:fill:160:0/q:90/plain/https://cellphones.com.vn/media/wysiwyg/ant-hello-2025.png" alt="CellphoneS hỗ trợ" />
-              <p>Hãy đặt câu hỏi cho chúng tôi, CellphoneS sẽ phản hồi trong vòng 1 giờ.</p>
+              <p>Xin mời để lại câu hỏi, CellphoneS sẽ trả lời trong 1h.</p>
               <button type="button">Gửi câu hỏi</button>
             </div>
             {product.faqs?.map((faq) => (
@@ -314,6 +451,7 @@ export default function ProductDetail({ product }) {
                 <p>{faq.answer}</p>
               </details>
             ))}
+            </section>
           </aside>
         </div>
       </div>
