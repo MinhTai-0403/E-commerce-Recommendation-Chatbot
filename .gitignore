@@ -13,3 +13,21 @@ logs/
 *.pt
 *.pth
 *.ckpt
+
+# Frontend dependencies and build files
+**/node_modules/
+**/dist/
+**/build/
+
+# Generated AI data and index files
+multimodal-chatbox/index/
+multimodal-chatbox/data/products/_downloaded/
+
+# Environment and Python cache
+.env
+**/.venv/
+**/__pycache__/
+*.pyc
+
+# Test folder
+test/
