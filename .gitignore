@@ -10,3 +10,11 @@ __pycache__/
 *.pt
 *.pth
 *.ckpt
+# Frontend dependencies and build files
+**/node_modules/
+**/dist/
+**/build/
+multimodal-chatbox/index/
+multimodal-chatbox/data/products/_downloaded/
+
+

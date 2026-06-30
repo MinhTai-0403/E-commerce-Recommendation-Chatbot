@@ -1,0 +1,210 @@
+/* ===== HOT TREND ===== */
+.hot-trend { margin-top: 24px; }
+
+.hot-trend-wrapper {
+  background: #f0f7ff; /* light blue background */
+  border: 2px solid #4a90ff;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+}
+
+/* Header */
+.hot-trend-header {
+  display: flex;
+  align-items: flex-end;
+  border-bottom: 2px solid #3b82f6;
+  padding-top: 0;
+}
+
+.hot-trend-tabs-wrapper {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+
+.hot-trend-tabs {
+  display: flex;
+  gap: 0;
+  width: 100%;
+}
+
+.hot-trend-tab-btn {
+  height: 62px;
+  padding: 6px 24px;
+  border: none;
+  background: transparent;
+  font-size: 18px;
+  font-weight: 800;
+  color: #1689eb;
+  text-transform: uppercase;
+  cursor: pointer;
+  position: relative;
+  transition: all var(--transition-fast);
+  flex: 1;
+  background: #fff;
+  border-radius: 12px 12px 0 0;
+}
+
+.hot-trend-tab-btn img {
+  width: auto;
+  max-width: 100%;
+  height: 50px;
+  margin: 0 auto;
+  object-fit: contain;
+}
+
+.hot-trend-tab-btn:hover {
+  color: #3b82f6;
+}
+
+.hot-trend-tab-btn.active {
+  color: #3b82f6;
+  background: #eef6ff;
+}
+
+/* Content Area */
+.hot-trend-content {
+  padding: 20px 20px 18px;
+}
+
+/* Category Filters */
+.hot-trend-category-filters {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 3px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.ht-cat-filter {
+  height: 32px;
+  padding: 5px 16px;
+  border: 1px solid #ccc;
+  background: white;
+  border-radius: 20px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.ht-cat-filter:hover {
+  border-color: #3b82f6;
+  color: #3b82f6;
+}
+
+.ht-cat-filter.active {
+  border-color: #3b82f6;
+  color: #3b82f6;
+  background: #eff6ff;
+}
+
+/* Sub Filters */
+.hot-trend-sub-filters-container {
+  display: flex;
+  align-items: center;
+  position: relative;
+  margin-bottom: 20px;
+  background: white;
+  border-radius: 8px;
+  height: 44px;
+  padding: 4px 5px;
+}
+
+.hot-trend-sub-filters {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scroll-behavior: smooth;
+  scrollbar-width: none; /* Firefox */
+  padding-right: 30px;
+}
+
+.hot-trend-sub-filters::-webkit-scrollbar {
+  display: none; /* Chrome */
+}
+
+.ht-sub-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid #eee;
+  background: white;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+}
+
+.ht-sub-filter:hover {
+  background: #f5f5f5;
+}
+
+.ht-sub-filter.active {
+  background: #eff6ff;
+  border-color: #3b82f6;
+  color: #3b82f6;
+}
+
+.ht-sub-filter-icon {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+}
+
+.ht-sub-filter-next {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 30px;
+  height: 100%;
+  background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,1) 30%);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 10px;
+  cursor: pointer;
+  color: #666;
+}
+
+/* Products */
+.hot-trend-products {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  padding-bottom: 10px;
+}
+
+.hot-trend-products::-webkit-scrollbar {
+  height: 6px;
+}
+
+.hot-trend-products::-webkit-scrollbar-thumb {
+  background: #ccc;
+  border-radius: 4px;
+}
+
+.ht-product-wrapper {
+  min-width: 215px;
+  scroll-snap-align: start;
+}
+
+@media (max-width: 640px) {
+  .hot-trend { margin-top: 12px; }
+  .hot-trend-tab-btn { height: 48px; padding: 4px 6px; }
+  .hot-trend-tab-btn img { height: 38px; }
+  .hot-trend-content { padding: 10px; }
+  .hot-trend-category-filters { justify-content: flex-start; flex-wrap: nowrap; overflow-x: auto; gap: 7px; }
+  .ht-cat-filter { padding: 5px 11px; font-size: 11px; white-space: nowrap; }
+  .hot-trend-sub-filters-container { margin-bottom: 10px; }
+  .ht-sub-filter-icon { width: 28px; height: 28px; }
+  .ht-product-wrapper { min-width: 166px; }
+}

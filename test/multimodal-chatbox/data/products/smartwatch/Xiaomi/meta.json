@@ -1,0 +1,113 @@
+[
+  {
+    "id": "Vòng đeo tay thông minh Xiaomi Mi Band 10",
+    "name": "Vòng Đeo Tay Thông Minh Xiaomi Mi Band 10",
+    "brand": "Xiaomi",
+    "category": "Smart Watch",
+    "price": 1660000,
+    "currency": "VND",
+    "description": "Vòng đeo tay thông minh Xiaomi Mi Band 10 gốm trắng sở hữu màn hình hiển thị AMOLED thế hệ mới, kích thước 1,72 inch sắc nét và độ sáng lên đến 1500 nit. Với trọng lượng chỉ 23,05g cùng chất liệu khung gốm, thiết bị mang đến trải nghiệm đeo nhẹ nhàng. Ngoài ra, dung lượng pin 233mAh còn giúp thiết bị duy trì hoạt động liền mạch lên đến 21 ngày.",
+    "specs": {
+      "Công nghệ màn hình": "AMOLED",
+      "Kích thước màn hình": "1.74 inches",
+      "Đường kính mặt": "135-210mm",
+      "Tiện ích sức khoẻ": "Chế độ luyện tập, Theo dõi giấc ngủ, Đo nhịp tim, Đo lượng oxy trong máu, Đo mức độ stress, Đo VO2 max (Đo lượng tiêu thụ oxy tối đa), Theo dõi chu kỳ, Bài tập thở",
+      "Tương thích": "Android 8.0 trở lên \n iOS 14.0 trở lên",
+      "Thời lượng pin": "Ở chế độ sử dụng thông thường: 21 ngày \n Ở chế độ AOD: 9 ngày \n Ở chế độ sử dụng cường độ cao: 8 ngày"
+    },
+    "image": "Vòng đeo tay thông minh Xiaomi Mi Band 10.png"
+  },
+  {
+    "id": "Vòng đeo tay thông minh Xiaomi Mi Band 8",
+    "name": "Vòng Đeo Tay Thông Minh Xiaomi Mi Band 8",
+    "brand": "Xiaomi",
+    "category": "Smart Watch",
+    "price": 680000,
+    "currency": "VND",
+    "description": "Vòng đeo tay thông minh Xiaomi Mi Band 8 được trang bị màn hình AMOLED 1.62 inch cùng tần số quét 60Hz, màn hình Always On Display cùng khả năng điều chỉnh độ sáng tự động. Đồng hồ được trang bị khả năng kháng nước 5ATM cùng viên pin cho thời gian sử dụng tới 16 ngày. Mi Band 8 sở hữu khả năng theo dõi nhiều chỉ số sức khỏe như đo nhịp tim, chỉ số giấc ngủ và hỗ trợ tập luyện tới 150 môn thể thao.",
+    "specs": {
+      "Công nghệ màn hình": "AMOLED",
+      "Kích thước màn hình": "1.62 inches",
+      "Đường kính mặt": "13-21cm",
+      "Tiện ích sức khoẻ": "Chế độ luyện tập, Đo nhịp tim, Đo lượng oxy trong máu, Đếm bước chân, Tính calo tiêu thụ, Đo mức độ stress, Đo VO2 max (Đo lượng tiêu thụ oxy tối đa)",
+      "Tương thích": "Android 6.0 trở lên \n iOS10",
+      "Thời lượng pin": "16 ngày"
+    },
+    "image": "Vòng đeo tay thông minh Xiaomi Mi Band 8.png"
+  },
+  {
+    "id": "Vòng đeo tay thông minh Xiaomi Mi Band 9 Pro",
+    "name": "Vòng Đeo Tay Thông Minh Xiaomi Mi Band 9 Pro",
+    "brand": "Xiaomi",
+    "category": "Smart Watch",
+    "price": 1860000,
+    "currency": "VND",
+    "description": "Vòng đeo tay thông minh Xiaomi Mi Band 9 Pro sở hữu màn hình AMOLED 1,74 inch độ sáng đến 1.200 nits, mang lại trải nghiệm hiển thị tuyệt vời ngay dưới ánh sáng mạnh. Thiết kế khung hợp kim nhôm cao cấp giúp sản phẩm đồng hồ xiaomi này vừa nhẹ (24.5g chưa bao gồm dây đeo) vừa bền bỉ, đảm bảo cảm giác thoải mái khi mang suốt cả ngày. Ngoài ra, thời lượng pin của thiết bị còn lên đến 21 ngày chỉ với một lần sạc, lý tưởng cho người dùng yêu thích sự tiện lợi và bền bỉ.",
+    "specs": {
+      "Công nghệ màn hình": "AMOLED \n Độ sáng tối đa 1200 nits",
+      "Kích thước màn hình": "1.74 inches",
+      "Kính thước cổ tay phù hợp": "Từ 13.5 - 20.5cm",
+      "Tiện ích sức khoẻ": "Chế độ luyện tập, Theo dõi giấc ngủ, Đo nhịp tim, Đo lượng oxy trong máu, Đo mức độ stress, Theo dõi chu kỳ, Bài tập thở",
+      "Tương thích": "Android 8.0 trở lên \n iOS12 trở lên",
+      "Thời lượng pin": "Chế độ bình thường: 21 ngày \n Chế độ AOD: 10 ngày \n Chế độ tải nặng: 8 ngày"
+    },
+    "image": "Vòng đeo tay thông minh Xiaomi Mi Band 9 Pro.png"
+  },
+  {
+    "id": "Đồng hồ thông minh Xiaomi Redmi Watch 5 Active",
+    "name": "Đồng Hồ Thông Minh Xiaomi Redmi Watch 5 Active",
+    "brand": "Xiaomi",
+    "category": "Smart Watch",
+    "price": 880000,
+    "currency": "VND",
+    "description": "Đồng hồ Xiaomi Redmi Watch 5 Active là một trong những mẫu đồng hồ thông minh của Xiaomi với màn hình LCD có kích thước 2 inch. Đồng hồ sở hữu màn hình có độ phân giải 360 x 385 pixels ấn tượng. Redmi Watch 5 Active có thiết kế thể thao, với vỏ đồng hồ nhẹ nhàng và dây đeo được làm từ silicon để tạo cảm giác thoải mái khi đeo.",
+    "specs": {
+      "Công nghệ màn hình": "LCD",
+      "Kích thước màn hình": "2.0 inches",
+      "Đường kính mặt": "49.1mm",
+      "Nghe, gọi": "Nghe gọi qua Bluetooth",
+      "Tiện ích sức khoẻ": "Chế độ luyện tập, Theo dõi giấc ngủ, Đo nhịp tim, Đo lượng oxy trong máu, Đếm bước chân, Đo mức độ stress",
+      "Tương thích": "Android 6.0 trở lên \n iOS11 trở lên",
+      "Thời lượng pin": "18 ngày sử dụng liên tục (không có AOD)"
+    },
+    "image": "Đồng hồ thông minh Xiaomi Redmi Watch 5 Active.png"
+  },
+  {
+    "id": "Đồng hồ thông minh Xiaomi Redmi Watch 5 Lite",
+    "name": "Đồng Hồ Thông Minh Xiaomi Redmi Watch 5 Lite",
+    "brand": "Xiaomi",
+    "category": "Smart Watch",
+    "price": 1270000,
+    "currency": "VND",
+    "description": "Đồng hồ Xiaomi Redmi Watch 5 Lite sở hữu màn hình AMOLED 1.96 inch sắc nét, mang lại trải nghiệm hiển thị rõ ràng ở nhiều đièu kiện ánh sáng. Với dung lượng pin lớn có thể lên đến 18 ngày chỉ sau một lần sạc, phù hợp cho người dùng có nhu cầu sử dụng dài ngày. Thêm vào đó, sản phẩm đồng hồ này còn được ưu ái sở hữu khả năng chống nước 5ATM và tính năng nghe gọi Bluetooth giúp nâng cao trải nghiệm sử dụng.",
+    "specs": {
+      "Công nghệ màn hình": "AMOLED",
+      "Kích thước màn hình": "1.96 inches",
+      "Đường kính mặt": "48.2mm",
+      "Nghe, gọi": "Nghe gọi qua Bluetooth",
+      "Tiện ích sức khoẻ": "Chế độ luyện tập, Theo dõi giấc ngủ, Đo nhịp tim, Đo lượng oxy trong máu, Đếm bước chân, Đo mức độ stress, Cảnh báo nhịp tim bất thường, Theo dõi chu kỳ",
+      "Tương thích": "Android 6.0 trở lên \n iOS11 trở lên",
+      "Thời lượng pin": "18 ngày sử dụng liên tục (không có AOD)"
+    },
+    "image": "Đồng hồ thông minh Xiaomi Redmi Watch 5 Lite.png"
+  },
+  {
+    "id": "Đồng hồ thông minh Xiaomi Watch S4",
+    "name": "Đồng Hồ Thông Minh Xiaomi Watch S4",
+    "brand": "Xiaomi",
+    "category": "Smart Watch",
+    "price": 3620000,
+    "currency": "VND",
+    "description": "Xiaomi Watch S4 nổi bật với màn hình AMOLED 1.43 inch sắc nét, độ sáng lên đến 2000 nits cùng thời lượng pin ấn tượng lên đến 15 ngày. Với Xiaomi HyperOS 2, mang lại trải nghiệm điều khiển thông minh. Đồng hồ trang bị các tính năng sức khỏe như đo nhịp tim, theo dõi giấc ngủ, bài tập hít thở giúp người dùng chăm sóc sức khỏe toàn diện.",
+    "specs": {
+      "Công nghệ màn hình": "AMOLED \n Độ sáng tối đa 2200 nits",
+      "Kích thước màn hình": "1.43 inches",
+      "Kính thước cổ tay phù hợp": "Từ 14 - 21cm",
+      "Nghe, gọi": "Nghe gọi qua Bluetooth",
+      "Tiện ích sức khoẻ": "Theo dõi giấc ngủ, Đo nhịp tim, Đo lượng oxy trong máu, Đo mức độ stress, Phát hiện té ngã, Cảnh báo nhịp tim bất thường, Theo dõi chu kỳ, Bài tập thở",
+      "Tương thích": "Android 8.0 hoặc iOS 12.0 trở lên",
+      "Thời lượng pin": "Sử dụng thông thường: 15 ngày"
+    },
+    "image": "Đồng hồ thông minh Xiaomi Watch S4.png"
+  }
+]
