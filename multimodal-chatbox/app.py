@@ -1,5 +1,11 @@
-from flask import Flask, render_template, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
+
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    def load_dotenv(*args, **kwargs):
+        return False
 import os, json, uuid, re
 import numpy as np
 import faiss
@@ -26,17 +32,29 @@ except ImportError:
 
 
 # ----------------------------
-# Flask cấu hình
+# Flask cấu hình + đường dẫn dự án
 # ----------------------------
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+PROJECT_ROOT = os.path.abspath(os.path.join(BASE_DIR, ".."))
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
+load_dotenv(os.path.join(BASE_DIR, ".env"), override=True)
+
+DEFAULT_FRONTEND_DIST = os.path.abspath(
+    os.path.join(BASE_DIR, "..", "cellphones-clone", "dist")
+)
+FRONTEND_DIST = os.path.abspath(
+    os.getenv("FRONTEND_DIST", DEFAULT_FRONTEND_DIST)
+)
+
 app = Flask(__name__)
-app.config["UPLOAD_FOLDER"] = os.path.join("data", "products")
+app.config["UPLOAD_FOLDER"] = os.path.join(BASE_DIR, "data", "products")
 os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
 
 
 # =========================
 # GEMINI CONFIG - SDK CŨ
 # =========================
-GEMINI_API_KEY = "AIzaSyCSiMIcBXJw9TdsDFCYflH7XTQKAtQt1mc"
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 
 client = None
 
@@ -46,8 +64,9 @@ try:
     else:
         genai.configure(api_key=GEMINI_API_KEY)
 
-        MODEL_MAIN = genai.GenerativeModel("gemini-2.5-flash-lite")
-        MODEL_TRANSLATION = genai.GenerativeModel("gemini-2.5-flash-lite")
+        GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
+        MODEL_MAIN = genai.GenerativeModel(GEMINI_MODEL)
+        MODEL_TRANSLATION = genai.GenerativeModel(GEMINI_MODEL)
 
         client = True
         print("Đã khởi tạo Gemini 2.5 Flash lite thành công.")
@@ -86,7 +105,6 @@ def ask_gemini(prompt):
 # ----------------------------
 # Dữ liệu & Mô hình
 # ----------------------------
-BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 FAISS_DIR = os.path.join(BASE_DIR, "index")
 os.makedirs(FAISS_DIR, exist_ok=True)
 
@@ -542,15 +560,21 @@ def get_suggestion_questions(message):
 # ----------------------------
 # Routes
 # ----------------------------
-@app.route("/")
-def index():
-    return render_template("index.html")
+@app.route("/api/health")
+def health():
+    return jsonify({
+        "status": "ok",
+        "chatbot": client is not None,
+        "faiss": faiss_index is not None,
+        "products": len(products),
+    })
 
 
 @app.route("/chat", methods=["POST"])
 def chat():
 
-    user_message = request.json.get("message", "").strip()
+    payload = request.get_json(silent=True) or {}
+    user_message = str(payload.get("message", "")).strip()
 
     print("ĐÃ VÀO ROUTE /chat MỚI")
     print("USER:", user_message)
@@ -710,18 +734,21 @@ def upload():
 
     for p in recs:
         text = (
-        p.get("name", "").lower() + " " +
-        p.get("category", "").lower() + " " +
-        p.get("description", "").lower()
-    )
+            p.get("name", "").lower() + " " +
+            p.get("category", "").lower() + " " +
+            p.get("description", "").lower()
+        )
 
-    if any(cat in text for cat in allowed_categories):
-        valid_recs.append(p)
+        if any(cat in text for cat in allowed_categories):
+            valid_recs.append(p)
 
     if not valid_recs:
         return jsonify({
-        "reply": "🛒 Mình chỉ hỗ trợ tìm sản phẩm có trong cửa hàng như laptop, tai nghe, tablet và đồng hồ thông minh."
-    })
+            "reply": (
+                "🛒 Mình chỉ hỗ trợ tìm sản phẩm có trong cửa hàng như "
+                "laptop, tai nghe, tablet và đồng hồ thông minh."
+            )
+        })
 
     recs = valid_recs
 
@@ -886,6 +913,31 @@ Dưới đây là một số sản phẩm phù hợp:
 @app.route("/data/products/<path:filename>")
 def serve_product_image(filename):
     return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
+
+
+# ----------------------------
+# Phục vụ giao diện React/Vite đã build
+# ----------------------------
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
+def serve_frontend(path):
+    index_file = os.path.join(FRONTEND_DIST, "index.html")
+
+    if not os.path.isfile(index_file):
+        return jsonify({
+            "error": "Chưa tìm thấy giao diện frontend đã build.",
+            "frontend_dist": FRONTEND_DIST,
+            "instruction": (
+                "Mở terminal trong cellphones-clone, chạy npm install và "
+                "npm run build, sau đó chạy lại app.py."
+            ),
+        }), 503
+
+    requested_file = os.path.join(FRONTEND_DIST, path)
+    if path and os.path.isfile(requested_file):
+        return send_from_directory(FRONTEND_DIST, path)
+
+    return send_from_directory(FRONTEND_DIST, "index.html")
 
 
 # ----------------------------
