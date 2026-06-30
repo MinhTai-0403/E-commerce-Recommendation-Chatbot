@@ -18,3 +18,16 @@ multimodal-chatbox/index/
 multimodal-chatbox/data/products/_downloaded/
 
 test/
+
+@'
+
+# Generated AI index files
+**/index/embeddings.npy
+**/index/faiss_index.index
+**/index/products.json
+
+# Environment
+.env
+**/.venv/
+**/__pycache__/
+'@ | Add-Content .gitignore
