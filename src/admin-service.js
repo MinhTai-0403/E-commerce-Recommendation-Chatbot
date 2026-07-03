@@ -701,16 +701,15 @@ async function handleDeleteQuestion({ req, res, pathParts, sendJson, sendError, 
   const { questions } = await getCollections(getDb);
   const result = await questions.findOneAndDelete({ _id: new ObjectId(questionId) });
 
-  if (!result) {
+  if (!result?.value) {
     sendError(res, 404, "Không tìm thấy câu hỏi.");
     return;
   }
 
   sendJson(res, 200, {
     ok: true,
-    deleted: normalizeAdminQuestion(result),
+    deleted: normalizeAdminQuestion(result.value),
   });
-}
 
 function buildUserQuery(searchParams) {
   const q = searchParams.get("q");
