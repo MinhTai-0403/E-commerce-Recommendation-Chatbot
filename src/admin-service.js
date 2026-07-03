@@ -582,16 +582,15 @@ async function handleUpdateReview({ req, res, pathParts, parseJsonBody, sendJson
     { returnDocument: "after" }
   );
 
-  if (!result) {
+  if (!result?.value) {
     sendError(res, 404, "Không tìm thấy đánh giá.");
     return;
   }
 
   sendJson(res, 200, {
     ok: true,
-    data: normalizeAdminReview(result),
+    data: normalizeAdminReview(result.value),
   });
-}
 
 async function handleDeleteReview({ req, res, pathParts, sendJson, sendError, getDb }) {
   if (!isAdminAuthorized(req)) {
