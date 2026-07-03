@@ -348,6 +348,7 @@ async function handleListOrders({ req, res, sendJson, sendError, getDb }) {
       .limit(limit)
       .toArray(),
     orders.aggregate([
+      { $match: query },
       { $group: { _id: "$status", count: { $sum: 1 } } },
     ]).toArray(),
   ]);
