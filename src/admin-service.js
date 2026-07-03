@@ -675,16 +675,15 @@ async function handleUpdateQuestion({ req, res, pathParts, parseJsonBody, sendJs
     { returnDocument: "after" }
   );
 
-  if (!result) {
+  if (!result?.value) {
     sendError(res, 404, "Không tìm thấy câu hỏi.");
     return;
   }
 
   sendJson(res, 200, {
     ok: true,
-    data: normalizeAdminQuestion(result),
+    data: normalizeAdminQuestion(result.value),
   });
-}
 
 async function handleDeleteQuestion({ req, res, pathParts, sendJson, sendError, getDb }) {
   if (!isAdminAuthorized(req)) {
