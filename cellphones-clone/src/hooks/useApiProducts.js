@@ -3,6 +3,7 @@ import {
   fetchProductDetail,
   fetchProducts,
   fetchRelatedProducts,
+  isUsableApiProductDetail,
   isSellableApiProduct,
   toProductCardProduct,
   toProductDetailProduct,
@@ -18,6 +19,101 @@ const normalizeProductList = (items, displayLimit) => {
   return typeof displayLimit === 'number'
     ? normalized.slice(0, displayLimit)
     : normalized;
+};
+
+const normalizeText = (value = '') => (
+  String(value)
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+);
+
+const isGeneratedDescriptionArticle = (product) => {
+  if (!product || product.articleHtml) return false;
+  const sections = Array.isArray(product.articleSections) ? product.articleSections : [];
+  if (sections.length === 0) return true;
+
+  return sections.every((section) => (
+    section.id === 'mo-ta-san-pham' ||
+    normalizeText(section.heading).startsWith('danh gia ')
+  ));
+};
+
+const hasItems = (value) => Array.isArray(value) && value.length > 0;
+
+const shouldKeepFallbackDetail = (apiProduct, fallbackProduct) => (
+  Boolean(fallbackProduct?.preferLocalDetail) ||
+  String(apiProduct?.detailCompleteness || '').includes('summary-fallback')
+);
+
+const mergeApiProductWithFallback = (apiProduct, fallbackProduct) => {
+  if (!fallbackProduct) return apiProduct;
+
+  const merged = { ...fallbackProduct, ...apiProduct };
+  const keepFallbackDetail = shouldKeepFallbackDetail(apiProduct, fallbackProduct);
+  const fallbackHasArticle = Boolean(
+    fallbackProduct.articleHtml ||
+    fallbackProduct.articleSections?.length
+  );
+
+  [
+    'categoryTrail',
+    'media',
+    'variants',
+    'colors',
+    'priceBenefits',
+    'promotions',
+    'privileges',
+    'policies',
+    'paymentOffers',
+    'specifications',
+    'articleSections',
+    'faqs',
+    'news',
+  ].forEach((field) => {
+    if (hasItems(fallbackProduct[field]) && (keepFallbackDetail || !hasItems(apiProduct[field]))) {
+      merged[field] = fallbackProduct[field];
+    }
+  });
+
+  if (fallbackHasArticle && (keepFallbackDetail || isGeneratedDescriptionArticle(apiProduct))) {
+    merged.articleHtml = fallbackProduct.articleHtml || '';
+    merged.articleTitle = fallbackProduct.articleTitle || apiProduct.articleTitle;
+    merged.articleSections = fallbackProduct.articleSections || [];
+  }
+
+  if (
+    fallbackProduct.highlights?.length &&
+    (!apiProduct.highlights?.length || keepFallbackDetail)
+  ) {
+    merged.highlights = fallbackProduct.highlights;
+  }
+
+  [
+    'stockNote',
+    'shortNotice',
+    'statusLabel',
+  ].forEach((field) => {
+    if (fallbackProduct[field] && (keepFallbackDetail || !apiProduct[field])) {
+      merged[field] = fallbackProduct[field];
+    }
+  });
+
+  if (fallbackProduct.preferLocalDetail) {
+    merged.name = fallbackProduct.name || merged.name;
+    merged.brand = fallbackProduct.brand || merged.brand;
+    merged.brandKey = fallbackProduct.brandKey || merged.brandKey;
+    merged.category = fallbackProduct.category || merged.category;
+    merged.rating = fallbackProduct.rating ?? merged.rating;
+    merged.ratingCount = fallbackProduct.ratingCount ?? merged.ratingCount;
+    merged.reviewSummary = fallbackProduct.reviewSummary || merged.reviewSummary;
+    merged.currentPrice = fallbackProduct.currentPrice || merged.currentPrice;
+    merged.originalPrice = fallbackProduct.originalPrice || merged.originalPrice;
+  }
+
+  return merged;
 };
 
 export function useApiProducts(query, fallbackProducts = []) {
@@ -48,27 +144,35 @@ export function useApiProducts(query, fallbackProducts = []) {
       ...parsedQuery,
       limit: fetchLimit,
     };
+    const canUseFallback = !parsedQuery.brand && !parsedQuery.segment && !parsedQuery.q;
 
     delete requestQuery.displayLimit;
     delete requestQuery.fetchLimit;
+
+    setState({
+      products: canUseFallback ? fallback : [],
+      loading: true,
+      error: null,
+      source: canUseFallback ? 'fallback' : 'api',
+    });
 
     fetchProducts(requestQuery, controller.signal)
       .then((items) => {
         const products = normalizeProductList(items, displayLimit);
         setState({
-          products: products.length ? products : fallback,
+          products: products.length ? products : (canUseFallback ? fallback : []),
           loading: false,
           error: null,
-          source: products.length ? 'api' : 'fallback',
+          source: products.length ? 'api' : (canUseFallback ? 'fallback' : 'api'),
         });
       })
       .catch((error) => {
         if (error.name === 'AbortError') return;
         setState({
-          products: fallback,
+          products: canUseFallback ? fallback : [],
           loading: false,
           error,
-          source: 'fallback',
+          source: canUseFallback ? 'fallback' : 'api',
         });
       });
 
@@ -99,8 +203,15 @@ export function useApiProductDetail(slug, fallbackProduct = null) {
     ])
       .then(([product, related]) => {
         const relatedProducts = normalizeProductList(related, 8);
+        const apiProduct = toProductDetailProduct(product, relatedProducts);
+        const mergedProduct = mergeApiProductWithFallback(apiProduct, fallbackProduct);
+
+        if (!isUsableApiProductDetail(mergedProduct)) {
+          throw new Error('API product detail is missing core data.');
+        }
+
         setState({
-          product: toProductDetailProduct(product, relatedProducts),
+          product: mergedProduct,
           loading: false,
           error: null,
           source: 'api',

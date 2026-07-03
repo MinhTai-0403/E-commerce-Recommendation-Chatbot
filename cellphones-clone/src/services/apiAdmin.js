@@ -60,6 +60,24 @@ export async function deleteAdminUser(userId) {
   return payload.deleted;
 }
 
+export async function fetchAdminOrders(params = {}) {
+  const payload = await adminRequest('/api/admin/orders', {
+    params: {
+      limit: 50,
+      ...params,
+    },
+  });
+  return payload;
+}
+
+export async function updateAdminOrder(orderId, body) {
+  const payload = await adminRequest(`/api/admin/orders/${encodeURIComponent(orderId)}`, {
+    method: 'PATCH',
+    body,
+  });
+  return payload.data;
+}
+
 export async function fetchAdminProducts(params = {}) {
   const payload = await adminRequest('/api/products', {
     params: {
@@ -90,6 +108,56 @@ export async function updateAdminProduct(identifier, body) {
 
 export async function deleteAdminProduct(identifier) {
   const payload = await adminRequest(`/api/products/${encodeURIComponent(identifier)}`, {
+    method: 'DELETE',
+  });
+  return payload.deleted;
+}
+
+export async function fetchAdminReviews(params = {}) {
+  const payload = await adminRequest('/api/admin/reviews', {
+    params: {
+      limit: 50,
+      ...params,
+    },
+  });
+  return payload;
+}
+
+export async function updateAdminReview(reviewId, body) {
+  const payload = await adminRequest(`/api/admin/reviews/${encodeURIComponent(reviewId)}`, {
+    method: 'PATCH',
+    body,
+  });
+  return payload.data;
+}
+
+export async function deleteAdminReview(reviewId) {
+  const payload = await adminRequest(`/api/admin/reviews/${encodeURIComponent(reviewId)}`, {
+    method: 'DELETE',
+  });
+  return payload.deleted;
+}
+
+export async function fetchAdminQuestions(params = {}) {
+  const payload = await adminRequest('/api/admin/questions', {
+    params: {
+      limit: 50,
+      ...params,
+    },
+  });
+  return payload;
+}
+
+export async function updateAdminQuestion(questionId, body) {
+  const payload = await adminRequest(`/api/admin/questions/${encodeURIComponent(questionId)}`, {
+    method: 'PATCH',
+    body,
+  });
+  return payload.data;
+}
+
+export async function deleteAdminQuestion(questionId) {
+  const payload = await adminRequest(`/api/admin/questions/${encodeURIComponent(questionId)}`, {
     method: 'DELETE',
   });
   return payload.deleted;

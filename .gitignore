@@ -9,6 +9,7 @@ __pycache__/
 node_modules/
 npm-debug.log*
 logs/
+data/product-details/
 
 *.pt
 *.pth

@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import './HotTrend.css';
 import { hotTrendCategoryFilters, hotTrendSubFilters, hotTrendProducts } from '../../data/mockData';
-import ProductCard from '../ProductCard/ProductCard';
+import ProductCard, { ProductCardSkeleton } from '../ProductCard/ProductCard';
 
-export default function HotTrend({ products = hotTrendProducts }) {
+export default function HotTrend({ products = hotTrendProducts, loading = false }) {
   const [activeMainTab, setActiveMainTab] = useState('deal');
   const [activeCategory, setActiveCategory] = useState('phu-kien');
   const [activeSubFilter, setActiveSubFilter] = useState('all');
@@ -67,12 +67,20 @@ export default function HotTrend({ products = hotTrendProducts }) {
             </div>
 
             {/* Products */}
-            <div className="hot-trend-products">
-              {products.map((product) => (
-                <div key={product.id} className="ht-product-wrapper">
-                  <ProductCard product={product} />
-                </div>
-              ))}
+            <div className="hot-trend-products" aria-busy={loading}>
+              {loading ? (
+                Array.from({ length: 8 }).map((_, index) => (
+                  <div key={`hot-trend-skeleton-${index}`} className="ht-product-wrapper">
+                    <ProductCardSkeleton />
+                  </div>
+                ))
+              ) : (
+                products.map((product) => (
+                  <div key={product.id} className="ht-product-wrapper">
+                    <ProductCard product={product} />
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>

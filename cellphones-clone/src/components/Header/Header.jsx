@@ -110,7 +110,14 @@ export function TopBar() {
   );
 }
 
-export function MainHeader({ activePopup, setActivePopup, selectedLocation, currentUser }) {
+export function MainHeader({
+  activePopup,
+  setActivePopup,
+  selectedLocation,
+  currentUser,
+  cartCount = 0,
+  onGoCart,
+}) {
   const accountLabel = currentUser?.fullName
     ? currentUser.fullName.split(" ").slice(-2).join(" ")
     : currentUser?.email || "Đăng nhập";
@@ -219,8 +226,22 @@ export function MainHeader({ activePopup, setActivePopup, selectedLocation, curr
 
         {/* Right Actions */}
         <div className="header-actions">
-          <a href="#" className="header-cart-btn" id="header-cart-btn">
+          <a
+            href="/cart"
+            className="header-cart-btn"
+            id="header-cart-btn"
+            onClick={(event) => {
+              if (!onGoCart) return;
+              event.preventDefault();
+              onGoCart();
+            }}
+          >
             <span className="header-action-label">Giỏ hàng</span>
+            {cartCount > 0 && (
+              <span className="header-cart-count" aria-label={`${cartCount} sản phẩm trong giỏ`}>
+                {cartCount > 99 ? '99+' : cartCount}
+              </span>
+            )}
             <svg
               width="20"
               height="20"

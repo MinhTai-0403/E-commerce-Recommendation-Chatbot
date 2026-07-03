@@ -2,11 +2,19 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   createAdminProduct,
   deleteAdminProduct,
+  deleteAdminQuestion,
+  deleteAdminReview,
   deleteAdminUser,
+  fetchAdminOrders,
   fetchAdminProducts,
+  fetchAdminQuestions,
+  fetchAdminReviews,
   fetchAdminSummary,
   fetchAdminUsers,
+  updateAdminOrder,
   updateAdminProduct,
+  updateAdminQuestion,
+  updateAdminReview,
   updateAdminUser,
 } from '../../services/apiAdmin';
 import { clearAuthSession } from '../../services/apiAuth';
@@ -23,6 +31,23 @@ const emptyProductForm = {
   primaryImage: '',
   description: '',
 };
+
+const orderStatusOptions = [
+  { value: 'pending', label: 'Chờ xác nhận' },
+  { value: 'confirmed', label: 'Đã xác nhận' },
+  { value: 'packing', label: 'Đang chuẩn bị hàng' },
+  { value: 'ready_for_pickup', label: 'Sẵn sàng nhận tại cửa hàng' },
+  { value: 'shipping', label: 'Đang giao hàng' },
+  { value: 'completed', label: 'Đã hoàn tất' },
+  { value: 'cancelled', label: 'Đã hủy' },
+];
+
+const paymentStatusOptions = [
+  { value: 'unpaid', label: 'Chưa thanh toán' },
+  { value: 'paid', label: 'Đã thanh toán' },
+  { value: 'refunded', label: 'Đã hoàn tiền' },
+  { value: 'failed', label: 'Thanh toán lỗi' },
+];
 
 function formatCurrency(value) {
   const price = Number(value);
@@ -101,23 +126,39 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
   const [loading, setLoading] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
   const [summary, setSummary] = useState(null);
+  const [ordersPayload, setOrdersPayload] = useState(null);
   const [productsPayload, setProductsPayload] = useState(null);
   const [usersPayload, setUsersPayload] = useState(null);
+  const [questionsPayload, setQuestionsPayload] = useState(null);
+  const [reviewsPayload, setReviewsPayload] = useState(null);
   const [productSearch, setProductSearch] = useState('');
+  const [orderSearch, setOrderSearch] = useState('');
+  const [orderStatusFilter, setOrderStatusFilter] = useState('all');
+  const [orderNotes, setOrderNotes] = useState({});
   const [userSearch, setUserSearch] = useState('');
+  const [questionSearch, setQuestionSearch] = useState('');
+  const [reviewSearch, setReviewSearch] = useState('');
+  const [questionAnswers, setQuestionAnswers] = useState({});
+  const [reviewReplies, setReviewReplies] = useState({});
   const [productForm, setProductForm] = useState(emptyProductForm);
   const [editingProduct, setEditingProduct] = useState(null);
 
+  const orders = ordersPayload?.data || [];
   const products = productsPayload?.data || [];
   const users = usersPayload?.data || [];
+  const questions = questionsPayload?.data || [];
+  const reviews = reviewsPayload?.data || [];
   const stats = summary?.cards || {};
   const isAdmin = currentUser?.role === 'admin';
   const adminName = currentUser?.fullName || currentUser?.email || currentUser?.username || 'Quản trị viên';
 
   const tabs = useMemo(() => [
     { id: 'dashboard', label: 'Dashboard' },
+    { id: 'orders', label: 'Đơn hàng' },
     { id: 'products', label: 'Sản phẩm' },
     { id: 'users', label: 'Người dùng' },
+    { id: 'questions', label: 'Hỏi đáp' },
+    { id: 'reviews', label: 'Đánh giá' },
   ], []);
 
   useEffect(() => {
@@ -138,6 +179,20 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
           if (!ignore) setSummary(data);
         }
 
+        if (activeTab === 'orders') {
+          const data = await fetchAdminOrders({
+            q: orderSearch.trim(),
+            status: orderStatusFilter,
+            limit: 50,
+          });
+          if (!ignore) {
+            setOrdersPayload(data);
+            setOrderNotes(Object.fromEntries(
+              (data.data || []).map((item) => [item.id, item.adminNote || ''])
+            ));
+          }
+        }
+
         if (activeTab === 'products') {
           const data = await fetchAdminProducts({
             q: productSearch.trim(),
@@ -153,6 +208,32 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
           });
           if (!ignore) setUsersPayload(data);
         }
+
+        if (activeTab === 'questions') {
+          const data = await fetchAdminQuestions({
+            q: questionSearch.trim(),
+            limit: 50,
+          });
+          if (!ignore) {
+            setQuestionsPayload(data);
+            setQuestionAnswers(Object.fromEntries(
+              (data.data || []).map((item) => [item.id, item.answer?.content || ''])
+            ));
+          }
+        }
+
+        if (activeTab === 'reviews') {
+          const data = await fetchAdminReviews({
+            q: reviewSearch.trim(),
+            limit: 50,
+          });
+          if (!ignore) {
+            setReviewsPayload(data);
+            setReviewReplies(Object.fromEntries(
+              (data.data || []).map((item) => [item.id, item.adminReply?.content || ''])
+            ));
+          }
+        }
       } catch (loadError) {
         if (!ignore) setError(loadError.message || 'Không thể tải dữ liệu admin.');
       } finally {
@@ -164,9 +245,62 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
     return () => {
       ignore = true;
     };
-  }, [activeTab, isAdmin, productSearch, refreshTick, userSearch]);
+  }, [activeTab, isAdmin, orderSearch, orderStatusFilter, productSearch, questionSearch, refreshTick, reviewSearch, userSearch]);
 
   const refresh = () => setRefreshTick((value) => value + 1);
+
+  const handleUpdateOrderStatus = async (order, status) => {
+    setLoading(true);
+    setError('');
+    setMessage('');
+
+    try {
+      await updateAdminOrder(order.id || order.orderCode, {
+        status,
+        statusNote: orderNotes[order.id] || '',
+      });
+      setMessage('Đã cập nhật trạng thái đơn hàng.');
+      refresh();
+    } catch (updateError) {
+      setError(updateError.message || 'Không thể cập nhật đơn hàng.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdateOrderPayment = async (order, paymentStatus) => {
+    setLoading(true);
+    setError('');
+    setMessage('');
+
+    try {
+      await updateAdminOrder(order.id || order.orderCode, { paymentStatus });
+      setMessage('Đã cập nhật thanh toán đơn hàng.');
+      refresh();
+    } catch (updateError) {
+      setError(updateError.message || 'Không thể cập nhật thanh toán.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveOrderNote = async (order) => {
+    setLoading(true);
+    setError('');
+    setMessage('');
+
+    try {
+      await updateAdminOrder(order.id || order.orderCode, {
+        adminNote: orderNotes[order.id] || '',
+      });
+      setMessage('Đã lưu ghi chú đơn hàng.');
+      refresh();
+    } catch (updateError) {
+      setError(updateError.message || 'Không thể lưu ghi chú đơn hàng.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const updateProductField = (field, value) => {
     setProductForm((previous) => ({ ...previous, [field]: value }));
@@ -259,6 +393,119 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
       refresh();
     } catch (deleteError) {
       setError(deleteError.message || 'Không thể xóa người dùng.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAnswerQuestion = async (question) => {
+    const answer = (questionAnswers[question.id] || '').trim();
+    if (!answer) {
+      setError('Vui lòng nhập nội dung trả lời.');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    setMessage('');
+
+    try {
+      await updateAdminQuestion(question.id, { answer });
+      setMessage('Đã trả lời câu hỏi.');
+      refresh();
+    } catch (updateError) {
+      setError(updateError.message || 'Không thể trả lời câu hỏi.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdateQuestionStatus = async (question, status) => {
+    setLoading(true);
+    setError('');
+    setMessage('');
+
+    try {
+      await updateAdminQuestion(question.id, { status });
+      setMessage('Đã cập nhật câu hỏi.');
+      refresh();
+    } catch (updateError) {
+      setError(updateError.message || 'Không thể cập nhật câu hỏi.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteQuestion = async (question) => {
+    if (!window.confirm(`Xóa câu hỏi của "${question.authorName || question.email}"?`)) return;
+
+    setLoading(true);
+    setError('');
+
+    try {
+      await deleteAdminQuestion(question.id);
+      setMessage('Đã xóa câu hỏi.');
+      refresh();
+    } catch (deleteError) {
+      setError(deleteError.message || 'Không thể xóa câu hỏi.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReplyReview = async (review) => {
+    const reply = (reviewReplies[review.id] || '').trim();
+    if (!reply) {
+      setError('Vui lòng nhập nội dung phản hồi.');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    setMessage('');
+
+    try {
+      await updateAdminReview(review.id, {
+        reply,
+        status: review.status === 'pending' ? 'approved' : review.status,
+      });
+      setMessage('Đã phản hồi đánh giá.');
+      refresh();
+    } catch (updateError) {
+      setError(updateError.message || 'Không thể phản hồi đánh giá.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdateReviewStatus = async (review, status) => {
+    setLoading(true);
+    setError('');
+    setMessage('');
+
+    try {
+      await updateAdminReview(review.id, { status });
+      setMessage('Đã cập nhật đánh giá.');
+      refresh();
+    } catch (updateError) {
+      setError(updateError.message || 'Không thể cập nhật đánh giá.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteReview = async (review) => {
+    if (!window.confirm(`Xóa đánh giá của "${review.authorName || review.email}"?`)) return;
+
+    setLoading(true);
+    setError('');
+
+    try {
+      await deleteAdminReview(review.id);
+      setMessage('Đã xóa đánh giá.');
+      refresh();
+    } catch (deleteError) {
+      setError(deleteError.message || 'Không thể xóa đánh giá.');
     } finally {
       setLoading(false);
     }
@@ -364,10 +611,15 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
           <section className="admin-section">
             <div className="admin-stat-grid">
               <StatCard label="Tổng sản phẩm" value={stats.totalProducts} />
+              <StatCard label="Tổng đơn hàng" value={stats.totalOrders} tone="green" />
+              <StatCard label="Đơn cần xử lý" value={stats.pendingOrders} tone="orange" />
+              <StatCard label="Đang giao" value={stats.shippingOrders} tone="blue" />
               <StatCard label="Tổng người dùng" value={stats.totalUsers} />
               <StatCard label="User active" value={stats.activeUsers} tone="green" />
               <StatCard label="User bị khóa" value={stats.blockedUsers} tone="orange" />
               <StatCard label="OTP đang chờ" value={stats.pendingOtps} tone="blue" />
+              <StatCard label="Đánh giá" value={stats.totalReviews} tone="green" />
+              <StatCard label="Câu hỏi chờ" value={stats.pendingQuestions} tone="orange" />
             </div>
 
             <div className="admin-two-columns">
@@ -401,6 +653,145 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                   ))}
                   {!summary?.recentProducts?.length && <p className="admin-empty">Chưa có sản phẩm.</p>}
                 </div>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {activeTab === 'orders' && (
+          <section className="admin-section">
+            <div className="admin-card">
+              <div className="admin-card-title-row">
+                <div>
+                  <h2>Quản lý đơn hàng</h2>
+                  <p className="admin-card-subtitle">
+                    Theo dõi đơn từ lúc khách đặt COD đến xác nhận, chuẩn bị hàng, giao hàng và hoàn tất.
+                  </p>
+                </div>
+                <div className="admin-order-filters">
+                  <input
+                    value={orderSearch}
+                    onChange={(event) => setOrderSearch(event.target.value)}
+                    placeholder="Tìm mã đơn, khách, SĐT, sản phẩm..."
+                  />
+                  <select
+                    value={orderStatusFilter}
+                    onChange={(event) => setOrderStatusFilter(event.target.value)}
+                  >
+                    <option value="all">Tất cả trạng thái</option>
+                    {orderStatusOptions.map((status) => (
+                      <option key={status.value} value={status.value}>{status.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="admin-order-status-strip">
+                {orderStatusOptions.map((status) => (
+                  <button
+                    key={status.value}
+                    type="button"
+                    className={orderStatusFilter === status.value ? 'active' : ''}
+                    onClick={() => setOrderStatusFilter(status.value)}
+                  >
+                    <span>{status.label}</span>
+                    <strong>{ordersPayload?.statusCounts?.[status.value] || 0}</strong>
+                  </button>
+                ))}
+              </div>
+
+              <div className="admin-order-list">
+                {orders.map((order) => {
+                  const firstItem = order.items?.[0] || {};
+                  const totalQuantity = order.totals?.quantity || order.items?.reduce((sum, item) => sum + Number(item.quantity || 0), 0) || 0;
+                  const address = order.shippingAddress?.fullAddress
+                    || [
+                      order.shippingAddress?.addressLine,
+                      order.shippingAddress?.ward,
+                      order.shippingAddress?.district,
+                      order.shippingAddress?.province,
+                    ].filter(Boolean).join(', ');
+
+                  return (
+                    <article className="admin-order-row" key={order.id || order.orderCode}>
+                      <div className="admin-order-head">
+                        <div>
+                          <strong>#{order.orderCode}</strong>
+                          <span>{formatDate(order.createdAt)} · {order.shippingChoice?.label || 'COD'}</span>
+                        </div>
+                        <em className={`admin-status ${order.status}`}>{order.statusLabel || order.status}</em>
+                      </div>
+
+                      <div className="admin-order-body">
+                        <img src={firstItem.image || firstItem.thumbnail || firstItem.primaryImage} alt="" />
+                        <div>
+                          <strong>{firstItem.name || 'Đơn hàng CellphoneS'}</strong>
+                          <span>{totalQuantity} sản phẩm · {order.customer?.fullName || 'Khách hàng'} · {order.customer?.phone}</span>
+                          <span>{address || 'Chưa có địa chỉ nhận hàng'}</span>
+                        </div>
+                        <div className="admin-order-money">
+                          <span>Tổng tiền</span>
+                          <strong>{formatCurrency(order.totals?.total || order.totals?.roundedTotal)}</strong>
+                          <small>{order.payment?.methodLabel || 'Thanh toán COD'}</small>
+                        </div>
+                      </div>
+
+                      <div className="admin-order-controls">
+                        <label>
+                          Giai đoạn đơn
+                          <select
+                            value={order.status || 'pending'}
+                            onChange={(event) => handleUpdateOrderStatus(order, event.target.value)}
+                          >
+                            {orderStatusOptions.map((status) => (
+                              <option key={status.value} value={status.value}>{status.label}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          Thanh toán
+                          <select
+                            value={order.paymentStatus || order.payment?.status || 'unpaid'}
+                            onChange={(event) => handleUpdateOrderPayment(order, event.target.value)}
+                          >
+                            {paymentStatusOptions.map((status) => (
+                              <option key={status.value} value={status.value}>{status.label}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="admin-order-note">
+                          Ghi chú admin
+                          <textarea
+                            value={orderNotes[order.id] || ''}
+                            onChange={(event) => setOrderNotes((previous) => ({
+                              ...previous,
+                              [order.id]: event.target.value,
+                            }))}
+                            rows="2"
+                            placeholder="VD: Đã gọi xác nhận, chờ khách phản hồi..."
+                          />
+                        </label>
+                        <button type="button" onClick={() => handleSaveOrderNote(order)}>
+                          Lưu ghi chú
+                        </button>
+                      </div>
+
+                      <div className="admin-order-timeline">
+                        {(order.statusHistory?.length ? order.statusHistory : [{ status: order.status, label: order.statusLabel, changedAt: order.updatedAt }]).map((item, index) => (
+                          <div className="admin-order-timeline-item" key={`${order.id}-${item.status}-${index}`}>
+                            <span />
+                            <div>
+                              <strong>{item.label || item.status}</strong>
+                              <small>{formatDate(item.changedAt)}</small>
+                              {item.note && <p>{item.note}</p>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </article>
+                  );
+                })}
+                {!orders.length && <p className="admin-empty">Chưa có đơn hàng phù hợp.</p>}
               </div>
             </div>
           </section>
@@ -596,6 +987,124 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                   </div>
                 ))}
                 {!users.length && <p className="admin-empty">Chưa có người dùng phù hợp.</p>}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {activeTab === 'questions' && (
+          <section className="admin-section">
+            <div className="admin-card">
+              <div className="admin-card-title-row">
+                <h2>Quản lý hỏi đáp sản phẩm</h2>
+                <div className="admin-search">
+                  <input
+                    value={questionSearch}
+                    onChange={(event) => setQuestionSearch(event.target.value)}
+                    placeholder="Tìm sản phẩm, khách, câu hỏi..."
+                  />
+                </div>
+              </div>
+
+              <div className="admin-interaction-list">
+                {questions.map((question) => (
+                  <article className="admin-interaction-row" key={question.id}>
+                    <div className="admin-interaction-head">
+                      <div>
+                        <strong>{question.productName || question.productSlug}</strong>
+                        <span>{question.authorName || question.email || 'Khách hàng'} · {formatDate(question.createdAt)}</span>
+                      </div>
+                      <em className={`admin-status ${question.status}`}>{question.status}</em>
+                    </div>
+                    <p className="admin-interaction-content">{question.question}</p>
+                    <label className="admin-reply-box">
+                      Trả lời của CellphoneS
+                      <textarea
+                        value={questionAnswers[question.id] || ''}
+                        onChange={(event) => setQuestionAnswers((previous) => ({
+                          ...previous,
+                          [question.id]: event.target.value,
+                        }))}
+                        rows="3"
+                        placeholder="Nhập câu trả lời để hiển thị ngoài trang sản phẩm..."
+                      />
+                    </label>
+                    <div className="admin-row-actions">
+                      <button type="button" onClick={() => handleAnswerQuestion(question)}>
+                        Trả lời
+                      </button>
+                      <button type="button" onClick={() => handleUpdateQuestionStatus(question, 'pending')}>
+                        Chờ
+                      </button>
+                      <button type="button" onClick={() => handleUpdateQuestionStatus(question, 'hidden')}>
+                        Ẩn
+                      </button>
+                      <button type="button" className="danger" onClick={() => handleDeleteQuestion(question)}>
+                        Xóa
+                      </button>
+                    </div>
+                  </article>
+                ))}
+                {!questions.length && <p className="admin-empty">Chưa có câu hỏi phù hợp.</p>}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {activeTab === 'reviews' && (
+          <section className="admin-section">
+            <div className="admin-card">
+              <div className="admin-card-title-row">
+                <h2>Quản lý đánh giá</h2>
+                <div className="admin-search">
+                  <input
+                    value={reviewSearch}
+                    onChange={(event) => setReviewSearch(event.target.value)}
+                    placeholder="Tìm sản phẩm, khách, nội dung..."
+                  />
+                </div>
+              </div>
+
+              <div className="admin-interaction-list">
+                {reviews.map((review) => (
+                  <article className="admin-interaction-row" key={review.id}>
+                    <div className="admin-interaction-head">
+                      <div>
+                        <strong>{review.productName || review.productSlug}</strong>
+                        <span>{review.authorName || review.email || 'Khách hàng'} · {formatDate(review.createdAt)}</span>
+                      </div>
+                      <em className={`admin-status ${review.status}`}>{review.rating}★ · {review.status}</em>
+                    </div>
+                    <p className="admin-interaction-content">{review.content}</p>
+                    <label className="admin-reply-box">
+                      Phản hồi đánh giá
+                      <textarea
+                        value={reviewReplies[review.id] || ''}
+                        onChange={(event) => setReviewReplies((previous) => ({
+                          ...previous,
+                          [review.id]: event.target.value,
+                        }))}
+                        rows="3"
+                        placeholder="Nhập phản hồi của CellphoneS..."
+                      />
+                    </label>
+                    <div className="admin-row-actions">
+                      <button type="button" onClick={() => handleReplyReview(review)}>
+                        Phản hồi
+                      </button>
+                      <button type="button" onClick={() => handleUpdateReviewStatus(review, 'approved')}>
+                        Duyệt
+                      </button>
+                      <button type="button" onClick={() => handleUpdateReviewStatus(review, 'hidden')}>
+                        Ẩn
+                      </button>
+                      <button type="button" className="danger" onClick={() => handleDeleteReview(review)}>
+                        Xóa
+                      </button>
+                    </div>
+                  </article>
+                ))}
+                {!reviews.length && <p className="admin-empty">Chưa có đánh giá phù hợp.</p>}
               </div>
             </div>
           </section>
