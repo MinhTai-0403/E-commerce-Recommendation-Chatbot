@@ -397,16 +397,15 @@ async function handleUpdateOrder({ req, res, pathParts, parseJsonBody, sendJson,
     { returnDocument: "after" }
   );
 
-  if (!result) {
+  if (!result?.value) {
     sendError(res, 404, "Không tìm thấy đơn hàng.");
     return;
   }
 
   sendJson(res, 200, {
     ok: true,
-    data: normalizeAdminOrder(result),
+    data: normalizeAdminOrder(result.value),
   });
-}
 
 function buildInteractionAdminQuery(searchParams, type = "review") {
   const q = searchParams.get("q");
