@@ -201,9 +201,15 @@ async function urlsFromProducts(db, args) {
   const { productsCollection, productDetailsCollection } = getMongoConfig();
   const products = db.collection(productsCollection);
   const details = db.collection(productDetailsCollection);
-  const existingUrls = args.rescrape
-    ? new Set()
-    : new Set((await details.find({}, { projection: { url: 1 } }).toArray()).map((doc) => doc.url));
+  const existingUrls = new Set();
+
+  if (!args.rescrape) {
+    const urlCursor = details.find({}, { projection: { url: 1 } }).batchSize(1000);
+    for await (const doc of urlCursor) {
+      if (doc.url) existingUrls.add(doc.url);
+    }
+  }
+
   const urls = [];
   const cursor = products
     .find(
