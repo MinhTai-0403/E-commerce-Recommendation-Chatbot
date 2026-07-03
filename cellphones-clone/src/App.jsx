@@ -9,6 +9,7 @@ import HomeApplianceCategories from './components/HomeApplianceCategories/HomeAp
 import UsedProducts from './components/UsedProducts/UsedProducts';
 import TechNews from './components/TechNews/TechNews';
 import Footer from './components/Footer/Footer';
+import ChatbotWidget from './components/ChatbotWidget/ChatbotWidget';
 import ProductDetail from './components/ProductDetail/ProductDetail';
 import LoginSmember from './components/LoginSmember/LoginSmember';
 import RegisterSmember from './components/RegisterSmember/RegisterSmember';
@@ -27,14 +28,42 @@ import { useApiProductDetail, useApiProducts } from './hooks/useApiProducts';
 import { clearAuthSession, fetchCurrentSmember, getStoredUser } from './services/apiAuth';
 
 const homeProductQueries = {
-  hotTrend: { category: 'Phụ kiện', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
-  phones: { category: 'Điện thoại', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
-  laptops: { category: 'Laptop', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
-  audio: { category: 'Âm thanh', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
-  watches: { category: 'Đồng hồ thông minh', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
-  tvs: { category: 'Tivi', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
-  appliances: { category: 'Đồ gia dụng', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
-  coldAppliances: { q: 'Tủ lạnh', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
+  hotTrend: { category: 'Phụ kiện', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
+  phones: { category: 'Điện thoại', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
+  laptops: { category: 'Laptop', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
+  audio: { category: 'Âm thanh', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
+  watches: { category: 'Đồng hồ thông minh', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
+  tvs: { category: 'Tivi', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
+  appliances: { category: 'Đồ gia dụng', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
+  coldAppliances: { include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
+};
+
+const homeTabQueries = {
+  phones: [
+    { category: 'Điện thoại' },
+    { category: 'Máy tính bảng' },
+  ],
+  laptops: [
+    { category: 'Laptop' },
+    { category: null, segment: 'monitor' },
+    { category: null, segment: 'pc-gaming' },
+  ],
+  audio: [
+    { category: 'Âm thanh' },
+    { category: 'Tai nghe' },
+    { category: 'Loa' },
+  ],
+  coldAppliances: [
+    { q: 'Tủ lạnh' },
+    { category: 'Máy giặt' },
+    { category: 'Máy sấy quần áo' },
+    { category: 'Điều hòa - Máy lạnh' },
+  ],
+  appliances: [
+    { category: 'Đồ gia dụng' },
+    { q: 'Robot hút bụi' },
+    { q: 'Máy massage' },
+  ],
 };
 
 const authRouteMap = {
@@ -162,15 +191,21 @@ function FloatingActions() {
   );
 }
 
-function ProductRoute({ slug }) {
+function ProductRoute({ slug, currentUser, onGoLogin }) {
   const fallbackProduct = useMemo(() => (
     findProductDetailByPathname(window.location.pathname)
   ), []);
-  const { product, loading, error } = useApiProductDetail(slug, fallbackProduct);
-  const resolvedProduct = fallbackProduct?.preferLocalDetail ? fallbackProduct : product;
+  const { product, loading, error, source } = useApiProductDetail(slug, fallbackProduct);
+  const resolvedProduct = source === 'api' ? product : (fallbackProduct || product);
 
   if (resolvedProduct) {
-    return <ProductDetail product={resolvedProduct} />;
+    return (
+      <ProductDetail
+        product={resolvedProduct}
+        currentUser={currentUser}
+        onGoLogin={onGoLogin}
+      />
+    );
   }
 
   return (
@@ -192,13 +227,6 @@ function ProductRoute({ slug }) {
 
 function HomePage({ currentUser, onGoLogin, onGoRegister }) {
   const hotTrend = useApiProducts(homeProductQueries.hotTrend, hotTrendProducts);
-  const phones = useApiProducts(homeProductQueries.phones, phoneProducts);
-  const laptops = useApiProducts(homeProductQueries.laptops, laptopProducts);
-  const audio = useApiProducts(homeProductQueries.audio, audioProducts);
-  const watches = useApiProducts(homeProductQueries.watches, watchProducts);
-  const tvs = useApiProducts(homeProductQueries.tvs, tvProducts);
-  const appliances = useApiProducts(homeProductQueries.appliances, applianceProducts);
-  const coldAppliances = useApiProducts(homeProductQueries.coldAppliances, applianceProducts);
 
   return (
     <>
@@ -208,14 +236,16 @@ function HomePage({ currentUser, onGoLogin, onGoRegister }) {
         onGoRegister={onGoRegister}
       />
 
-      <HotTrend products={hotTrend.products} />
+      <HotTrend products={hotTrend.products} loading={hotTrend.loading} />
 
       <CategoryBlock
         title="Điện thoại nổi bật"
         tabs={['Điện thoại', 'Máy tính bảng']}
         subCategories={phoneSubCategories}
         filters={phoneBrandFilters}
-        products={phones.products}
+        productQuery={homeProductQueries.phones}
+        tabQueries={homeTabQueries.phones}
+        products={phoneProducts}
         campaignBanner="https://cdn2.cellphones.com.vn/insecure/rs:fill:321:795/q:100/plain/https://media-asset.cellphones.com.vn/page_configs/01KTXD3MF8YTC80J2CHM6AVC9F.jpg"
       />
 
@@ -225,7 +255,9 @@ function HomePage({ currentUser, onGoLogin, onGoRegister }) {
         title="Laptop"
         tabs={['Laptop', 'Màn hình', 'PC Gaming']}
         filters={laptopBrandFilters}
-        products={laptops.products}
+        productQuery={homeProductQueries.laptops}
+        tabQueries={homeTabQueries.laptops}
+        products={laptopProducts}
         campaignBanner="https://cdn2.cellphones.com.vn/insecure/rs:fill:321:795/q:100/plain/https://media-asset.cellphones.com.vn/page_configs/01KVFPDXRAJ749QHYHQKZFR23W.png"
       />
 
@@ -233,7 +265,9 @@ function HomePage({ currentUser, onGoLogin, onGoRegister }) {
         title="Âm thanh"
         tabs={['Âm thanh', 'Tai nghe', 'Loa']}
         filters={audioBrandFilters}
-        products={audio.products}
+        productQuery={homeProductQueries.audio}
+        tabQueries={homeTabQueries.audio}
+        products={audioProducts}
       />
 
       <CategoryBlock
@@ -246,7 +280,8 @@ function HomePage({ currentUser, onGoLogin, onGoRegister }) {
           { id: 'garmin', name: 'Garmin' },
           { id: 'xiaomi', name: 'Xiaomi' },
         ]}
-        products={watches.products}
+        productQuery={homeProductQueries.watches}
+        products={watchProducts}
         campaignBanner="https://cdn2.cellphones.com.vn/insecure/rs:fill:321:960/q:100/plain/https://media-asset.cellphones.com.vn/page_configs/01KTQYDCRMJX3BWCYNHPYJ6FRC.png"
       />
 
@@ -254,7 +289,8 @@ function HomePage({ currentUser, onGoLogin, onGoRegister }) {
         title="Tivi"
         tabs={['Tivi']}
         filters={tvBrandFilters}
-        products={tvs.products}
+        productQuery={homeProductQueries.tvs}
+        products={tvProducts}
         campaignBanner="https://cdn2.cellphones.com.vn/insecure/rs:fill:321:960/q:100/plain/https://media-asset.cellphones.com.vn/page_configs/01KT8ANYD04XX6K1VH0NZ387P7.png"
       />
 
@@ -264,7 +300,9 @@ function HomePage({ currentUser, onGoLogin, onGoRegister }) {
         title="Tủ lạnh - Tủ đông"
         tabs={['Tủ lạnh - Tủ đông', 'Máy giặt', 'Máy sấy quần áo', 'Điều hòa - Máy lạnh']}
         filters={applianceBrandFilters}
-        products={coldAppliances.products}
+        productQuery={homeProductQueries.coldAppliances}
+        tabQueries={homeTabQueries.coldAppliances}
+        products={applianceProducts}
         campaignBanner="https://cdn2.cellphones.com.vn/insecure/rs:fill:321:960/q:100/plain/https://media-asset.cellphones.com.vn/page_configs/01KDCX8QQYKQ4AX3BEHBRA5B9W.png"
       />
 
@@ -272,7 +310,9 @@ function HomePage({ currentUser, onGoLogin, onGoRegister }) {
         title="Đồ gia dụng"
         tabs={['Đồ gia dụng', 'Chăm sóc nhà', 'Chăm sóc sức khỏe']}
         filters={applianceBrandFilters}
-        products={appliances.products}
+        productQuery={homeProductQueries.appliances}
+        tabQueries={homeTabQueries.appliances}
+        products={applianceProducts}
         campaignBanner="https://cdn2.cellphones.com.vn/insecure/rs:fill:321:960/q:100/plain/https://media-asset.cellphones.com.vn/page_configs/01KDCX8QQYKQ4AX3BEHBRA5B9W.png"
       />
 
@@ -419,7 +459,11 @@ function App() {
 
       <main className={`main-content ${isProductRoute ? 'product-detail-main' : ''}`}>
         {isProductRoute ? (
-          <ProductRoute slug={productSlug} />
+          <ProductRoute
+            slug={productSlug}
+            currentUser={currentUser}
+            onGoLogin={goLogin}
+          />
         ) : (
           <HomePage
             currentUser={currentUser}
@@ -432,6 +476,16 @@ function App() {
       <Footer />
 
       <FloatingActions />
+
+      <ChatbotWidget
+        userName={
+          currentUser?.fullName
+          || currentUser?.displayName
+          || currentUser?.name
+          || currentUser?.username
+          || ''
+        }
+      />
 
       {activePopup === 'location' && (
         <div className="location-modal-box">

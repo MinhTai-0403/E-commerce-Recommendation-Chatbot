@@ -294,7 +294,7 @@ function ChatbotWidget({ userName = '' }) {
               onClick={() => setIsOpen(false)}
               aria-label="Đóng chatbot"
             >
-              ×
+              
             </button>
           </header>
 

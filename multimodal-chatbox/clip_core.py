@@ -11,6 +11,8 @@ import os
 # 3. Pillow: pip install Pillow
 # ******************************************************************************
 
+# CLIP is loaded lazily on the first image upload.
+
 # ----------------------------
 #  Cấu hình và Tải mô hình CLIP
 # ----------------------------
@@ -44,7 +46,6 @@ def load_clip_model():
             preprocess = None
 
 # Tải mô hình khi module được import lần đầu
-load_clip_model()
 
 
 # ----------------------------
@@ -62,6 +63,9 @@ def get_clip_embedding(image_path: str) -> np.ndarray:
         np.ndarray: Vector embedding 512 chiều, dtype='float32'.
         (Trả về mảng ngẫu nhiên nếu mô hình không tải được)
     """
+    if model is None or preprocess is None:
+        load_clip_model()
+
     if model is None or preprocess is None:
         print(" Mô hình CLIP chưa được tải. Trả về embedding ngẫu nhiên.")
         # Trả về embedding ngẫu nhiên 512D (dùng cho mục đích thử nghiệm)
