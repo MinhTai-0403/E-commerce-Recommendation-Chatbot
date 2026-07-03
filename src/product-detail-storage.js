@@ -34,8 +34,14 @@ function detailRelativePath(detail = {}) {
 }
 
 function detailAbsolutePath(relativePath) {
+  const root = getDetailStorageRoot();
   const cleanRelative = String(relativePath || "").replace(/[\\/]+/g, path.sep);
-  return path.resolve(getDetailStorageRoot(), cleanRelative);
+  const resolved = path.resolve(root, cleanRelative);
+  const rel = path.relative(root, resolved);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw new Error("Invalid storage path.");
+  }
+  return resolved;
 }
 
 function stripMongoOnlyFields(detail = {}) {
