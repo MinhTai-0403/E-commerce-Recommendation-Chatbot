@@ -608,16 +608,15 @@ async function handleDeleteReview({ req, res, pathParts, sendJson, sendError, ge
   const { reviews } = await getCollections(getDb);
   const result = await reviews.findOneAndDelete({ _id: new ObjectId(reviewId) });
 
-  if (!result) {
+  if (!result?.value) {
     sendError(res, 404, "Không tìm thấy đánh giá.");
     return;
   }
 
   sendJson(res, 200, {
     ok: true,
-    deleted: normalizeAdminReview(result),
+    deleted: normalizeAdminReview(result.value),
   });
-}
 
 async function handleListQuestions({ req, res, sendJson, sendError, getDb }) {
   if (!isAdminAuthorized(req)) {
