@@ -272,51 +272,6 @@ function NewsListCard({ news = [] }) {
   );
 }
 
-function LegacyReviewSummaryCard({ summary, productName }) {
-  if (!summary) return null;
-
-  const total = Number(summary.total || 0);
-
-  return (
-    <section className="pdp-review-card" id="pdp-reviews">
-      <h2>Đánh giá &amp; nhận xét {productName}</h2>
-      <div className="pdp-review-overview">
-        <div className="pdp-review-score">
-          <strong>{summary.rating?.toFixed ? summary.rating.toFixed(1) : summary.rating || 5}</strong>
-          <RatingStars rating={summary.rating || 5} />
-          <span>{total} đánh giá</span>
-        </div>
-        <div className="pdp-review-bars">
-          {summary.distribution?.map((row) => {
-            const percent = total ? Math.round((row.count / total) * 100) : 0;
-            return (
-              <div className="pdp-review-bar-row" key={row.stars}>
-                <span>{row.stars} sao</span>
-                <div><i style={{ width: `${percent}%` }} /></div>
-                <span>{row.count}</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-      <button type="button" className="pdp-review-action">Đánh giá ngay</button>
-      {summary.samples?.length > 0 && (
-        <div className="pdp-review-samples">
-          {summary.samples.map((item) => (
-            <article key={item.id} className="pdp-review-sample">
-              <div>
-                <strong>{item.author}</strong>
-                <RatingStars rating={item.rating || 5} />
-              </div>
-              <p>{item.content}</p>
-            </article>
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
 function createDefaultReviewSummary(rating = 5, total = 0) {
   return {
     rating: Number(rating || 5),
@@ -490,11 +445,21 @@ export default function ProductDetail({ product, currentUser, onGoLogin, onAddTo
   const productQuestions = questionsPayload?.data || [];
 
   useEffect(() => {
+    let mounted = true;
     const nextColor = product.colors?.find((color) => color.active) || product.colors?.[0] || null;
     const nextMedia = nextColor ? findMediaForColor(nextColor, mediaItems) : null;
 
-    setSelectedColorId(nextColor ? getOptionId(nextColor, 'color') : '');
-    setActiveMediaId(nextMedia?.id || mediaItems[0]?.id);
+    queueMicrotask(() => {
+      if (!mounted) return;
+      setSelectedColorId(nextColor ? getOptionId(nextColor, 'color') : '');
+      setActiveMediaId(nextMedia?.id || mediaItems[0]?.id);
+    });
+
+    return () => {
+      mounted = false;
+    };
+    // mediaItems is derived from product.media/image; these product-level keys are enough to reset gallery.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productIdentifier, product.colors, product.media]);
 
   const refreshInteractions = () => {
@@ -528,22 +493,32 @@ export default function ProductDetail({ product, currentUser, onGoLogin, onAddTo
   }, [productIdentifier]);
 
   useEffect(() => {
-    if (!isInteractionLoggedIn) {
-      setShowReviewForm(false);
-      setShowQuestionForm(false);
-      return;
-    }
+    let mounted = true;
 
-    setReviewForm((previous) => ({
-      ...previous,
-      authorName: previous.authorName || accountDisplayName,
-      contact: previous.contact || accountContact,
-    }));
-    setQuestionForm((previous) => ({
-      ...previous,
-      authorName: previous.authorName || accountDisplayName,
-      contact: previous.contact || accountContact,
-    }));
+    queueMicrotask(() => {
+      if (!mounted) return;
+
+      if (!isInteractionLoggedIn) {
+        setShowReviewForm(false);
+        setShowQuestionForm(false);
+        return;
+      }
+
+      setReviewForm((previous) => ({
+        ...previous,
+        authorName: previous.authorName || accountDisplayName,
+        contact: previous.contact || accountContact,
+      }));
+      setQuestionForm((previous) => ({
+        ...previous,
+        authorName: previous.authorName || accountDisplayName,
+        contact: previous.contact || accountContact,
+      }));
+    });
+
+    return () => {
+      mounted = false;
+    };
   }, [accountContact, accountDisplayName, isInteractionLoggedIn]);
 
   const updateReviewField = (field, value) => {

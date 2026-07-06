@@ -139,7 +139,7 @@ export function useApiProducts(query, fallbackProducts = []) {
       100,
     );
     const requestQuery = {
-      sort: 'price_desc',
+      sort: 'latest',
       inStock: true,
       ...parsedQuery,
       limit: fetchLimit,
@@ -149,11 +149,14 @@ export function useApiProducts(query, fallbackProducts = []) {
     delete requestQuery.displayLimit;
     delete requestQuery.fetchLimit;
 
-    setState({
-      products: canUseFallback ? fallback : [],
-      loading: true,
-      error: null,
-      source: canUseFallback ? 'fallback' : 'api',
+    queueMicrotask(() => {
+      if (controller.signal.aborted) return;
+      setState({
+        products: canUseFallback ? fallback : [],
+        loading: true,
+        error: null,
+        source: canUseFallback ? 'fallback' : 'api',
+      });
     });
 
     fetchProducts(requestQuery, controller.signal)

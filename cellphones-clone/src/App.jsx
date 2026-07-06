@@ -31,14 +31,14 @@ import useCart from './hooks/useCart';
 import { clearAuthSession, fetchCurrentSmember, getStoredUser } from './services/apiAuth';
 
 const homeProductQueries = {
-  hotTrend: { category: 'Phụ kiện', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
-  phones: { category: 'Điện thoại', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
-  laptops: { category: 'Laptop', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
-  audio: { category: 'Âm thanh', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
-  watches: { category: 'Đồng hồ thông minh', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
-  tvs: { category: 'Tivi', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
-  appliances: { category: 'Đồ gia dụng', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
-  coldAppliances: { include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
+  hotTrend: { category: 'Phụ kiện', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
+  phones: { category: 'Điện thoại', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
+  laptops: { category: 'Laptop', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
+  audio: { category: 'Âm thanh', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
+  watches: { category: 'Đồng hồ thông minh', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
+  tvs: { category: 'Tivi', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
+  appliances: { category: 'Đồ gia dụng', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
+  coldAppliances: { include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
 };
 
 const homeTabQueries = {

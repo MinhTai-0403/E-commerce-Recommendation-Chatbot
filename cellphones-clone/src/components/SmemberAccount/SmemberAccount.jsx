@@ -114,7 +114,7 @@ function OrderCard({ order }) {
   );
 }
 
-export default function SmemberAccount({ currentUser, onGoLogin, onGoHome, onLogout }) {
+export default function SmemberAccount({ currentUser, onGoLogin, onLogout }) {
   const [activeTab, setActiveTab] = useState('overview');
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -124,8 +124,11 @@ export default function SmemberAccount({ currentUser, onGoLogin, onGoHome, onLog
     if (!currentUser) return undefined;
 
     const controller = new AbortController();
-    setLoading(true);
-    setError('');
+    queueMicrotask(() => {
+      if (controller.signal.aborted) return;
+      setLoading(true);
+      setError('');
+    });
 
     fetchMyOrders(controller.signal)
       .then(setOrders)
