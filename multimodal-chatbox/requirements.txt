@@ -1,4 +1,9 @@
-flask
+Flask>=3.0,<4
+flask-cors>=4.0,<7
+python-dotenv>=1.0,<2
+pymongo[srv]>=4.7,<5
+PyJWT>=2.8,<3
+Werkzeug>=3.0,<4
 numpy
 faiss-cpu
 ultralytics

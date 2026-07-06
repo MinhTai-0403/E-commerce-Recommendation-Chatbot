@@ -407,6 +407,7 @@ async function handleUpdateOrder({ req, res, pathParts, parseJsonBody, sendJson,
     ok: true,
     data: normalizeAdminOrder(result.value),
   });
+}
 
 function buildInteractionAdminQuery(searchParams, type = "review") {
   const q = searchParams.get("q");
@@ -591,6 +592,7 @@ async function handleUpdateReview({ req, res, pathParts, parseJsonBody, sendJson
     ok: true,
     data: normalizeAdminReview(result.value),
   });
+}
 
 async function handleDeleteReview({ req, res, pathParts, sendJson, sendError, getDb }) {
   if (!isAdminAuthorized(req)) {
@@ -616,6 +618,7 @@ async function handleDeleteReview({ req, res, pathParts, sendJson, sendError, ge
     ok: true,
     deleted: normalizeAdminReview(result.value),
   });
+}
 
 async function handleListQuestions({ req, res, sendJson, sendError, getDb }) {
   if (!isAdminAuthorized(req)) {
@@ -682,6 +685,7 @@ async function handleUpdateQuestion({ req, res, pathParts, parseJsonBody, sendJs
     ok: true,
     data: normalizeAdminQuestion(result.value),
   });
+}
 
 async function handleDeleteQuestion({ req, res, pathParts, sendJson, sendError, getDb }) {
   if (!isAdminAuthorized(req)) {
@@ -707,6 +711,7 @@ async function handleDeleteQuestion({ req, res, pathParts, sendJson, sendError, 
     ok: true,
     deleted: normalizeAdminQuestion(result.value),
   });
+}
 
 function buildUserQuery(searchParams) {
   const q = searchParams.get("q");

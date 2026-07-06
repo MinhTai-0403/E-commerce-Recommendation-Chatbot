@@ -14,9 +14,6 @@ import ProductDetail from './components/ProductDetail/ProductDetail';
 import LoginSmember from './components/LoginSmember/LoginSmember';
 import RegisterSmember from './components/RegisterSmember/RegisterSmember';
 import AdminDashboard from './components/AdminDashboard/AdminDashboard';
-import CartPage from './components/CartPage/CartPage';
-import CheckoutPage from './components/CheckoutPage/CheckoutPage';
-import SmemberAccount from './components/SmemberAccount/SmemberAccount';
 import { extractProductSlug, findProductDetailByPathname } from './data/productCatalog';
 import {
   phoneSubCategories, phoneBrandFilters, phoneProducts,
@@ -28,18 +25,17 @@ import {
   hotTrendProducts,
 } from './data/mockData';
 import { useApiProductDetail, useApiProducts } from './hooks/useApiProducts';
-import useCart from './hooks/useCart';
 import { clearAuthSession, fetchCurrentSmember, getStoredUser } from './services/apiAuth';
 
 const homeProductQueries = {
-  hotTrend: { category: 'Phụ kiện', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
-  phones: { category: 'Điện thoại', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
-  laptops: { category: 'Laptop', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
-  audio: { category: 'Âm thanh', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
-  watches: { category: 'Đồng hồ thông minh', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
-  tvs: { category: 'Tivi', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
-  appliances: { category: 'Đồ gia dụng', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
-  coldAppliances: { include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
+  hotTrend: { category: 'Phụ kiện', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
+  phones: { category: 'Điện thoại', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
+  laptops: { category: 'Laptop', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
+  audio: { category: 'Âm thanh', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
+  watches: { category: 'Đồng hồ thông minh', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
+  tvs: { category: 'Tivi', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
+  appliances: { category: 'Đồ gia dụng', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
+  coldAppliances: { include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
 };
 
 const homeTabQueries = {
@@ -85,9 +81,6 @@ const getAuthPageFromPathname = (pathname = '') => {
 const getAppPageFromPathname = (pathname = '') => {
   const cleaned = pathname.replace(/\/+$/g, '') || '/';
   if (cleaned === '/admin') return 'admin';
-  if (cleaned === '/cart' || cleaned === '/gio-hang') return 'cart';
-  if (cleaned === '/checkout' || cleaned === '/thanh-toan') return 'checkout';
-  if (cleaned === '/smember' || cleaned === '/smember/profile' || cleaned === '/smember/account' || cleaned === '/thong-tin-ca-nhan') return 'account';
   return getAuthPageFromPathname(cleaned);
 };
 
@@ -198,7 +191,7 @@ function FloatingActions() {
   );
 }
 
-function ProductRoute({ slug, currentUser, onGoLogin, onAddToCart }) {
+function ProductRoute({ slug, currentUser, onGoLogin }) {
   const fallbackProduct = useMemo(() => (
     findProductDetailByPathname(window.location.pathname)
   ), []);
@@ -211,7 +204,6 @@ function ProductRoute({ slug, currentUser, onGoLogin, onAddToCart }) {
         product={resolvedProduct}
         currentUser={currentUser}
         onGoLogin={onGoLogin}
-        onAddToCart={onAddToCart}
       />
     );
   }
@@ -342,7 +334,6 @@ function App() {
   const [currentUser, setCurrentUser] = useState(() => getStoredUser());
   const [selectedLocation, setSelectedLocation] = useState('Hồ Chí Minh');
   const [locationSearch, setLocationSearch] = useState('');
-  const cartState = useCart(currentUser);
 
   useEffect(() => {
     let ignore = false;
@@ -393,24 +384,6 @@ function App() {
     setCurrentPage('admin');
   };
 
-  const goCart = () => {
-    window.history.pushState(null, '', '/cart');
-    setCurrentPage('cart');
-    handleCloseAllPopups();
-  };
-
-  const goCheckout = () => {
-    window.history.pushState(null, '', '/checkout');
-    setCurrentPage('checkout');
-    handleCloseAllPopups();
-  };
-
-  const goAccount = () => {
-    window.history.pushState(null, '', '/smember');
-    setCurrentPage('account');
-    handleCloseAllPopups();
-  };
-
   const handleAuthSuccess = (user) => {
     if (user) setCurrentUser(user);
     if (user?.role === 'admin') {
@@ -458,93 +431,6 @@ function App() {
     );
   }
 
-  if (currentPage === 'account') {
-    return (
-      <div className="app">
-        <TopBar />
-        <MainHeader
-          activePopup={activePopup}
-          setActivePopup={setActivePopup}
-          selectedLocation={selectedLocation}
-          currentUser={currentUser}
-          cartCount={cartState.count}
-          onGoCart={goCart}
-        />
-        <main className="main-content">
-          <SmemberAccount
-            currentUser={currentUser}
-            onGoLogin={goLogin}
-            onGoHome={goHome}
-            onLogout={handleLogout}
-          />
-        </main>
-        <Footer />
-        <FloatingActions />
-      </div>
-    );
-  }
-
-  if (currentPage === 'cart') {
-    return (
-      <div className="app">
-        <TopBar />
-        <MainHeader
-          activePopup={activePopup}
-          setActivePopup={setActivePopup}
-          selectedLocation={selectedLocation}
-          currentUser={currentUser}
-          cartCount={cartState.count}
-          onGoCart={goCart}
-        />
-        <main className="main-content">
-          <CartPage
-            cart={cartState.cart}
-            loading={cartState.loading}
-            error={cartState.error}
-            currentUser={currentUser}
-            onUpdateItem={cartState.updateItem}
-            onRemoveItem={cartState.removeItem}
-            onClearCart={cartState.clearCart}
-            onGoHome={goHome}
-            onGoLogin={goLogin}
-            onGoCheckout={goCheckout}
-          />
-        </main>
-        <Footer />
-        <FloatingActions />
-      </div>
-    );
-  }
-
-  if (currentPage === 'checkout') {
-    return (
-      <div className="app">
-        <TopBar />
-        <MainHeader
-          activePopup={activePopup}
-          setActivePopup={setActivePopup}
-          selectedLocation={selectedLocation}
-          currentUser={currentUser}
-          cartCount={cartState.count}
-          onGoCart={goCart}
-        />
-        <main className="main-content">
-          <CheckoutPage
-            cart={cartState.cart}
-            currentUser={currentUser}
-            selectedLocation={selectedLocation}
-            onGoCart={goCart}
-            onGoHome={goHome}
-            onGoAccount={goAccount}
-            onClearCart={cartState.clearCart}
-          />
-        </main>
-        <Footer />
-        <FloatingActions />
-      </div>
-    );
-  }
-
   return (
     <div className="app">
       {activePopup === 'category' && (
@@ -569,8 +455,6 @@ function App() {
         setActivePopup={setActivePopup}
         selectedLocation={selectedLocation}
         currentUser={currentUser}
-        cartCount={cartState.count}
-        onGoCart={goCart}
       />
 
       <main className={`main-content ${isProductRoute ? 'product-detail-main' : ''}`}>
@@ -579,7 +463,6 @@ function App() {
             slug={productSlug}
             currentUser={currentUser}
             onGoLogin={goLogin}
-            onAddToCart={cartState.addItem}
           />
         ) : (
           <HomePage
@@ -691,13 +574,6 @@ function App() {
                 <span>Role: {currentUser.role || 'customer'}</span>
               </div>
               <div className="auth-modal-actions stacked">
-                <button
-                  className="auth-btn btn-login"
-                  onClick={goAccount}
-                  type="button"
-                >
-                  Thông tin cá nhân
-                </button>
                 <button
                   className="auth-btn btn-register"
                   onClick={handleLogout}
