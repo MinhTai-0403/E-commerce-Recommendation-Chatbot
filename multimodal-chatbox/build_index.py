@@ -1,6 +1,7 @@
 import os
 import json
 import hashlib
+import time
 from io import BytesIO
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
@@ -12,13 +13,20 @@ import torch
 from dotenv import load_dotenv
 from PIL import Image
 from pymongo import MongoClient
+from pymongo.errors import (
+    AutoReconnect,
+    ConnectionFailure,
+    NetworkTimeout,
+    PyMongoError,
+    ServerSelectionTimeoutError,
+)
 
 # ==========================================================
 # CẤU HÌNH
 # ==========================================================
 EMBEDDING_DIM = 512
 SAVE_EVERY = 100  # Lưu mỗi 100 ảnh; metadata checkpoint chỉ lưu ID nên vẫn nhẹ.
-CHECKPOINT_VERSION = 2
+CHECKPOINT_VERSION = 3
 
 CLIP_MODEL_NAME = "ViT-B-32"
 CLIP_PRETRAINED = "openai"
@@ -88,6 +96,24 @@ if not MONGODB_URI or not MONGODB_DB or not MONGODB_PRODUCTS_COLLECTION:
     )
 
 
+# Đọc MongoDB theo từng trang nhỏ để tránh cursor dài bị hủy.
+MONGODB_FETCH_BATCH_SIZE = max(
+    50, int(os.getenv("MONGODB_FETCH_BATCH_SIZE", "200"))
+)
+MONGODB_FETCH_MAX_RETRIES = max(
+    1, int(os.getenv("MONGODB_FETCH_MAX_RETRIES", "5"))
+)
+MONGODB_FETCH_RETRY_SECONDS = max(
+    1, int(os.getenv("MONGODB_FETCH_RETRY_SECONDS", "5"))
+)
+MONGODB_SOCKET_TIMEOUT_MS = max(
+    60000, int(os.getenv("MONGODB_SOCKET_TIMEOUT_MS", "600000"))
+)
+FORCE_REBUILD_INDEX = os.getenv(
+    "FORCE_REBUILD_INDEX", "false"
+).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 # ==========================================================
 # NẠP OPENCLIP
 # ==========================================================
@@ -120,6 +146,7 @@ def normalize_identity(value: Any) -> str:
 def get_product_id(product: Dict[str, Any]) -> str:
     """ID chính dùng cho checkpoint và nhận diện sản phẩm."""
     for key in (
+        "productKey",
         "_id",
         "id",
         "productId",
@@ -141,6 +168,7 @@ def get_product_aliases(product: Dict[str, Any]) -> Set[str]:
     aliases: Set[str] = set()
 
     for key in (
+        "productKey",
         "_id",
         "id",
         "productId",
@@ -217,11 +245,61 @@ def create_l2_index(embeddings: np.ndarray):
 # ==========================================================
 # CHECKPOINT / RESUME
 # ==========================================================
-def get_target_signature(products: Sequence[Dict[str, Any]]) -> str:
-    product_ids = sorted(get_product_id(product) for product in products)
-    raw = "\n".join(product_ids).encode("utf-8")
-    return hashlib.sha256(raw).hexdigest()
+def get_image_reference_fingerprint(product: Dict[str, Any]) -> str:
+    """
+    Tạo dấu vân tay từ các trường ảnh.
 
+    Nếu MongoDB đổi URL hoặc danh sách ảnh nhưng giữ nguyên ID, embedding cũ
+    và checkpoint cũ sẽ không bị tái sử dụng nhầm.
+    """
+    image_fields = (
+        "image_path",
+        "primaryImage",
+        "image",
+        "images",
+        "thumbnail",
+        "thumbnailUrl",
+        "imageUrl",
+        "image_url",
+        "gallery",
+        "media",
+    )
+
+    payload = {
+        field: product.get(field)
+        for field in image_fields
+        if product.get(field) not in (None, "", [], {})
+    }
+
+    if not payload:
+        return ""
+
+    serialized = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def get_target_signature(products: Sequence[Dict[str, Any]]) -> str:
+    """
+    Chữ ký checkpoint gồm ID sản phẩm và dấu vân tay ảnh.
+    """
+    digest = hashlib.sha256()
+
+    for product in sorted(products, key=get_product_id):
+        product_id = get_product_id(product)
+        image_fingerprint = get_image_reference_fingerprint(product)
+
+        digest.update(product_id.encode("utf-8"))
+        digest.update(b"\t")
+        digest.update(image_fingerprint.encode("utf-8"))
+        digest.update(b"\n")
+
+    return digest.hexdigest()
 
 def checkpoint_files_exist() -> bool:
     return any(
@@ -371,25 +449,115 @@ def load_checkpoint(
 # ==========================================================
 # ĐỌC SẢN PHẨM TỪ MONGODB
 # ==========================================================
+def _is_retryable_mongodb_error(exc: Exception) -> bool:
+    if isinstance(
+        exc,
+        (
+            AutoReconnect,
+            ConnectionFailure,
+            NetworkTimeout,
+            ServerSelectionTimeoutError,
+        ),
+    ):
+        return True
+
+    message = str(exc).lower()
+    retryable_messages = (
+        "operation cancelled",
+        "operation canceled",
+        "connection reset",
+        "connection closed",
+        "network timeout",
+        "timed out",
+        "server selection timeout",
+        "not primary",
+        "node is recovering",
+    )
+
+    return isinstance(exc, PyMongoError) and any(
+        phrase in message for phrase in retryable_messages
+    )
+
+
+def _run_mongodb_with_retry(operation, operation_name: str):
+    last_error: Optional[Exception] = None
+
+    for attempt in range(1, MONGODB_FETCH_MAX_RETRIES + 1):
+        try:
+            return operation()
+
+        except KeyboardInterrupt:
+            raise
+
+        except Exception as exc:
+            last_error = exc
+
+            should_retry = (
+                attempt < MONGODB_FETCH_MAX_RETRIES
+                and _is_retryable_mongodb_error(exc)
+            )
+
+            if not should_retry:
+                raise
+
+            print(
+                f"\nMongoDB tạm thời gián đoạn khi {operation_name}: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            print(
+                f"Thử lại lần {attempt + 1}/"
+                f"{MONGODB_FETCH_MAX_RETRIES} sau "
+                f"{MONGODB_FETCH_RETRY_SECONDS} giây..."
+            )
+            time.sleep(MONGODB_FETCH_RETRY_SECONDS)
+
+    if last_error is not None:
+        raise last_error
+
+    raise RuntimeError(
+        f"Không thể hoàn thành thao tác MongoDB: {operation_name}"
+    )
+
+
 def load_products_from_mongodb() -> List[Dict[str, Any]]:
+    """
+    Đọc MongoDB theo từng trang dựa trên _id.
+
+    Không giữ một cursor cho toàn bộ collection, nhờ vậy giảm lỗi
+    "operation cancelled". Nếu một batch lỗi, chương trình thử lại batch đó.
+    """
+    # Metadata này được lưu nguyên thứ tự vào index/products.json.
+    # Flask sẽ dùng file đó làm catalog cục bộ, nên cần đủ trường để
+    # hiển thị, tìm kiếm và lọc mà không đọc lại collection MongoDB.
     projection = {
         "_id": 1,
+        "productKey": 1,
         "id": 1,
         "productId": 1,
         "product_id": 1,
         "sku": 1,
+        "slug": 1,
         "name": 1,
         "title": 1,
+        "product_name": 1,
         "brand": 1,
-        "price": 1,
-        "originalPrice": 1,
-        "salePrice": 1,
-        "description": 1,
-        "categories": 1,
+        "manufacturer": 1,
         "category": 1,
-        "attributes": 1,
-        "specifications": 1,
+        "category_name": 1,
+        "categories": 1,
+        "trainingLabels": 1,
+        "training_labels": 1,
+        "labels": 1,
+        "tags": 1,
+        "keywords": 1,
+        "description": 1,
+        "price": 1,
+        "currentPrice": 1,
+        "originalPrice": 1,
         "specs": 1,
+        "specifications": 1,
+        "colors": 1,
+        "variants": 1,
         "primaryImage": 1,
         "images": 1,
         "image": 1,
@@ -400,46 +568,111 @@ def load_products_from_mongodb() -> List[Dict[str, Any]]:
         "image_url": 1,
         "gallery": 1,
         "media": 1,
-        "rating": 1,
-        "availability": 1,
-        "stock": 1,
         "url": 1,
-        "slug": 1,
         "sourceUrl": 1,
         "sourceUrls": 1,
     }
 
     client = MongoClient(
         MONGODB_URI,
-        serverSelectionTimeoutMS=15000,
-        connectTimeoutMS=15000,
-        socketTimeoutMS=60000,
+        serverSelectionTimeoutMS=30000,
+        connectTimeoutMS=30000,
+        socketTimeoutMS=MONGODB_SOCKET_TIMEOUT_MS,
+        retryReads=True,
+        maxPoolSize=10,
+        appname="ecommerce-build-image-index",
     )
 
     try:
-        client.admin.command("ping")
+        _run_mongodb_with_retry(
+            lambda: client.admin.command("ping"),
+            "kiểm tra kết nối",
+        )
+
         collection = client[MONGODB_DB][MONGODB_PRODUCTS_COLLECTION]
-        total_documents = collection.count_documents({})
+
+        total_documents = _run_mongodb_with_retry(
+            lambda: collection.count_documents({}),
+            "đếm document",
+        )
 
         print(
-            f"Đã kết nối MongoDB: {MONGODB_DB}."
-            f"{MONGODB_PRODUCTS_COLLECTION}"
+            f"Đã kết nối MongoDB: "
+            f"{MONGODB_DB}.{MONGODB_PRODUCTS_COLLECTION}"
         )
         print(f"MongoDB đang có {total_documents} document sản phẩm.")
-
-        products: List[Dict[str, Any]] = []
-        cursor = (
-            collection.find({}, projection)
-            .sort("_id", 1)
-            .batch_size(500)
+        print(
+            f"Đang tải theo batch {MONGODB_FETCH_BATCH_SIZE}; "
+            f"tối đa {MONGODB_FETCH_MAX_RETRIES} lần thử mỗi batch."
         )
 
-        for product in cursor:
-            if "_id" in product:
-                product["_id"] = str(product["_id"])
-            products.append(product)
+        products: List[Dict[str, Any]] = []
+        last_raw_id: Any = None
 
+        while True:
+            query: Dict[str, Any] = {}
+
+            if last_raw_id is not None:
+                query = {"_id": {"$gt": last_raw_id}}
+
+            def fetch_page() -> List[Dict[str, Any]]:
+                cursor = (
+                    collection.find(query, projection)
+                    .sort("_id", 1)
+                    .limit(MONGODB_FETCH_BATCH_SIZE)
+                    .batch_size(MONGODB_FETCH_BATCH_SIZE)
+                )
+
+                try:
+                    return list(cursor)
+                finally:
+                    cursor.close()
+
+            batch = _run_mongodb_with_retry(
+                fetch_page,
+                f"tải batch sau _id={last_raw_id}",
+            )
+
+            if not batch:
+                break
+
+            # Giữ ObjectId gốc để truy vấn trang kế tiếp.
+            next_last_raw_id = batch[-1].get("_id")
+
+            if next_last_raw_id is None:
+                raise ValueError(
+                    "Document cuối batch không có _id; "
+                    "không thể phân trang an toàn."
+                )
+
+            for product in batch:
+                if "_id" in product:
+                    product["_id"] = str(product["_id"])
+
+                products.append(product)
+
+            last_raw_id = next_last_raw_id
+
+            print(
+                f"\rĐang tải MongoDB: "
+                f"{len(products)}/{total_documents}",
+                end="",
+                flush=True,
+            )
+
+            if len(batch) < MONGODB_FETCH_BATCH_SIZE:
+                break
+
+        print()
         print(f"Đã tải {len(products)} sản phẩm từ MongoDB.")
+
+        if len(products) != total_documents:
+            print(
+                "Cảnh báo: số document tải được khác số đã đếm: "
+                f"{len(products)} != {total_documents}. "
+                "Collection có thể đã thay đổi trong lúc build."
+            )
+
         if products:
             print(
                 "Các field của sản phẩm đầu tiên: "
@@ -448,9 +681,17 @@ def load_products_from_mongodb() -> List[Dict[str, Any]]:
 
         return products
 
+    except KeyboardInterrupt:
+        raise
+
+    except Exception as exc:
+        print("\nLỗi khi tải MongoDB:")
+        print(f"- Loại lỗi: {type(exc).__name__}")
+        print(f"- Nội dung: {repr(exc)}")
+        raise
+
     finally:
         client.close()
-
 
 def deduplicate_products(
     products: Sequence[Dict[str, Any]],
@@ -787,6 +1028,17 @@ def reconcile_existing_with_mongodb(
         if matched_product is None:
             continue
 
+        old_image_fingerprint = get_image_reference_fingerprint(old_product)
+        new_image_fingerprint = get_image_reference_fingerprint(
+            matched_product
+        )
+
+        if (
+            not old_image_fingerprint
+            or old_image_fingerprint != new_image_fingerprint
+        ):
+            continue
+
         mongodb_id = get_product_id(matched_product)
         if not mongodb_id or mongodb_id in reused_ids:
             continue
@@ -1030,7 +1282,7 @@ def save_all(index, embeddings: np.ndarray, products) -> None:
     print("\nĐã lưu thành công:")
     print(f"- FAISS index: {INDEX_PATH}")
     print(f"- Embeddings: {EMB_PATH}")
-    print(f"- Metadata: {META_PATH}")
+    print(f"- Metadata catalog cục bộ: {META_PATH}")
     print(f"- Tổng vectors: {index.ntotal}")
 
 
@@ -1054,7 +1306,16 @@ def main() -> None:
 
     print(f"Tổng sản phẩm MongoDB sau lọc trùng: {len(all_products)}")
 
-    loaded_old_index, old_embeddings, old_products = load_existing_data()
+    if FORCE_REBUILD_INDEX:
+        print(
+            "FORCE_REBUILD_INDEX=true: bỏ qua index cuối hiện có "
+            "và xây lại từ MongoDB."
+        )
+        loaded_old_index = None
+        old_embeddings = np.empty((0, EMBEDDING_DIM), dtype="float32")
+        old_products: List[Dict[str, Any]] = []
+    else:
+        loaded_old_index, old_embeddings, old_products = load_existing_data()
 
     (
         old_index,
@@ -1079,11 +1340,14 @@ def main() -> None:
     print(f"Sản phẩm cần trích xuất mới: {len(products_to_process)}")
 
     if not products_to_process:
-        if existing_changed:
-            print("Index cũ đã được làm sạch theo MongoDB. Đang lưu lại...")
-            save_all(old_index, old_embeddings, old_products)
-        else:
-            print("Không có sản phẩm mới. Index hiện tại đã đồng bộ MongoDB.")
+        # old_products đã được thay bằng document MongoDB mới nhất trong
+        # reconcile_existing_with_mongodb(). Luôn lưu lại để products.json
+        # có đầy đủ tên, giá, category, specs... cho Flask dùng offline.
+        print(
+            "Không có embedding mới. Đang làm mới metadata products.json "
+            "từ MongoDB mà không trích xuất lại vector..."
+        )
+        save_all(old_index, old_embeddings, old_products)
 
         if checkpoint_files_exist():
             clear_checkpoint()
@@ -1129,5 +1393,15 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\nĐã dừng chương trình an toàn. Checkpoint đã được giữ lại.")
     except Exception as exc:
-        print(f"\nBuild index gặp lỗi: {exc}")
-        print("Checkpoint vẫn được giữ lại để lần sau chạy tiếp.")
+        print(f"\nBuild index gặp lỗi: {type(exc).__name__}: {exc}")
+
+        if checkpoint_files_exist():
+            print(
+                "Checkpoint embedding hiện có vẫn được giữ "
+                "để lần sau chạy tiếp."
+            )
+        else:
+            print(
+                "Lỗi xảy ra trước bước tạo embedding nên chưa có "
+                "checkpoint mới. Phần tải MongoDB sẽ tự thử lại theo batch."
+            )

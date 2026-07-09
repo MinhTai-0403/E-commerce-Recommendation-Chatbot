@@ -31,3 +31,8 @@ multimodal-chatbox/data/products/_downloaded/
 
 # Test folder
 test/
+
+.env
+**/.env
+.env.*
+!.env.example

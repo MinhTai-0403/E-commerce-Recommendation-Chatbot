@@ -33,8 +33,11 @@ import faiss
 import jwt
 import numpy as np
 
-# Gemini SDK hiện tại của dự án. Có thể chuyển sang google.genai sau.
-import google.generativeai as genai
+# Gemini SDK mới (cài bằng: pip install -U google-genai)
+try:
+    from google import genai
+except ImportError:
+    genai = None
 
 
 # ----------------------------
@@ -122,14 +125,13 @@ MONGODB_OTP_COLLECTION = (
 
 mongo_client = None
 mongo_db = None
-products_collection = None
 users_collection = None
 registration_otps_collection = None
 mongo_error = ""
 
 
 def init_mongodb():
-    global mongo_client, mongo_db, products_collection, users_collection, registration_otps_collection, mongo_error
+    global mongo_client, mongo_db, users_collection, registration_otps_collection, mongo_error
 
     if not MONGODB_URI:
         mongo_error = "Chưa khai báo MONGODB_URI trong file .env."
@@ -145,7 +147,6 @@ def init_mongodb():
         mongo_client.admin.command("ping")
 
         mongo_db = mongo_client[MONGODB_DB]
-        products_collection = mongo_db[MONGODB_PRODUCTS_COLLECTION]
         users_collection = mongo_db[MONGODB_USERS_COLLECTION]
         registration_otps_collection = mongo_db[MONGODB_OTP_COLLECTION]
 
@@ -184,8 +185,7 @@ def init_mongodb():
 
         mongo_error = ""
         print(
-            "Đã kết nối MongoDB: "
-            f"{MONGODB_DB}.{MONGODB_PRODUCTS_COLLECTION}, "
+            "Đã kết nối MongoDB cho tài khoản/OTP: "
             f"{MONGODB_DB}.{MONGODB_USERS_COLLECTION} và "
             f"{MONGODB_DB}.{MONGODB_OTP_COLLECTION}"
         )
@@ -194,7 +194,6 @@ def init_mongodb():
         print(f"Lỗi kết nối MongoDB: {exc}")
         mongo_client = None
         mongo_db = None
-        products_collection = None
         users_collection = None
         registration_otps_collection = None
 
@@ -329,26 +328,46 @@ def login_required(view_function):
 
 
 # =========================
-# GEMINI CONFIG - SDK CŨ
+# GEMINI CONFIG - GOOGLE GENAI SDK
 # =========================
-GEMINI_API_KEY = os.getenv("AIzaSyCSiMIcBXJw9TdsDFCYflH7XTQKAtQt1mc", "").strip()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite").strip()
 client = None
 MODEL_MAIN = None
 MODEL_TRANSLATION = None
 
+
+class GeminiModelAdapter:
+    """Giữ cách gọi generate_content() cũ để không phải sửa toàn bộ dự án."""
+
+    def __init__(self, gemini_client, model_name):
+        self.gemini_client = gemini_client
+        self.model_name = model_name
+
+    def generate_content(self, contents, generation_config=None):
+        config = generation_config or None
+        return self.gemini_client.models.generate_content(
+            model=self.model_name,
+            contents=contents,
+            config=config,
+        )
+
+
 try:
-    if not GEMINI_API_KEY:
-        print("Lỗi: Chưa nhập API key Gemini.")
+    if genai is None:
+        print("Lỗi: Chưa cài google-genai. Chạy: pip install -U google-genai")
+    elif not GEMINI_API_KEY:
+        print("Lỗi: Chưa nhập GEMINI_API_KEY trong file .env.")
     else:
-        genai.configure(api_key=GEMINI_API_KEY)
-        GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
-        MODEL_MAIN = genai.GenerativeModel(GEMINI_MODEL)
-        MODEL_TRANSLATION = genai.GenerativeModel(GEMINI_MODEL)
-        client = True
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        MODEL_MAIN = GeminiModelAdapter(client, GEMINI_MODEL)
+        MODEL_TRANSLATION = GeminiModelAdapter(client, GEMINI_MODEL)
         print(f"Đã khởi tạo Gemini với model: {GEMINI_MODEL}")
 except Exception as exc:
     print("Lỗi khởi tạo Gemini:", exc)
     client = None
+    MODEL_MAIN = None
+    MODEL_TRANSLATION = None
 
 
 def ask_gemini(prompt):
@@ -376,21 +395,23 @@ def ask_gemini(prompt):
 
 
 # ----------------------------
-# Dữ liệu MongoDB + FAISS + mô hình
+# Catalog cục bộ + FAISS + mô hình
 # ----------------------------
+# MongoDB chỉ dùng cho tài khoản/OTP khi Flask đang chạy.
+# Dữ liệu sản phẩm được đọc từ index/products.json, không quét collection MongoDB.
 FAISS_DIR = os.path.join(BASE_DIR, "index")
 os.makedirs(FAISS_DIR, exist_ok=True)
 
-# products.json chỉ được dùng như metadata thứ tự ID cũ của FAISS nếu có.
-# Nội dung sản phẩm thực tế luôn được đọc từ MongoDB.
-LEGACY_PRODUCTS_METADATA_PATH = os.path.join(FAISS_DIR, "products.json")
+# products.json chứa metadata đầy đủ theo đúng thứ tự từng vector FAISS.
+PRODUCTS_METADATA_PATH = os.path.join(FAISS_DIR, "products.json")
+# Giữ đường dẫn product_ids.json để tương thích, nhưng runtime không cần dùng file này.
 FAISS_PRODUCT_IDS_PATH = os.path.join(FAISS_DIR, "product_ids.json")
 FAISS_INDEX_PATH = os.path.join(FAISS_DIR, "faiss_index.index")
 EMBEDDINGS_PATH = os.path.join(FAISS_DIR, "embeddings.npy")
 MODEL_PATH = os.path.join(BASE_DIR, "best.pt")
 
 from data.faq_flow import faq_flows
-from clip_core import get_clip_embedding
+from clip_core import get_clip_embedding, get_clip_text_embedding
 
 products = []
 product_ids = []
@@ -398,19 +419,28 @@ product_by_id = {}
 product_embeddings = None
 faiss_index = None
 faiss_product_order_ids = []
+faiss_position_by_product_id = {}
 yolo_model = None
-product_refresh_lock = Lock()
-last_product_refresh = 0.0
-PRODUCT_CACHE_SECONDS = max(0, int(os.getenv("PRODUCT_CACHE_SECONDS", "30")))
+catalog_loaded_at = None
 
-# 0 = tải toàn bộ document trong collection. Có thể đặt số dương trong .env
-# nếu máy không đủ RAM, ví dụ CHATBOT_PRODUCT_LIMIT=20000.
-CHATBOT_PRODUCT_LIMIT = max(0, int(os.getenv("CHATBOT_PRODUCT_LIMIT", "0")))
+# Tìm kiếm văn bản đa phương thức: text embedding truy vấn trực tiếp
+# FAISS index được build từ ảnh sản phẩm MongoDB.
+TEXT_EMBEDDING_SEARCH_ENABLED = os.getenv(
+    "TEXT_EMBEDDING_SEARCH_ENABLED", "true"
+).strip().lower() in {"1", "true", "yes", "on"}
+TEXT_FAISS_CANDIDATES = max(20, int(os.getenv("TEXT_FAISS_CANDIDATES", "300")))
+TEXT_FAISS_MIN_SIMILARITY = float(os.getenv("TEXT_FAISS_MIN_SIMILARITY", "0.18"))
+TEXT_SEMANTIC_WEIGHT = float(os.getenv("TEXT_SEMANTIC_WEIGHT", "0.72"))
+TEXT_KEYWORD_WEIGHT = float(os.getenv("TEXT_KEYWORD_WEIGHT", "0.28"))
+
 
 # Các trường được dùng để tìm theo tên, hãng, danh mục, trainingLabels,
 # nhãn phụ, thông số và mã sản phẩm.
 CHATBOT_PRODUCT_PROJECTION = {
+    "productKey": 1,
+    "_id": 1,
     "id": 1,
+    "productId": 1,
     "product_id": 1,
     "sku": 1,
     "slug": 1,
@@ -567,7 +597,10 @@ def _build_product_search_fields(product):
     categories = product.get("categories", [])
     labels = product.get("trainingLabels", [])
     identifiers = [
+        product.get("productKey"),
+        product.get("_id"),
         product.get("id"),
+        product.get("productId"),
         product.get("product_id"),
         product.get("sku"),
         product.get("slug"),
@@ -602,11 +635,19 @@ def _build_product_search_fields(product):
 
 def normalize_product_document(document):
     product = dict(document or {})
+    # Phải cùng thứ tự khóa với get_product_id() trong build_index.py
+    # để vị trí FAISS luôn ánh xạ đúng document MongoDB.
     product_id = (
-        product.get("id")
+        product.get("productKey")
+        or product.get("_id")
+        or product.get("id")
+        or product.get("productId")
         or product.get("product_id")
         or product.get("sku")
-        or product.get("_id")
+        or product.get("slug")
+        or product.get("url")
+        or product.get("name")
+        or product.get("title")
     )
 
     product["id"] = str(product_id or "")
@@ -694,147 +735,142 @@ def _mongo_price_to_number(value):
     return int(digits) if digits else 0
 
 
-def load_faiss_product_order_ids():
-    paths = [FAISS_PRODUCT_IDS_PATH, LEGACY_PRODUCTS_METADATA_PATH]
+def load_products_from_index_metadata():
+    """
+    Đọc catalog sản phẩm trực tiếp từ index/products.json.
 
-    for path in paths:
-        if not os.path.isfile(path):
-            continue
+    Thứ tự phần tử trong products.json phải trùng tuyệt đối với:
+    - embeddings.npy
+    - faiss_index.index
 
-        try:
-            with open(path, "r", encoding="utf-8") as file:
-                data = json.load(file)
+    Hàm này không truy vấn collection sản phẩm MongoDB.
+    """
+    global products, product_ids, product_by_id
+    global faiss_product_order_ids, faiss_position_by_product_id
+    global catalog_loaded_at
 
-            ids = []
-            for item in data if isinstance(data, list) else []:
-                if isinstance(item, dict):
-                    item_id = item.get("id") or item.get("product_id") or item.get("_id")
-                else:
-                    item_id = item
-                if item_id is not None:
-                    ids.append(str(item_id))
+    if not os.path.isfile(PRODUCTS_METADATA_PATH):
+        raise FileNotFoundError(
+            f"Không tìm thấy metadata sản phẩm: {PRODUCTS_METADATA_PATH}. "
+            "Hãy chạy build_index.py trước."
+        )
 
-            if ids:
-                print(f"Đã đọc {len(ids)} ID ánh xạ FAISS từ {path}")
-                return ids
-        except Exception as exc:
-            print(f"Không thể đọc metadata FAISS {path}: {exc}")
+    with open(PRODUCTS_METADATA_PATH, "r", encoding="utf-8") as file:
+        raw_products = json.load(file)
 
-    return []
+    if not isinstance(raw_products, list):
+        raise ValueError("index/products.json phải là một danh sách sản phẩm.")
 
+    normalized_products = []
+    seen_ids = set()
 
-def refresh_products_from_mongodb(force=False):
-    global products, product_ids, product_by_id, last_product_refresh
-
-    if products_collection is None:
-        return products
-
-    with product_refresh_lock:
-        now = monotonic()
-        if (
-            not force
-            and products
-            and PRODUCT_CACHE_SECONDS > 0
-            and now - last_product_refresh < PRODUCT_CACHE_SECONDS
-        ):
-            return products
-
-        try:
-            # Đọc toàn bộ collection thay vì chỉ lấy document có trường "name".
-            # Document dùng title/product_name/brand/trainingLabels vẫn được tìm thấy.
-            total_documents = products_collection.estimated_document_count()
-            cursor = products_collection.find({}, CHATBOT_PRODUCT_PROJECTION)
-
-            if CHATBOT_PRODUCT_LIMIT:
-                cursor = cursor.limit(CHATBOT_PRODUCT_LIMIT)
-
-            documents = list(cursor)
-            normalized_products = [
-                normalize_product_document(document)
-                for document in documents
-            ]
-            normalized_products = [
-                product
-                for product in normalized_products
-                if product.get("id") and product.get("_search_text")
-            ]
-
-            mapped_products = {
-                str(product["id"]): product
-                for product in normalized_products
-            }
-
-            if faiss_product_order_ids:
-                ordered_products = [
-                    mapped_products[product_id]
-                    for product_id in faiss_product_order_ids
-                    if product_id in mapped_products
-                ]
-                ordered_id_set = {str(product["id"]) for product in ordered_products}
-                extra_products = sorted(
-                    (
-                        product
-                        for product in normalized_products
-                        if str(product["id"]) not in ordered_id_set
-                    ),
-                    key=lambda product: str(product.get("id", "")),
-                )
-                normalized_products = ordered_products + extra_products
-            else:
-                normalized_products.sort(key=lambda product: str(product.get("id", "")))
-
-            products = normalized_products
-            product_ids = [str(product["id"]) for product in products]
-            product_by_id = {
-                str(product["id"]): product
-                for product in products
-            }
-            last_product_refresh = now
-
-            limit_note = (
-                f", giới hạn bởi CHATBOT_PRODUCT_LIMIT={CHATBOT_PRODUCT_LIMIT}"
-                if CHATBOT_PRODUCT_LIMIT
-                else ""
+    for position, document in enumerate(raw_products):
+        if not isinstance(document, dict):
+            raise ValueError(
+                f"Metadata tại vị trí {position} không phải object JSON."
             )
-            print(
-                f"Đã tải {len(products)}/{total_documents} document có dữ liệu tìm kiếm "
-                f"từ MongoDB {MONGODB_DB}.{MONGODB_PRODUCTS_COLLECTION}"
-                f"{limit_note}"
+
+        product = normalize_product_document(document)
+        product_id = str(product.get("id") or "").strip()
+
+        if not product_id:
+            raise ValueError(
+                f"Sản phẩm metadata tại vị trí {position} không có ID hợp lệ."
             )
-            return products
-        except PyMongoError as exc:
-            print(f"Lỗi đọc sản phẩm từ MongoDB: {exc}")
-            return products
+        if product_id in seen_ids:
+            raise ValueError(
+                f"ID sản phẩm bị trùng trong products.json: {product_id}"
+            )
+
+        seen_ids.add(product_id)
+        normalized_products.append(product)
+
+    products = normalized_products
+    product_ids = [str(product["id"]) for product in products]
+    product_by_id = {
+        str(product["id"]): product
+        for product in products
+    }
+    faiss_product_order_ids = list(product_ids)
+    faiss_position_by_product_id = {
+        product_id: position
+        for position, product_id in enumerate(product_ids)
+    }
+    catalog_loaded_at = datetime.now(timezone.utc)
+
+    print(
+        f"Đã tải {len(products)} sản phẩm từ metadata cục bộ: "
+        f"{PRODUCTS_METADATA_PATH}"
+    )
+    return products
 
 
-faiss_product_order_ids = load_faiss_product_order_ids()
+def load_local_search_assets():
+    """
+    Nạp đồng bộ products.json, embeddings.npy và FAISS index từ ổ đĩa.
+    Không đọc collection sản phẩm MongoDB.
+    """
+    global product_embeddings, faiss_index
+
+    local_products = load_products_from_index_metadata()
+
+    embeddings = np.load(EMBEDDINGS_PATH, allow_pickle=False)
+    if embeddings.ndim == 1:
+        embeddings = embeddings.reshape(1, -1)
+    if embeddings.ndim != 2:
+        raise ValueError(
+            f"embeddings.npy phải có 2 chiều, hiện tại: {embeddings.shape}"
+        )
+
+    index = faiss.read_index(FAISS_INDEX_PATH)
+
+    if index.ntotal != embeddings.shape[0]:
+        raise ValueError(
+            "FAISS index và embeddings.npy không khớp: "
+            f"FAISS={index.ntotal}, embeddings={embeddings.shape[0]}"
+        )
+    if index.ntotal != len(local_products):
+        raise ValueError(
+            "FAISS index và products.json không khớp: "
+            f"FAISS={index.ntotal}, products={len(local_products)}"
+        )
+    if index.d != embeddings.shape[1]:
+        raise ValueError(
+            "Số chiều FAISS và embeddings.npy không khớp: "
+            f"FAISS={index.d}, embeddings={embeddings.shape[1]}"
+        )
+
+    product_embeddings = embeddings.astype("float32", copy=False)
+    faiss_index = index
+
+    print(
+        "Đã tải bộ tìm kiếm cục bộ thành công: "
+        f"{faiss_index.ntotal} vector, {faiss_index.d} chiều."
+    )
+    return local_products
+
 
 try:
-    product_embeddings = np.load(EMBEDDINGS_PATH)
-    faiss_index = faiss.read_index(FAISS_INDEX_PATH)
-
-    if faiss_index.ntotal != product_embeddings.shape[0]:
-        print("Lỗi: Kích thước FAISS index và embeddings.npy không khớp.")
-        faiss_index = None
-        product_embeddings = None
-    elif faiss_product_order_ids and faiss_index.ntotal != len(faiss_product_order_ids):
-        print(
-            "Lỗi: Số ID ánh xạ sản phẩm không khớp FAISS index. "
-            "Hãy chạy lại build_index.py và lưu product_ids.json."
-        )
-        faiss_index = None
-        product_embeddings = None
-    else:
-        print(f"Đã tải FAISS index với {faiss_index.ntotal} vector.")
+    load_local_search_assets()
 except FileNotFoundError as exc:
-    print(f"Chưa có FAISS hoặc embeddings: {exc}")
-    print("Chat văn bản vẫn hoạt động; tìm bằng ảnh cần chạy build_index.py.")
-except Exception as exc:
-    print(f"Lỗi khi load FAISS hoặc Embeddings: {exc}")
+    print(f"Chưa có đủ file tìm kiếm cục bộ: {exc}")
+    print("Hãy chạy build_index.py để tạo products.json, embeddings.npy và FAISS index.")
+    products = []
+    product_ids = []
+    product_by_id = {}
+    faiss_product_order_ids = []
+    faiss_position_by_product_id = {}
     faiss_index = None
     product_embeddings = None
-
-refresh_products_from_mongodb(force=True)
+except Exception as exc:
+    print(f"Lỗi khi tải bộ tìm kiếm cục bộ: {exc}")
+    products = []
+    product_ids = []
+    product_by_id = {}
+    faiss_product_order_ids = []
+    faiss_position_by_product_id = {}
+    faiss_index = None
+    product_embeddings = None
 
 try:
     if os.path.exists(MODEL_PATH):
@@ -1054,7 +1090,7 @@ SEARCH_STOPWORDS = {
     "xem", "san", "pham", "cac", "mot", "vai", "loai", "hang", "thuong",
     "hieu", "theo", "co", "nao", "phu", "hop", "voi", "cua", "ban", "nhe",
     "a", "la", "ve", "trong", "tren", "duoi", "shop", "cua", "hang",
-    "mongodb", "database",
+    "danh", "muc", "category", "catalog", "mongodb", "database",
 }
 
 # Mỗi khóa là cách người dùng thường nhập; giá trị là các cách dữ liệu
@@ -1070,6 +1106,8 @@ QUERY_ALIAS_GROUPS = {
     "van phong": ["van phong", "office", "business"],
     "do hoa": ["do hoa", "graphic", "graphics", "designer", "design"],
     "dien thoai": ["dien thoai", "smartphone", "phone", "iphone", "galaxy"],
+    "may tinh de ban": ["may tinh de ban", "desktop", "desktop pc", "pc"],
+    "pc": ["pc", "desktop", "desktop pc", "may tinh de ban"],
     "may tinh xach tay": ["may tinh xach tay", "laptop", "notebook"],
     "laptop": ["laptop", "notebook", "may tinh xach tay"],
     "tai nghe": ["tai nghe", "earphone", "headphone", "headset", "earbuds"],
@@ -1079,7 +1117,123 @@ QUERY_ALIAS_GROUPS = {
     "op": ["op", "op lung", "case", "cover", "bao da"],
     "sac du phong": ["sac du phong", "power bank", "powerbank"],
     "cap sac": ["cap sac", "charging cable", "cable"],
+    "quat": ["quat", "fan", "electric fan"],
 }
+
+PHONE_DEVICE_QUERY_TERMS = (
+    "dien thoai",
+    "smartphone",
+    "mobile phone",
+    "iphone",
+    "galaxy",
+)
+
+PHONE_DEVICE_CONTEXT_TERMS = (
+    "danh muc dien thoai",
+    "muc dien thoai",
+    "category dien thoai",
+)
+
+PHONE_DEVICE_PRIMARY_CATEGORIES = (
+    "dien thoai",
+)
+
+PHONE_DEVICE_USED_CATEGORY_TERMS = (
+    "iphone cu",
+    "dien thoai cu",
+    "samsung cu",
+    "galaxy cu",
+    "xiaomi cu",
+    "oppo cu",
+    "realme cu",
+    "vivo cu",
+)
+
+NON_PHONE_CATEGORY_CONCEPTS = {
+    "may tinh xach tay",
+    "laptop",
+    "tai nghe",
+    "may tinh bang",
+    "dong ho thong minh",
+    "op lung",
+    "op",
+    "sac du phong",
+    "cap sac",
+}
+
+NON_PHONE_QUERY_TERMS = (
+    "phu kien",
+    "op lung",
+    "op",
+    "bao da",
+    "case",
+    "cover",
+    "dan man hinh",
+    "dan dien thoai",
+    "dan kinh",
+    "mieng dan",
+    "cuong luc",
+    "kinh cuong luc",
+    "applecare",
+    "bao hanh",
+    "sua chua",
+    "sac",
+    "charger",
+    "cable",
+    "power bank",
+    "pin du phong",
+    "tai nghe",
+    "earphone",
+    "headphone",
+    "airpods",
+    "dong ho",
+    "watch",
+    "smartwatch",
+    "tablet",
+    "ipad",
+    "tab",
+    "laptop",
+    "camera",
+    "may anh",
+    "man hinh",
+    "tivi",
+)
+
+NON_PHONE_PRODUCT_TERMS = (
+    "phu kien",
+    "op lung",
+    "bao da",
+    "case",
+    "cover",
+    "dan man hinh",
+    "dan dien thoai",
+    "dan kinh",
+    "mieng dan",
+    "cuong luc",
+    "kinh cuong luc",
+    "applecare",
+    "bao hanh",
+    "sua chua",
+    "sac",
+    "charger",
+    "cable",
+    "power bank",
+    "pin du phong",
+    "tai nghe",
+    "earphone",
+    "headphone",
+    "airpods",
+    "dong ho",
+    "watch",
+    "smartwatch",
+    "tablet",
+    "ipad",
+    "camera",
+    "may anh",
+    "lens",
+    "gia do",
+    "kinh",
+)
 
 
 def _contains_search_term(text, term):
@@ -1152,6 +1306,108 @@ def _parse_search_query(user_message):
         "concepts": concepts,
         "tokens": tokens,
     }
+
+
+def _has_any_search_term(text, terms):
+    return any(_contains_search_term(text, term) for term in terms)
+
+
+def _product_primary_category_text(product):
+    direct_category = product.get("category")
+    if direct_category:
+        return _normalize_search_text(direct_category)
+
+    categories = product.get("categories")
+    if isinstance(categories, (list, tuple)) and categories:
+        return _normalize_search_text(categories[0])
+
+    return ""
+
+
+def _product_is_phone_device(product):
+    search_fields = product.get("_search_fields") or _build_product_search_fields(product)
+    primary_category = _product_primary_category_text(product)
+    category_text = search_fields.get("category", "")
+    name_text = search_fields.get("name", "")
+    product_type_text = " ".join(
+        part for part in (primary_category, category_text, name_text) if part
+    )
+
+    if _has_any_search_term(product_type_text, NON_PHONE_PRODUCT_TERMS):
+        return False
+
+    if _has_any_search_term(primary_category, PHONE_DEVICE_PRIMARY_CATEGORIES):
+        return True
+
+    if (
+        _contains_search_term(primary_category, "hang cu")
+        and _has_any_search_term(category_text, PHONE_DEVICE_USED_CATEGORY_TERMS)
+    ):
+        return True
+
+    if re.search(r"^(apple\s+)?iphone(\s|$)", name_text):
+        return True
+
+    if re.search(r"^(samsung\s+)?galaxy\s+(s|z|a|m|note)\w*", name_text):
+        return True
+
+    return False
+
+
+def _query_mentions_cable(normalized_query):
+    query_without_quality = _remove_query_phrase(normalized_query, "cao cap")
+    return _contains_search_term(query_without_quality, "cap")
+
+
+def _query_requests_phone_device(parsed_query):
+    normalized_query = parsed_query.get("normalized_query", "")
+    concept_triggers = {
+        str(concept.get("trigger", ""))
+        for concept in parsed_query.get("concepts", [])
+    }
+
+    if concept_triggers.intersection(NON_PHONE_CATEGORY_CONCEPTS):
+        return False
+
+    if _has_any_search_term(normalized_query, NON_PHONE_QUERY_TERMS):
+        return False
+
+    if _query_mentions_cable(normalized_query):
+        return False
+
+    if _has_any_search_term(normalized_query, PHONE_DEVICE_CONTEXT_TERMS):
+        return True
+
+    if "dien thoai" in concept_triggers:
+        return True
+
+    return _has_any_search_term(normalized_query, PHONE_DEVICE_QUERY_TERMS)
+
+
+def _query_requires_primary_phone_category(parsed_query):
+    normalized_query = parsed_query.get("normalized_query", "")
+    return _has_any_search_term(normalized_query, PHONE_DEVICE_CONTEXT_TERMS)
+
+
+def _filter_scored_products_for_query(scored_items, parsed_query, product_index):
+    if not _query_requests_phone_device(parsed_query):
+        return scored_items
+
+    if _query_requires_primary_phone_category(parsed_query):
+        return [
+            item
+            for item in scored_items
+            if _has_any_search_term(
+                _product_primary_category_text(item[product_index]),
+                PHONE_DEVICE_PRIMARY_CATEGORIES,
+            )
+        ]
+
+    return [
+        item
+        for item in scored_items
+        if _product_is_phone_device(item[product_index])
+    ]
 
 
 def _best_weight_for_term(search_fields, term):
@@ -1273,11 +1529,19 @@ def search_products(user_message, product_list=None, limit=20):
         )
         return scored
 
-    scored_products = collect(allow_partial=False)
+    scored_products = _filter_scored_products_for_query(
+        collect(allow_partial=False),
+        parsed_query,
+        product_index=1,
+    )
 
     # Nếu không có kết quả chính xác, thử khớp mềm 2/3 số token.
     if not scored_products and len(parsed_query["tokens"]) >= 2:
-        scored_products = collect(allow_partial=True)
+        scored_products = _filter_scored_products_for_query(
+            collect(allow_partial=True),
+            parsed_query,
+            product_index=1,
+        )
 
     if limit is None:
         selected = [product for _, product in scored_products]
@@ -1372,6 +1636,447 @@ def filter_products(
     return results if has_filters else []
 
 
+
+# ----------------------------
+# Hội thoại tự nhiên
+# ----------------------------
+VIETNAM_TIMEZONE = timezone(timedelta(hours=7))
+
+
+def _clean_chat_user_name(value):
+    """Tên hiển thị ngắn, ưu tiên tên lấy từ tài khoản đã xác thực."""
+    cleaned = re.sub(r"\s+", " ", str(value or "")).strip()
+    return cleaned[:80]
+
+
+def get_vietnam_day_period(now=None):
+    """Trả về buổi trong ngày theo múi giờ Việt Nam."""
+    current_time = now or datetime.now(VIETNAM_TIMEZONE)
+    if current_time.tzinfo is None:
+        current_time = current_time.replace(tzinfo=VIETNAM_TIMEZONE)
+    else:
+        current_time = current_time.astimezone(VIETNAM_TIMEZONE)
+
+    hour = current_time.hour
+    if 5 <= hour < 11:
+        return "buổi sáng", current_time
+    if 11 <= hour < 14:
+        return "buổi trưa", current_time
+    if 14 <= hour < 18:
+        return "buổi chiều", current_time
+    return "buổi tối", current_time
+
+
+GREETING_PATTERN = (
+    r"(xin chao|chao|hello|hi|hey|halo|alo|"
+    r"chao buoi sang|chao buoi trua|chao buoi chieu|chao buoi toi)"
+    r"( ban| mochi| chatbot| shop| moi nguoi)?"
+)
+
+
+def is_greeting_message(user_message):
+    """Chỉ nhận diện lời chào độc lập, không chặn câu có kèm yêu cầu mua hàng."""
+    normalized = _normalize_user_query(user_message)
+    return re.fullmatch(GREETING_PATTERN, normalized) is not None
+
+
+def _fallback_greeting_response(user_name="", day_period="buổi sáng", seed_text=""):
+    """Câu chào dự phòng khi Gemini chưa cấu hình hoặc đang lỗi."""
+    safe_name = _safe_text(_clean_chat_user_name(user_name))
+    named_user = f" <strong>{safe_name}</strong>" if safe_name else ""
+
+    templates = {
+        "buổi sáng": [
+            f"Chào buổi sáng{named_user} 👋 Mình là Mochi. Bạn đang muốn tìm sản phẩm nào cho ngày mới?",
+            f"Xin chào{named_user}, chúc bạn buổi sáng vui vẻ ☀️ Mochi có thể giúp bạn tìm sản phẩm gì hôm nay?",
+        ],
+        "buổi trưa": [
+            f"Chào buổi trưa{named_user} 👋 Mình là Mochi. Bạn muốn mình hỗ trợ tìm sản phẩm nào?",
+            f"Xin chào{named_user}, chúc bạn buổi trưa thật dễ chịu 😊 Hôm nay bạn đang quan tâm sản phẩm gì?",
+        ],
+        "buổi chiều": [
+            f"Chào buổi chiều{named_user} 👋 Mochi sẵn sàng giúp bạn tìm sản phẩm phù hợp.",
+            f"Xin chào{named_user}, chúc bạn một buổi chiều vui vẻ 😊 Bạn đang muốn tham khảo sản phẩm nào?",
+        ],
+        "buổi tối": [
+            f"Chào buổi tối{named_user} 👋 Mình là Mochi. Bạn muốn tìm sản phẩm nào tối nay?",
+            f"Xin chào{named_user}, chúc bạn buổi tối vui vẻ 🌙 Mochi có thể tư vấn sản phẩm gì cho bạn?",
+        ],
+    }
+
+    choices = templates.get(day_period, templates["buổi sáng"])
+    digest = hashlib.sha256(
+        f"{seed_text}|{user_name}|{day_period}".encode("utf-8")
+    ).hexdigest()
+    return choices[int(digest, 16) % len(choices)]
+
+
+def generate_natural_greeting_response(user_message, user_name=""):
+    """
+    Function riêng xử lý lời chào.
+    Gemini tạo câu trả lời tự nhiên dựa trên tên đăng nhập và thời gian Việt Nam;
+    nếu Gemini lỗi thì dùng câu chào dự phòng theo buổi trong ngày.
+    """
+    if not is_greeting_message(user_message):
+        return None
+
+    day_period, current_time = get_vietnam_day_period()
+    customer_name = _clean_chat_user_name(user_name)
+
+    if MODEL_MAIN:
+        prompt = f"""
+Bạn là Mochi, trợ lý mua sắm thân thiện của một cửa hàng công nghệ.
+
+Người dùng vừa chào: {user_message}
+Tên người dùng: {customer_name or 'khách chưa đăng nhập'}
+Thời gian hiện tại tại Việt Nam: {current_time.strftime('%H:%M')}, {day_period}
+
+Hãy trả lời lời chào thật tự nhiên và ấm áp.
+Quy tắc:
+- Viết bằng tiếng Việt, tối đa 2 câu.
+- Xưng là "Mochi" hoặc "mình".
+- Gọi tên người dùng tối đa một lần nếu có tên.
+- Chào phù hợp với buổi trong ngày.
+- Kết thúc bằng một câu hỏi ngắn xem người dùng muốn tìm sản phẩm nào.
+- Không dùng Markdown, không tạo thẻ HTML, không nhắc đến AI, code, database hoặc API.
+"""
+        try:
+            response = MODEL_MAIN.generate_content(
+                prompt,
+                generation_config={
+                    "max_output_tokens": 100,
+                    "temperature": 0.85,
+                },
+            )
+            reply = str(response.text or "").strip()
+            if reply:
+                return _safe_text(reply).replace("\n", "<br>")
+        except Exception as exc:
+            print(f"Lỗi tạo lời chào tự nhiên: {exc}")
+
+    return _fallback_greeting_response(
+        user_name=user_name,
+        day_period=day_period,
+        seed_text=user_message,
+    )
+
+
+def get_natural_social_response(user_message, user_name=""):
+    """
+    Xử lý các câu xã giao độc lập. Lời chào được chuyển sang function
+    generate_natural_greeting_response() để có thể dùng tên và thời gian.
+    """
+    greeting_reply = generate_natural_greeting_response(user_message, user_name)
+    if greeting_reply:
+        return greeting_reply
+
+    normalized = _normalize_user_query(user_message)
+    safe_name = _safe_text(_clean_chat_user_name(user_name))
+    named_user = f" <strong>{safe_name}</strong>" if safe_name else ""
+
+    thanks_pattern = (
+        r"(cam on|cam on ban|cam on mochi|thanks|thank you|"
+        r"ok cam on|oke cam on)( nhe| nha| rat nhieu)?"
+    )
+    if re.fullmatch(thanks_pattern, normalized):
+        return (
+            f"Không có gì{named_user} 😊<br>"
+            "Khi cần tìm hoặc so sánh sản phẩm, bạn cứ nhắn cho mình nhé."
+        )
+
+    goodbye_pattern = (
+        r"(tam biet|bye|goodbye|hen gap lai|chao nhe|chao tam biet)"
+        r"( ban| mochi)?"
+    )
+    if re.fullmatch(goodbye_pattern, normalized):
+        return (
+            f"Tạm biệt{named_user} 👋 "
+            "Chúc bạn một ngày vui vẻ và hẹn gặp lại!"
+        )
+
+    identity_pattern = r"(ban la ai|mochi la ai|chatbot nay la gi)"
+    if re.fullmatch(identity_pattern, normalized):
+        return (
+            "Mình là <strong>Mochi</strong>, trợ lý mua sắm AI. "
+            "Mình có thể giúp bạn tìm sản phẩm bằng văn bản hoặc hình ảnh."
+        )
+
+    help_pattern = (
+        r"(ban lam duoc gi|mochi lam duoc gi|chatbot lam duoc gi|"
+        r"giup toi voi|huong dan toi)"
+    )
+    if re.fullmatch(help_pattern, normalized):
+        return (
+            "Mình có thể giúp bạn tìm sản phẩm theo tên, hãng, danh mục, "
+            "tầm giá hoặc thông số. Bạn cũng có thể kéo thả ảnh vào khung chat "
+            "để tìm sản phẩm tương tự."
+        )
+
+    return None
+
+
+PRODUCT_REQUEST_TERMS = (
+    "san pham", "tim", "kiem", "mua", "gia", "bao nhieu", "tu van",
+    "laptop", "may tinh", "may tinh de ban", "pc", "desktop",
+    "dien thoai", "iphone", "samsung", "xiaomi",
+    "tai nghe", "headphone", "earphone", "tablet", "may tinh bang",
+    "dong ho", "smartwatch", "op lung", "sac", "cap", "pin",
+    "ram", "ssd", "cpu", "gpu", "rtx", "intel", "amd",
+    "quat", "quat may", "quat dien", "quat mini", "quat cam tay",
+    "do gia dung", "gia dung", "tu lanh", "may lanh", "dieu hoa",
+    "may giat", "may say", "noi chien", "noi com", "may loc nuoc",
+)
+
+
+def _classify_product_intent_with_gemini(user_message):
+    """Nhận diện cả tên sản phẩm chưa có trong danh mục, ví dụ: 'tủ lạnh'."""
+    if not MODEL_MAIN:
+        return False
+
+    prompt = f"""
+Phân loại tin nhắn sau cho chatbot cửa hàng:
+Tin nhắn: {user_message}
+
+Trả về duy nhất một từ:
+- PRODUCT: người dùng đang nhắc đến, tìm, hỏi giá, muốn mua hoặc cần tư vấn một sản phẩm/danh mục/model cụ thể. Một tên sản phẩm đứng riêng cũng là PRODUCT.
+- GENERAL: trò chuyện thông thường, hỏi kiến thức không liên quan đến mua sắm, cảm xúc hoặc xã giao.
+"""
+    try:
+        response = MODEL_MAIN.generate_content(
+            prompt,
+            generation_config={
+                "max_output_tokens": 8,
+                "temperature": 0,
+            },
+        )
+        label = str(response.text or "").strip().upper()
+        return label.startswith("PRODUCT")
+    except Exception as exc:
+        print(f"Lỗi nhận diện ý định sản phẩm: {exc}")
+        return False
+
+
+def looks_like_product_request(user_message):
+    normalized = _normalize_user_query(user_message)
+    if any(
+        _contains_search_term(normalized, term)
+        for term in PRODUCT_REQUEST_TERMS
+    ):
+        return True
+
+    # Gemini giúp nhận ra những sản phẩm không nằm trong danh sách từ khóa cứng.
+    return _classify_product_intent_with_gemini(user_message)
+
+
+def generate_natural_chat_reply(user_message, user_name=""):
+    """
+    Dùng Gemini cho hội thoại chung, nhưng không cho phép bịa tên,
+    giá hoặc thông tin sản phẩm ngoài MongoDB.
+    """
+    if not MODEL_MAIN:
+        return None
+
+    customer_name = _clean_chat_user_name(user_name) or "khách chưa đăng nhập"
+    day_period, current_time = get_vietnam_day_period()
+    prompt = f"""
+Bạn là Mochi, trợ lý mua sắm thân thiện của một cửa hàng công nghệ.
+
+Tên người dùng: {customer_name}
+Thời gian tại Việt Nam: {current_time.strftime('%H:%M')}, {day_period}
+Tin nhắn: {user_message}
+
+Quy tắc:
+- Trả lời bằng tiếng Việt tự nhiên, thân thiện, tối đa 3 câu.
+- Có thể gọi tên người dùng tối đa một lần nếu phù hợp.
+- Không bịa tên sản phẩm, giá, khuyến mãi hoặc tồn kho.
+- Nếu người dùng muốn mua sản phẩm nhưng chưa nói rõ nhu cầu, hãy hỏi đúng một câu làm rõ.
+- Không nói về code, MongoDB, FAISS, API hoặc quy trình nội bộ.
+- Không dùng Markdown và không tạo thẻ HTML.
+"""
+
+    try:
+        response = MODEL_MAIN.generate_content(
+            prompt,
+            generation_config={
+                "max_output_tokens": 160,
+                "temperature": 0.65,
+            },
+        )
+        reply = str(response.text or "").strip()
+        if not reply:
+            return None
+        return _safe_text(reply).replace("\n", "<br>")
+    except Exception as exc:
+        print(f"Lỗi tạo câu trả lời hội thoại tự nhiên: {exc}")
+        return None
+
+
+def find_alternative_products(user_message, product_list=None, limit=3):
+    """
+    Tìm sản phẩm thay thế gần với yêu cầu nhưng không yêu cầu mọi token đều khớp.
+    Hàm chỉ trả về sản phẩm có trong metadata index/products.json.
+    """
+    source_products = product_list if product_list is not None else products
+    parsed_query = _parse_search_query(user_message)
+    normalized_query = parsed_query["normalized_query"]
+    scored_products = []
+    seen_ids = set()
+
+    for product in source_products:
+        search_fields = product.get("_search_fields") or _build_product_search_fields(product)
+        score = 0.0
+
+        for concept in parsed_query["concepts"]:
+            concept_score = max(
+                (
+                    _best_weight_for_term(search_fields, alias)
+                    for alias in concept["aliases"]
+                ),
+                default=0,
+            )
+            if concept_score > 0:
+                score += concept_score * 2.0
+
+        for token in parsed_query["tokens"]:
+            token_score = _best_weight_for_term(search_fields, token)
+            if token_score > 0:
+                score += token_score
+
+        # Khi câu có cụm tên/model dài, ưu tiên sản phẩm chứa một phần cụm đó.
+        name_text = search_fields.get("name", "")
+        brand_text = search_fields.get("brand", "")
+        category_text = search_fields.get("category", "")
+        for query_token in normalized_query.split():
+            if len(query_token) < 3 or query_token in SEARCH_STOPWORDS:
+                continue
+            if _contains_search_term(name_text, query_token):
+                score += 8
+            elif _contains_search_term(brand_text, query_token):
+                score += 7
+            elif _contains_search_term(category_text, query_token):
+                score += 5
+
+        if score <= 0:
+            continue
+
+        product_id = str(product.get("id", ""))
+        if product_id and product_id in seen_ids:
+            continue
+        if product_id:
+            seen_ids.add(product_id)
+
+        if product.get("image_path"):
+            score += 0.5
+        if product.get("price", 0) > 0:
+            score += 0.25
+
+        scored_products.append((score, product))
+
+    scored_products.sort(
+        key=lambda item: (
+            -item[0],
+            str(item[1].get("name", "")).casefold(),
+        )
+    )
+    return [product for _, product in scored_products[:max(0, int(limit))]]
+
+
+def get_available_category_names(product_list=None, limit=5):
+    """Lấy một số danh mục thật đang có để gợi ý khi không có sản phẩm liên quan."""
+    source_products = product_list if product_list is not None else products
+    category_counts = {}
+
+    for product in source_products:
+        category = str(product.get("category") or "").strip()
+        if not category:
+            continue
+        key = category.casefold()
+        if key not in category_counts:
+            category_counts[key] = [category, 0]
+        category_counts[key][1] += 1
+
+    ordered = sorted(
+        category_counts.values(),
+        key=lambda item: (-item[1], item[0].casefold()),
+    )
+    return [category for category, _ in ordered[:max(0, int(limit))]]
+
+
+def generate_product_not_found_reply(
+    user_message,
+    user_name="",
+    alternative_products=None,
+    available_categories=None,
+):
+    """
+    Tạo câu báo không có sản phẩm tự nhiên. Gemini chỉ được nhắc đến sản phẩm
+    thay thế và danh mục đã truyền vào từ MongoDB.
+    """
+    alternatives = list(alternative_products or [])
+    categories = list(available_categories or [])
+    customer_name = _clean_chat_user_name(user_name) or "khách chưa đăng nhập"
+
+    simplified_alternatives = [
+        {
+            "name": product.get("name"),
+            "brand": product.get("brand"),
+            "category": product.get("category"),
+            "price": product.get("price"),
+        }
+        for product in alternatives
+    ]
+
+    if MODEL_MAIN:
+        prompt = f"""
+Bạn là Mochi, trợ lý mua sắm thân thiện.
+
+Tên người dùng: {customer_name}
+Yêu cầu không tìm thấy trong danh mục: {user_message}
+Sản phẩm thay thế có thật trong MongoDB: {json.dumps(simplified_alternatives, ensure_ascii=False)}
+Các danh mục có thật trong cửa hàng: {json.dumps(categories, ensure_ascii=False)}
+
+Hãy viết lời phản hồi bằng tiếng Việt tự nhiên, tối đa 3 câu.
+Quy tắc bắt buộc:
+- Nói rõ hiện chưa tìm thấy sản phẩm phù hợp trong danh mục cửa hàng; không khẳng định hết hàng.
+- Nếu danh sách sản phẩm thay thế không rỗng, giới thiệu rằng bên dưới là một vài lựa chọn gần với nhu cầu.
+- Nếu không có sản phẩm thay thế, gợi ý người dùng thử một trong các danh mục có thật hoặc cung cấp thêm hãng, tầm giá, thông số.
+- Không bịa thêm bất kỳ tên sản phẩm, giá, danh mục hoặc khuyến mãi nào.
+- Có thể gọi tên người dùng tối đa một lần.
+- Không dùng Markdown, không tạo thẻ HTML và không nhắc MongoDB/API/code.
+"""
+        try:
+            response = MODEL_MAIN.generate_content(
+                prompt,
+                generation_config={
+                    "max_output_tokens": 150,
+                    "temperature": 0.75,
+                },
+            )
+            reply = str(response.text or "").strip()
+            if reply:
+                return reply
+        except Exception as exc:
+            print(f"Lỗi tạo phản hồi không tìm thấy sản phẩm: {exc}")
+
+    name_prefix = f"{customer_name}, " if user_name else ""
+    if alternatives:
+        return (
+            f"{name_prefix}mình chưa tìm thấy đúng sản phẩm “{user_message}” "
+            "trong danh mục hiện tại. Bạn có thể tham khảo một vài lựa chọn gần với nhu cầu ở bên dưới nhé."
+        )
+
+    if categories:
+        return (
+            f"{name_prefix}mình chưa tìm thấy sản phẩm “{user_message}” trong danh mục hiện tại. "
+            f"Bạn có thể thử tìm theo các nhóm như {', '.join(categories)} hoặc cho mình thêm hãng, tầm giá và thông số mong muốn."
+        )
+
+    return (
+        f"{name_prefix}mình chưa tìm thấy sản phẩm “{user_message}” trong danh mục hiện tại. "
+        "Bạn thử cung cấp thêm tên hãng, tầm giá hoặc thông số mong muốn nhé."
+    )
+
+
 # ----------------------------
 # FAQ
 # ----------------------------
@@ -1398,46 +2103,317 @@ def get_faq_response(user_message):
 # CLIP + FAISS
 # ----------------------------
 def find_similar_products_clip_faiss(query_embedding, k=5):
+    scored_results, error = search_faiss_products_with_scores(query_embedding, k=k)
+    if error:
+        return [], error
+    return [item["product"] for item in scored_results], None
+
+
+CLIP_TEXT_TRANSLATIONS = {
+    "dien thoai": "smartphone mobile phone",
+    "may tinh de ban": "desktop computer pc tower",
+    "pc": "desktop computer pc tower",
+    "may tinh xach tay": "laptop notebook computer",
+    "may tinh": "computer laptop",
+    "tai nghe": "headphones earphones earbuds headset",
+    "may tinh bang": "tablet ipad",
+    "dong ho thong minh": "smartwatch wearable watch",
+    "dong ho": "watch smartwatch",
+    "op lung": "phone case cover",
+    "sac du phong": "power bank portable charger",
+    "cap sac": "charging cable",
+    "cu sac": "wall charger power adapter",
+    "quat": "electric fan appliance",
+    "do gia dung": "home appliance",
+    "khong day": "wireless bluetooth",
+    "co day": "wired",
+    "chong on": "noise cancelling ANC",
+    "choi game": "gaming",
+    "hoc tap": "student education study",
+    "van phong": "office business productivity",
+    "do hoa": "graphics design creator",
+    "gia re": "budget affordable",
+    "pin lau": "long battery life",
+}
+
+
+def build_clip_text_query(user_message):
+    """Tạo prompt tiếng Anh ngắn giúp OpenAI CLIP hiểu truy vấn tiếng Việt."""
+    original = " ".join(str(user_message or "").split()).strip()
+    normalized = _normalize_user_query(original)
+    expanded_terms = []
+
+    for vietnamese_term, english_term in CLIP_TEXT_TRANSLATIONS.items():
+        if _contains_search_term(normalized, vietnamese_term):
+            expanded_terms.append(english_term)
+
+    parsed_query = _parse_search_query(original)
+    for concept in parsed_query["concepts"]:
+        for alias in concept.get("aliases", []):
+            alias_text = str(alias or "").strip()
+            if alias_text and alias_text not in expanded_terms:
+                expanded_terms.append(alias_text)
+
+    for token in parsed_query["tokens"]:
+        if token not in expanded_terms:
+            expanded_terms.append(token)
+
+    expanded = " ".join(expanded_terms).strip()
+    if expanded:
+        return f"a clear ecommerce product photo of {expanded}. User request: {original}"
+    return f"a clear ecommerce product photo matching this request: {original}"
+
+
+def _validate_query_embedding(query_embedding):
     if faiss_index is None:
-        return [], "FAISS index chưa được tải thành công."
+        return None, "FAISS index chưa được tải thành công."
 
-    refresh_products_from_mongodb()
-
-    if not faiss_product_order_ids and faiss_index.ntotal != len(products):
-        return [], (
-            "Không thể ánh xạ FAISS với sản phẩm MongoDB. "
-            "Hãy chạy lại build_index.py và tạo product_ids.json."
+    vector = np.asarray(query_embedding, dtype="float32").reshape(-1)
+    if vector.size != faiss_index.d:
+        return None, (
+            "Kích thước embedding truy vấn không khớp FAISS: "
+            f"{vector.size} != {faiss_index.d}. "
+            "Hãy dùng cùng model CLIP với build_index.py."
         )
 
+    norm = float(np.linalg.norm(vector))
+    if norm <= 0:
+        return None, "Embedding truy vấn không hợp lệ."
+
+    vector = vector / norm
+    return vector.astype("float32"), None
+
+
+def _product_from_faiss_position(position):
+    position = int(position)
+    if position < 0:
+        return None
+
+    if faiss_product_order_ids:
+        if position >= len(faiss_product_order_ids):
+            return None
+        product_id = str(faiss_product_order_ids[position])
+        return product_by_id.get(product_id)
+
+    if position < len(products):
+        return products[position]
+    return None
+
+
+def search_faiss_products_with_scores(query_embedding, k=5):
+    """Trả về product, vị trí FAISS, L2 distance và cosine tương đương."""
+    vector, error = _validate_query_embedding(query_embedding)
+    if error:
+        return [], error
+
+    if not products:
+        return [], "Metadata sản phẩm cục bộ chưa được tải."
     search_k = min(max(1, int(k)), faiss_index.ntotal)
-    _, indexes = faiss_index.search(query_embedding.reshape(1, -1), search_k)
+    distances, indexes = faiss_index.search(vector.reshape(1, -1), search_k)
 
     results = []
     seen_ids = set()
-
-    for index in indexes[0]:
-        index = int(index)
-        if index < 0:
-            continue
-
-        product = None
-        if faiss_product_order_ids:
-            if index >= len(faiss_product_order_ids):
-                continue
-            product_id = str(faiss_product_order_ids[index])
-            product = product_by_id.get(product_id)
-        elif index < len(products):
-            product = products[index]
-
+    for distance, position in zip(distances[0], indexes[0]):
+        product = _product_from_faiss_position(position)
         if not product:
             continue
 
         product_id = str(product.get("id", ""))
-        if product_id and product_id not in seen_ids:
-            seen_ids.add(product_id)
-            results.append(product)
+        if not product_id or product_id in seen_ids:
+            continue
+        seen_ids.add(product_id)
+
+        # Với vector đã chuẩn hóa: L2^2 = 2 - 2*cosine.
+        cosine_similarity = 1.0 - float(distance) / 2.0
+        results.append({
+            "product": product,
+            "position": int(position),
+            "distance": float(distance),
+            "similarity": cosine_similarity,
+        })
 
     return results, None
+
+
+def _semantic_similarity_for_product(product_id, query_embedding, known_hits):
+    product_id = str(product_id or "")
+    if product_id in known_hits:
+        return known_hits[product_id]
+
+    position = faiss_position_by_product_id.get(product_id)
+    if position is None and not faiss_product_order_ids:
+        try:
+            position = product_ids.index(product_id)
+        except ValueError:
+            return None
+
+    if (
+        position is None
+        or product_embeddings is None
+        or position < 0
+        or position >= product_embeddings.shape[0]
+    ):
+        return None
+
+    candidate = np.asarray(product_embeddings[position], dtype="float32").reshape(-1)
+    candidate_norm = float(np.linalg.norm(candidate))
+    if candidate_norm <= 0:
+        return None
+    candidate = candidate / candidate_norm
+    return float(np.dot(query_embedding, candidate))
+
+
+def search_products_text_embedding(user_message, product_list=None, limit=20):
+    """
+    Hybrid retrieval nhưng embedding là bắt buộc khi FAISS hoạt động:
+    1. CLIP text embedding truy vấn 40k image embeddings trong FAISS.
+    2. Bổ sung candidate khớp tên/thông số từ metadata cục bộ.
+    3. Mọi candidate cuối cùng đều được chấm semantic similarity với embedding ảnh.
+    """
+    source_products = product_list if product_list is not None else products
+    parsed_query = _parse_search_query(user_message)
+
+    if not TEXT_EMBEDDING_SEARCH_ENABLED:
+        keyword_products, _ = search_products(user_message, source_products, limit=limit)
+        return keyword_products, parsed_query, {
+            "mode": "keyword_only_disabled",
+            "clip_query": None,
+            "error": None,
+        }
+
+    if faiss_index is None or product_embeddings is None:
+        keyword_products, _ = search_products(user_message, source_products, limit=limit)
+        return keyword_products, parsed_query, {
+            "mode": "keyword_fallback_no_faiss",
+            "clip_query": None,
+            "error": "FAISS/embeddings chưa sẵn sàng",
+        }
+
+    clip_query = build_clip_text_query(user_message)
+    try:
+        query_embedding = get_clip_text_embedding(clip_query)
+    except Exception as exc:
+        keyword_products, _ = search_products(user_message, source_products, limit=limit)
+        return keyword_products, parsed_query, {
+            "mode": "keyword_fallback_clip_error",
+            "clip_query": clip_query,
+            "error": str(exc),
+        }
+
+    query_embedding, validation_error = _validate_query_embedding(query_embedding)
+    if validation_error:
+        keyword_products, _ = search_products(user_message, source_products, limit=limit)
+        return keyword_products, parsed_query, {
+            "mode": "keyword_fallback_dimension_error",
+            "clip_query": clip_query,
+            "error": validation_error,
+        }
+
+    semantic_hits, semantic_error = search_faiss_products_with_scores(
+        query_embedding,
+        k=TEXT_FAISS_CANDIDATES,
+    )
+    if semantic_error:
+        keyword_products, _ = search_products(user_message, source_products, limit=limit)
+        return keyword_products, parsed_query, {
+            "mode": "keyword_fallback_faiss_error",
+            "clip_query": clip_query,
+            "error": semantic_error,
+        }
+
+    candidate_by_id = {}
+    known_similarity = {}
+    for hit in semantic_hits:
+        product = hit["product"]
+        product_id = str(product.get("id", ""))
+        if not product_id:
+            continue
+        candidate_by_id[product_id] = product
+        known_similarity[product_id] = float(hit["similarity"])
+
+    # Chỉ xếp hạng lại các ứng viên do FAISS trả về.
+    # Không quét toàn bộ catalog sản phẩm trong mỗi request.
+    semantic_candidate_products = [
+        hit["product"]
+        for hit in semantic_hits
+        if hit.get("product")
+    ]
+    keyword_candidates, _ = search_products(
+        user_message,
+        source_products,
+        limit=max(limit * 5, 50),
+    )
+    for product in keyword_candidates:
+        product_id = str(product.get("id", ""))
+        if product_id:
+            candidate_by_id[product_id] = product
+
+    if _query_requests_phone_device(parsed_query):
+        keyword_limit = max((int(limit) if limit is not None else 20) * 8, 80)
+        phone_keyword_candidates, _ = search_products(
+            user_message,
+            source_products,
+            limit=keyword_limit,
+        )
+        for product in phone_keyword_candidates:
+            product_id = str(product.get("id", ""))
+            if product_id:
+                candidate_by_id[product_id] = product
+
+    ranked = []
+    for product_id, product in candidate_by_id.items():
+        semantic_similarity = _semantic_similarity_for_product(
+            product_id,
+            query_embedding,
+            known_similarity,
+        )
+        if semantic_similarity is None:
+            semantic_similarity = 0
+
+        keyword_score = _score_product_for_query(
+            product,
+            parsed_query,
+            allow_partial=True,
+        )
+        keyword_score = max(0.0, float(keyword_score or 0.0))
+        keyword_normalized = min(keyword_score / 100.0, 1.0)
+
+        # Keep exact metadata matches even when the photo itself cannot expose
+        # specs such as RAM/SSD. Otherwise enforce a minimum semantic match.
+        if (
+            semantic_similarity < TEXT_FAISS_MIN_SIMILARITY
+            and keyword_score <= 0
+        ):
+            continue
+
+        combined_score = (
+            TEXT_SEMANTIC_WEIGHT * semantic_similarity
+            + TEXT_KEYWORD_WEIGHT * keyword_normalized
+        )
+        ranked.append((combined_score, semantic_similarity, keyword_score, product))
+
+    ranked.sort(
+        key=lambda item: (
+            -item[0],
+            -item[1],
+            -item[2],
+            str(item[3].get("name", "")).casefold(),
+        )
+    )
+    ranked = _filter_scored_products_for_query(
+        ranked,
+        parsed_query,
+        product_index=3,
+    )
+
+    selected = [item[3] for item in ranked[:max(0, int(limit))]]
+    return selected, parsed_query, {
+        "mode": "clip_text_faiss_hybrid",
+        "clip_query": clip_query,
+        "faiss_candidates": len(semantic_hits),
+        "ranked_candidates": len(ranked),
+        "error": None,
+    }
 
 
 def get_suggestion_questions(message):
@@ -1667,10 +2643,12 @@ def build_auth_response(user_document, message, status_code=200):
     serialized = serialize_user(user_document)
     return jsonify({
         "message": message,
+        "token": token,
         "access_token": token,
         "accessToken": token,
         "user": serialized,
         "data": {
+            "token": token,
             "accessToken": token,
             "user": serialized,
         },
@@ -1919,30 +2897,71 @@ def logout_user():
 # ----------------------------
 @app.route("/api/health")
 def health():
-    refresh_products_from_mongodb()
+    metadata_mtime = None
+    if os.path.isfile(PRODUCTS_METADATA_PATH):
+        metadata_mtime = datetime.fromtimestamp(
+            os.path.getmtime(PRODUCTS_METADATA_PATH),
+            tz=timezone.utc,
+        ).isoformat()
+
     return jsonify({
         "status": "ok",
-        "mongodb": products_collection is not None and users_collection is not None,
+        "product_source": "local_index_files",
+        "mongodb_used_for_products": False,
+        "mongodb_auth": users_collection is not None,
         "mongodb_error": mongo_error or None,
         "database": MONGODB_DB,
-        "products_collection": MONGODB_PRODUCTS_COLLECTION,
         "users_collection": MONGODB_USERS_COLLECTION,
         "otp_collection": MONGODB_OTP_COLLECTION,
         "otp_email_configured": bool(SMTP_HOST and SMTP_FROM_EMAIL),
         "otp_debug": OTP_DEBUG,
         "chatbot": client is not None,
         "faiss": faiss_index is not None,
-        "products": len(products),
+        "faiss_vectors": int(faiss_index.ntotal) if faiss_index is not None else 0,
+        "embedding_rows": (
+            int(product_embeddings.shape[0])
+            if product_embeddings is not None
+            else 0
+        ),
+        "metadata_products": len(products),
+        "metadata_path": PRODUCTS_METADATA_PATH,
+        "metadata_modified_at": metadata_mtime,
+        "catalog_loaded_at": (
+            catalog_loaded_at.isoformat()
+            if isinstance(catalog_loaded_at, datetime)
+            else None
+        ),
+        "text_embedding_search": (
+            TEXT_EMBEDDING_SEARCH_ENABLED
+            and faiss_index is not None
+            and product_embeddings is not None
+            and bool(products)
+        ),
     })
 
 
 @app.route("/api/products/reload", methods=["POST"])
 def reload_products():
-    refreshed_products = refresh_products_from_mongodb(force=True)
-    return jsonify({
-        "message": "Đã tải lại sản phẩm từ MongoDB.",
-        "products": len(refreshed_products),
-    })
+    try:
+        reloaded_products = load_local_search_assets()
+        return jsonify({
+            "message": (
+                "Đã tải lại products.json, embeddings.npy "
+                "và faiss_index.index từ ổ đĩa."
+            ),
+            "product_source": "local_index_files",
+            "products": len(reloaded_products),
+            "faiss_vectors": (
+                int(faiss_index.ntotal)
+                if faiss_index is not None
+                else 0
+            ),
+        })
+    except Exception as exc:
+        print(f"Lỗi tải lại bộ tìm kiếm cục bộ: {exc}")
+        return jsonify({
+            "error": f"Không thể tải lại bộ tìm kiếm cục bộ: {exc}"
+        }), 500
 
 
 # ----------------------------
@@ -1956,34 +2975,70 @@ def chat():
 
     payload = request.get_json(silent=True) or {}
     user_message = str(payload.get("message", "")).strip()
-    user_name = str(user_document.get("full_name", "")).strip() if user_document else ""
+
+    authenticated_name = (
+        str(user_document.get("full_name", "")).strip()
+        if user_document
+        else ""
+    )
+    frontend_name = str(
+        payload.get("user_name")
+        or payload.get("userName")
+        or ""
+    ).strip()
+    user_name = _clean_chat_user_name(authenticated_name or frontend_name)
 
     print("ĐÃ VÀO ROUTE /chat")
     print("TÀI KHOẢN:", user_name or "Khách")
     print("TIN NHẮN:", user_message)
 
     if not user_message:
-        return jsonify({"reply": "Vui lòng nhập tin nhắn."}), 400
+        return jsonify({"reply": "Bạn hãy nhập nội dung cần hỏi nhé."}), 400
 
-    current_products = refresh_products_from_mongodb()
-    if not current_products:
-        return jsonify({
-            "reply": "Hiện chưa tải được sản phẩm từ MongoDB. Hãy kiểm tra kết nối database."
-        }), 503
+    # Chào hỏi, cảm ơn, tạm biệt... được trả lời ngay, không tìm sản phẩm.
+    social_reply = get_natural_social_response(user_message, user_name)
+    if social_reply:
+        return jsonify({"reply": social_reply})
 
+    # FAQ cũng không phụ thuộc vào MongoDB.
     faq_reply = get_faq_response(user_message.lower())
     if faq_reply:
         return jsonify({"reply": faq_reply})
 
-    # Tìm trực tiếp trên tên, model, SKU, hãng, category, trainingLabels,
-    # labels/tags/keywords, thông số và mô tả. Không bắt buộc người dùng
-    # phải nhập một danh mục cố định như "điện thoại" hoặc "tai nghe".
-    matched_products, parsed_query = search_products(
+    # Hội thoại chung được Gemini trả lời tự nhiên.
+    # Chỉ truy vấn bộ embedding/FAISS cục bộ khi tin nhắn có ý định tìm sản phẩm.
+    if not looks_like_product_request(user_message):
+        natural_reply = generate_natural_chat_reply(user_message, user_name)
+        if natural_reply:
+            return jsonify({"reply": natural_reply})
+
+        display_name = f" {_safe_text(user_name)}" if user_name else ""
+        return jsonify({
+            "reply": (
+                f"Mình đang nghe đây{display_name} 😊 "
+                "Bạn có thể cho mình biết sản phẩm hoặc nhu cầu cần tư vấn không?"
+            )
+        })
+
+    current_products = products
+    if not current_products or faiss_index is None or product_embeddings is None:
+        return jsonify({
+            "reply": (
+                "Bộ tìm kiếm sản phẩm cục bộ chưa sẵn sàng. "
+                "Hãy chạy build_index.py và kiểm tra thư mục index."
+            )
+        }), 503
+
+    matched_products, parsed_query, retrieval_info = search_products_text_embedding(
         user_message,
         current_products,
         limit=20,
     )
 
+    print("CHẾ ĐỘ TÌM KIẾM VĂN BẢN:", retrieval_info.get("mode"))
+    print("CLIP TEXT QUERY:", retrieval_info.get("clip_query"))
+    if retrieval_info.get("error"):
+        print("CẢNH BÁO RETRIEVAL:", retrieval_info.get("error"))
     print("TRUY VẤN CHUẨN HÓA:", parsed_query["normalized_query"])
     print(
         "CONCEPT:",
@@ -1993,32 +3048,39 @@ def chat():
     print("SỐ KẾT QUẢ:", len(matched_products))
 
     if not matched_products:
-        suggestion_reply = get_suggestion_questions(user_message)
-        if suggestion_reply:
+        alternative_products = find_alternative_products(
+            user_message,
+            current_products,
+            limit=3,
+        )
+        available_categories = get_available_category_names(
+            current_products,
+            limit=5,
+        )
+        not_found_intro = generate_product_not_found_reply(
+            user_message=user_message,
+            user_name=user_name,
+            alternative_products=alternative_products,
+            available_categories=available_categories,
+        )
+
+        if alternative_products:
             return jsonify({
-                "reply": (
-                    "Mình chưa thấy kết quả khớp trực tiếp.<br>"
-                    + suggestion_reply.replace("\n", "<br>")
+                "reply": generate_product_cards(
+                    alternative_products,
+                    response_text_vi=not_found_intro,
                 )
             })
 
-        safe_query = _safe_text(user_message)
         return jsonify({
-            "reply": (
-                f"Không tìm thấy sản phẩm phù hợp cho “{safe_query}”. "
-                "Bạn có thể tìm theo tên/model, hãng, SKU, danh mục hoặc "
-                "các nhãn trong trainingLabels."
-            )
+            "reply": _safe_text(not_found_intro).replace("\n", "<br>")
         })
 
-    intro = (
-        "🛒 Đây là các sản phẩm phù hợp theo tên, hãng, danh mục "
-        "hoặc nhãn trainingLabels:"
-    )
+    intro = f"🛒 Đây là các sản phẩm phù hợp với “{user_message}”:"
     if user_name:
         intro = (
-            f"🛒 {user_name}, đây là các sản phẩm phù hợp theo tên, hãng, "
-            "danh mục hoặc nhãn trainingLabels:"
+            f"🛒 {user_name}, đây là các sản phẩm phù hợp với "
+            f"“{user_message}”:"
         )
 
     return jsonify({
@@ -2038,10 +3100,13 @@ def upload():
     if auth_error:
         return jsonify({"error": auth_error}), 401
 
-    current_products = refresh_products_from_mongodb()
-    if not current_products:
+    current_products = products
+    if not current_products or faiss_index is None or product_embeddings is None:
         return jsonify({
-            "reply": "Hiện chưa tải được sản phẩm từ MongoDB. Hãy kiểm tra kết nối database."
+            "reply": (
+                "Bộ tìm kiếm sản phẩm cục bộ chưa sẵn sàng. "
+                "Hãy chạy build_index.py và kiểm tra thư mục index."
+            )
         }), 503
 
     file = request.files.get("file")
@@ -2049,7 +3114,13 @@ def upload():
         "message",
         "Tìm giúp tôi sản phẩm tương tự như ảnh",
     )
-    user_name = str(user_document.get("full_name", "")).strip() if user_document else ""
+    authenticated_name = (
+        str(user_document.get("full_name", "")).strip()
+        if user_document
+        else ""
+    )
+    frontend_name = str(request.form.get("user_name", "")).strip()
+    user_name = _clean_chat_user_name(authenticated_name or frontend_name)
 
     if not file or not file.filename:
         return jsonify({"reply": "Không có file được tải lên."}), 400
@@ -2100,7 +3171,7 @@ def upload():
         return jsonify({"reply": html_reply}), 503
 
     # Không lọc theo danh sách danh mục cố định. Mọi sản phẩm có trong
-    # FAISS/MongoDB đều có thể được trả về, bao gồm phụ kiện và các nhóm
+    # FAISS/products.json đều có thể được trả về, bao gồm phụ kiện và các nhóm
     # được gán bằng trainingLabels.
     recs = [
         product
@@ -2127,7 +3198,7 @@ def upload():
 
             prompt = f"""
 Bạn là chuyên gia tư vấn sản phẩm thương mại điện tử.
-Chỉ được chọn sản phẩm trong danh sách MongoDB dưới đây.
+Chỉ được chọn sản phẩm trong danh sách metadata cục bộ dưới đây.
 Không được bịa thêm sản phẩm hoặc ID.
 
 Người dùng: {customer_context}
