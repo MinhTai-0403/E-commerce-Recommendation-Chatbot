@@ -163,7 +163,7 @@ function FloatingActions() {
       {showApp && (
         <div className="floating-app">
           <button type="button" onClick={() => setShowApp(false)} aria-label="Đóng quảng cáo tải ứng dụng">×</button>
-          <a href="#" aria-label="Tải ứng dụng CellphoneS">
+          <a href="/download-app" aria-label="Tải ứng dụng CellphoneS">
             <img src="https://cdn2.cellphones.com.vn/insecure/rs:fill:100:100/q:100/plain/https://cellphones.com.vn/media/wysiwyg/icon_downloadapp.png" alt="Tải ứng dụng CellphoneS" width="100" height="100" />
           </a>
         </div>
@@ -179,7 +179,7 @@ function FloatingActions() {
           <polyline points="18 20 12 14 6 20" />
         </svg>
       </button>
-      <a className="floating-action-button floating-contact" href="#">
+      <a className="floating-action-button floating-contact" href="/lien-he">
         <span>Liên hệ</span>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
           <path d="M4 14v-2a8 8 0 0 1 16 0v2" />

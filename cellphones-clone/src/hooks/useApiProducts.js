@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   fetchProductDetail,
   fetchProducts,
@@ -117,8 +117,17 @@ const mergeApiProductWithFallback = (apiProduct, fallbackProduct) => {
 };
 
 export function useApiProducts(query, fallbackProducts = []) {
+  const queryEnabled = Boolean(query);
   const queryKey = useMemo(() => JSON.stringify(query || {}), [query]);
-  const fallback = useMemo(() => fallbackProducts || [], [fallbackProducts]);
+  const fallback = useMemo(() => (
+    Array.isArray(fallbackProducts) ? fallbackProducts : []
+  ), [fallbackProducts]);
+  const fallbackRef = useRef(fallback);
+  const fallbackKey = useMemo(() => (
+    fallback
+      .map((product) => product?.id || product?.slug || product?.sku || product?.name || '')
+      .join('|')
+  ), [fallback]);
   const [state, setState] = useState({
     products: fallback,
     loading: false,
@@ -127,12 +136,17 @@ export function useApiProducts(query, fallbackProducts = []) {
   });
 
   useEffect(() => {
-    if (!query) {
+    fallbackRef.current = fallback;
+  }, [fallback, fallbackKey]);
+
+  useEffect(() => {
+    if (!queryEnabled) {
       return undefined;
     }
 
     const controller = new AbortController();
     const parsedQuery = JSON.parse(queryKey);
+    const currentFallback = fallbackRef.current;
     const displayLimit = Number(parsedQuery.displayLimit || parsedQuery.limit || 10);
     const fetchLimit = Math.min(
       Number(parsedQuery.fetchLimit || displayLimit * DEFAULT_FETCH_MULTIPLIER),
@@ -152,7 +166,7 @@ export function useApiProducts(query, fallbackProducts = []) {
     queueMicrotask(() => {
       if (controller.signal.aborted) return;
       setState({
-        products: canUseFallback ? fallback : [],
+        products: canUseFallback ? currentFallback : [],
         loading: true,
         error: null,
         source: canUseFallback ? 'fallback' : 'api',
@@ -163,7 +177,7 @@ export function useApiProducts(query, fallbackProducts = []) {
       .then((items) => {
         const products = normalizeProductList(items, displayLimit);
         setState({
-          products: products.length ? products : (canUseFallback ? fallback : []),
+          products: products.length ? products : (canUseFallback ? currentFallback : []),
           loading: false,
           error: null,
           source: products.length ? 'api' : (canUseFallback ? 'fallback' : 'api'),
@@ -172,7 +186,7 @@ export function useApiProducts(query, fallbackProducts = []) {
       .catch((error) => {
         if (error.name === 'AbortError') return;
         setState({
-          products: canUseFallback ? fallback : [],
+          products: canUseFallback ? currentFallback : [],
           loading: false,
           error,
           source: canUseFallback ? 'fallback' : 'api',
@@ -180,7 +194,7 @@ export function useApiProducts(query, fallbackProducts = []) {
       });
 
     return () => controller.abort();
-  }, [fallback, query, queryKey]);
+  }, [fallbackKey, queryEnabled, queryKey]);
 
   return state;
 }

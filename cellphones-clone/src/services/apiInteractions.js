@@ -12,6 +12,7 @@ async function postJson(path, body, signal) {
   const token = getAuthToken();
   const response = await fetch(buildApiUrl(path), {
     method: 'POST',
+    credentials: 'include',
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json',

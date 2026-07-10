@@ -5,6 +5,7 @@ import {
   footerSocials,
   paymentPartners,
 } from '../../data/mockData';
+import { externalLinks, getRouteForLabel } from '../../utils/linkRoutes';
 
 export default function Footer() {
   return (
@@ -22,7 +23,7 @@ export default function Footer() {
               <h2 className="footer-heading">Phương thức thanh toán</h2>
               <div className="footer-payments">
                 {paymentPartners.map((partner) => (
-                  <a href="#" aria-label={partner.name} key={partner.id}>
+                  <a href={getRouteForLabel(partner.name, 'payment')} aria-label={partner.name} key={partner.id}>
                     <img src={partner.image} alt={partner.name} width="46" height="30" loading="lazy" />
                   </a>
                 ))}
@@ -43,7 +44,7 @@ export default function Footer() {
                 <input type="checkbox" defaultChecked />
                 <span>Tôi đồng ý với điều khoản của CellphoneS</span>
               </label>
-              <button type="button">Đăng ký ngay</button>
+              <button type="button" onClick={() => window.location.assign('/khuyen-mai/dang-ky-nhan-tin')}>Đăng ký ngay</button>
             </section>
           </div>
 
@@ -51,7 +52,7 @@ export default function Footer() {
             <h2 className="footer-heading">Thông tin về chính sách</h2>
             <ul className="footer-link-list">
               {footerLinks.policies.map((link) => (
-                <li key={link}><a href="#">{link}</a></li>
+                <li key={link}><a href={getRouteForLabel(link, 'policy')}>{link}</a></li>
               ))}
             </ul>
           </nav>
@@ -61,7 +62,7 @@ export default function Footer() {
               <h2 className="footer-heading">Dịch vụ và thông tin khác</h2>
               <ul className="footer-link-list">
                 {footerLinks.services.map((link) => (
-                  <li key={link}><a href="#">{link}</a></li>
+                  <li key={link}><a href={getRouteForLabel(link, 'service')}>{link}</a></li>
                 ))}
               </ul>
             </nav>
@@ -78,8 +79,8 @@ export default function Footer() {
                   loading="lazy"
                 />
                 <div>
-                  <a href="#"><img src="https://cdn2.cellphones.com.vn/200x,webp/media/wysiwyg/downloadANDROID.png" alt="Tải app từ Google Play" width="161" height="48" loading="lazy" /></a>
-                  <a href="#"><img src="https://cdn2.cellphones.com.vn/200x,webp/media/wysiwyg/downloadiOS.png" alt="Tải app từ App Store" width="161" height="54" loading="lazy" /></a>
+                  <a href="/download-app"><img src="https://cdn2.cellphones.com.vn/200x,webp/media/wysiwyg/downloadANDROID.png" alt="Tải app từ Google Play" width="161" height="48" loading="lazy" /></a>
+                  <a href="/download-app"><img src="https://cdn2.cellphones.com.vn/200x,webp/media/wysiwyg/downloadiOS.png" alt="Tải app từ App Store" width="161" height="54" loading="lazy" /></a>
                 </div>
               </div>
             </section>
@@ -90,7 +91,7 @@ export default function Footer() {
               <h2 className="footer-heading">Kết nối với CellphoneS</h2>
               <div className="footer-socials">
                 {footerSocials.map((social) => (
-                  <a href="#" aria-label={social.name} key={social.id}>
+                  <a href={`/ket-noi/${social.id}`} aria-label={social.name} key={social.id}>
                     <img src={social.image} alt={social.name} width="40" height="28" loading="lazy" />
                   </a>
                 ))}
@@ -101,7 +102,7 @@ export default function Footer() {
               <h2 className="footer-heading">Website thành viên</h2>
               <div className="footer-member-sites">
                 {footerMemberSites.map((site) => (
-                  <a href="#" key={site.id}>
+                  <a href={`/thanh-vien/${site.id}`} key={site.id}>
                     <span>{site.description}</span>
                     <img src={site.image} alt={site.description} height="30" loading="lazy" />
                   </a>
@@ -117,7 +118,7 @@ export default function Footer() {
           <div className="footer-popular-grid">
             {footerLinks.popular.map((group, index) => (
               <nav aria-label={`Liên kết sản phẩm ${index + 1}`} className="footer-popular-group" key={group[0]}>
-                {group.map((link) => <a href="#" key={link}>{link}</a>)}
+                {group.map((link) => <a href={getRouteForLabel(link, 'category')} key={link}>{link}</a>)}
               </nav>
             ))}
           </div>
@@ -127,8 +128,8 @@ export default function Footer() {
           </p>
 
           <div className="footer-certificates">
-            <a href="#"><img src="https://cdn2.cellphones.com.vn/80x,webp/media/logo/logoSaleNoti.png" alt="Đã thông báo Bộ Công Thương" width="80" height="30" loading="lazy" /></a>
-            <a href="#"><img src="https://images.dmca.com/Badges/dmca_copyright_protected150c.png?ID=158f5667-cce3-4a18-b2d1-826225e6b022" alt="DMCA.com Protection Status" width="112" height="30" loading="lazy" /></a>
+            <a href={externalLinks.saleNotification} target="_blank" rel="noreferrer"><img src="https://cdn2.cellphones.com.vn/80x,webp/media/logo/logoSaleNoti.png" alt="Đã thông báo Bộ Công Thương" width="80" height="30" loading="lazy" /></a>
+            <a href={externalLinks.dmca} target="_blank" rel="noreferrer"><img src="https://images.dmca.com/Badges/dmca_copyright_protected150c.png?ID=158f5667-cce3-4a18-b2d1-826225e6b022" alt="DMCA.com Protection Status" width="112" height="30" loading="lazy" /></a>
           </div>
         </div>
       </div>

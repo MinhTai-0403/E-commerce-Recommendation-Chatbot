@@ -1,4 +1,5 @@
 import { createProductSlug, extractProductSlug } from '../data/productCatalog';
+import { buildCategoryPath } from '../utils/linkRoutes';
 
 const DEFAULT_API_BASE_URL = 'http://localhost:5050';
 const PRODUCT_IMAGE_FALLBACK =
@@ -136,7 +137,7 @@ const normalizeCategoryTrail = (product) => {
     return product.categoryTrail.map((item, index) => ({
       id: item.id || `breadcrumb-${index + 1}`,
       name: item.name || item.label || 'Danh mục',
-      href: item.href || '#',
+      href: item.href || buildCategoryPath(item.name || item.label || 'Danh mục'),
     }));
   }
 
@@ -145,7 +146,7 @@ const normalizeCategoryTrail = (product) => {
     ...(Array.isArray(product.categories) ? product.categories : []).map((category) => ({
       id: createProductSlug(category),
       name: category,
-      href: '#',
+      href: buildCategoryPath(category),
     })),
   ];
 };

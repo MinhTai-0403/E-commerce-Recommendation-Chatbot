@@ -2,6 +2,7 @@ const cheerio = require("cheerio");
 const { XMLParser } = require("fast-xml-parser");
 const { ProxyAgent } = require("undici");
 const { createMongoClient, getMongoConfig } = require("../config/mongodb");
+const { buildRealWorldRecency } = require("../cellphones/realworld-product-recency");
 const { repairMojibake, repairObjectText } = require("../utils/text-utils");
 
 const SITEMAP_INDEX_URL =
@@ -11,7 +12,12 @@ const SOURCE_SITE = "cellphones";
 const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (compatible; cosarii-cellphones-scraper/1.0)";
 const proxyAgents = new Map();
+const proxyFailures = new Map();
+const proxyDisabledUntil = new Map();
 let proxyCursor = Math.floor(Math.random() * 10000);
+const BAD_PROXY_FAILURE_LIMIT = Number(process.env.SCRAPER_PROXY_FAILURE_LIMIT || 3);
+const BAD_PROXY_COOLDOWN_MS =
+  Number(process.env.SCRAPER_PROXY_COOLDOWN_SECONDS || 300) * 1000;
 
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
@@ -30,6 +36,10 @@ function parseArgs(argv) {
     dryRun: false,
     timeoutMs: 30000,
     retries: 2,
+    inStockOnly: false,
+    availableOrContact: false,
+    directSitemap: false,
+    seedOnlyQueue: false,
   };
 
   for (const arg of argv) {
@@ -43,6 +53,10 @@ function parseArgs(argv) {
     else if (name === "--sitemap-limit") args.sitemapLimit = numberOrNull(value);
     else if (name === "--timeout-ms") args.timeoutMs = Number(value || 30000);
     else if (name === "--retries") args.retries = Number(value || 2);
+    else if (arg === "--in-stock-only") args.inStockOnly = true;
+    else if (arg === "--available-or-contact") args.availableOrContact = true;
+    else if (arg === "--direct-sitemap") args.directSitemap = true;
+    else if (arg === "--seed-only-queue") args.seedOnlyQueue = true;
     else if (arg === "--skip-existing") args.skipExisting = true;
     else if (arg === "--dry-run") args.dryRun = true;
     else if (arg === "--help") {
@@ -84,6 +98,8 @@ Options:
   --dry-run          Fetch sitemaps and print sample entries without scraping pages.
   --timeout-ms=N     Fetch timeout per request. Default: 30000.
   --retries=N        Retry failed requests. Default: 2.
+  --in-stock-only    Save only products with schema.org/InStock.
+  --direct-sitemap   Build product sitemap URLs directly instead of fetching sitemap_index.xml.
 `);
 }
 
@@ -124,18 +140,87 @@ function getProxyUrls() {
   );
 }
 
+function maskProxyUrl(proxyUrl) {
+  return String(proxyUrl || "")
+    .replace(/\/\/([^:\s/@]+):([^@\s]+)@/g, "//***:***@");
+}
+
+function isProxyDisabled(proxyUrl, now = Date.now()) {
+  const disabledUntil = proxyDisabledUntil.get(proxyUrl) || 0;
+  if (disabledUntil <= now) {
+    proxyDisabledUntil.delete(proxyUrl);
+    return false;
+  }
+  return true;
+}
+
 function getNextProxyAgent() {
   const proxies = getProxyUrls();
   if (!proxies.length) return null;
 
-  const proxyUrl = proxies[proxyCursor % proxies.length];
-  proxyCursor += 1;
+  let proxyUrl = null;
+  const now = Date.now();
+
+  for (let index = 0; index < proxies.length; index += 1) {
+    const candidate = proxies[proxyCursor % proxies.length];
+    proxyCursor += 1;
+
+    if (!isProxyDisabled(candidate, now)) {
+      proxyUrl = candidate;
+      break;
+    }
+  }
+
+  if (!proxyUrl) {
+    console.warn("[proxy-pool] All proxies are cooling down. Waiting instead of falling back to direct fetch.");
+    return null;
+  }
 
   if (!proxyAgents.has(proxyUrl)) {
     proxyAgents.set(proxyUrl, new ProxyAgent(proxyUrl));
   }
 
-  return proxyAgents.get(proxyUrl);
+  return {
+    proxyUrl,
+    agent: proxyAgents.get(proxyUrl),
+  };
+}
+
+function shouldCooldownProxy(error) {
+  if (!error) return false;
+
+  if (error.isBotChallenge) return true;
+
+  if ([401, 403, 407, 408, 429, 500, 502, 503, 504].includes(error.status)) {
+    return true;
+  }
+
+  return isRetryableOperationError(error);
+}
+
+function recordProxySuccess(proxyUrl) {
+  if (!proxyUrl) return;
+  proxyFailures.delete(proxyUrl);
+}
+
+function recordProxyFailure(proxyUrl, error) {
+  if (!proxyUrl || !shouldCooldownProxy(error)) return;
+
+  const nextCount = (proxyFailures.get(proxyUrl) || 0) + 1;
+  proxyFailures.set(proxyUrl, nextCount);
+
+  const immediateCooldown =
+    error.isBotChallenge || [401, 403, 407, 429].includes(error.status);
+
+  if (immediateCooldown || nextCount >= BAD_PROXY_FAILURE_LIMIT) {
+    proxyFailures.delete(proxyUrl);
+    proxyDisabledUntil.set(proxyUrl, Date.now() + BAD_PROXY_COOLDOWN_MS);
+    console.warn(
+      `[proxy-pool] Cooling down ${maskProxyUrl(proxyUrl)} for ${Math.round(
+        BAD_PROXY_COOLDOWN_MS / 1000
+      )}s after ${formatErrorMessage(error)}`
+    );
+  }
 }
 
 async function retryOperation(label, operation, retries = 3) {
@@ -162,11 +247,24 @@ async function retryOperation(label, operation, retries = 3) {
 }
 
 function isRetryableOperationError(error) {
-  const message = (error && error.message ? error.message : "").toLowerCase();
+  const message = [
+    error && error.message,
+    error && error.cause && error.cause.message,
+    error && error.code,
+    error && error.cause && error.cause.code,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
 
   return (
     message.includes("econnreset") ||
+    message.includes("econnrefused") ||
+    message.includes("connect timeout") ||
     message.includes("etimedout") ||
+    message.includes("cancelled") ||
+    message.includes("canceled") ||
+    message.includes("aborted") ||
     message.includes("connection") ||
     message.includes("network") ||
     message.includes("timeout")
@@ -203,10 +301,55 @@ function formatErrorMessage(error) {
     .replace(/\/\/([^:\s/@]+):([^@\s]+)@/g, "//***:***@");
 }
 
-async function fetchText(url, args, accept = "text/html,application/xhtml+xml") {
+async function fetchText(
+  url,
+  args,
+  accept = "text/html,application/xhtml+xml",
+  options = {}
+) {
+  const useProxy = options.useProxy !== false;
+  const proxyMode = String(process.env.SCRAPER_PROXY_MODE || "rotate").toLowerCase();
+
+  if (useProxy && proxyMode === "fallback" && getProxyUrls().length) {
+    try {
+      return await fetchTextRaw(url, args, accept, { useProxy: false });
+    } catch (error) {
+      console.warn(
+        `[proxy-fallback] Direct fetch failed for ${url}: ${formatErrorMessage(
+          error
+        )}. Retrying with proxy rotation...`
+      );
+      return fetchTextRaw(url, args, accept, { useProxy: true });
+    }
+  }
+
+  return fetchTextRaw(url, args, accept, options);
+}
+
+async function fetchTextRaw(
+  url,
+  args,
+  accept = "text/html,application/xhtml+xml",
+  options = {}
+) {
+  const useProxy = options.useProxy !== false;
+  const retries = Number.isFinite(options.retries) ? options.retries : args.retries;
   let lastError;
 
-  for (let attempt = 0; attempt <= args.retries; attempt += 1) {
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const proxyLease = useProxy ? getNextProxyAgent() : null;
+
+    if (useProxy && getProxyUrls().length && !proxyLease) {
+      const error = new Error("All proxies are cooling down");
+      error.transient = true;
+      lastError = error;
+      if (attempt < retries) {
+        await sleep(2500 * (attempt + 1));
+        continue;
+      }
+      break;
+    }
+
     try {
       const response = await fetch(url, {
         headers: {
@@ -214,7 +357,7 @@ async function fetchText(url, args, accept = "text/html,application/xhtml+xml") 
           "accept-language": "vi,en;q=0.8",
           "user-agent": process.env.SCRAPER_USER_AGENT || DEFAULT_USER_AGENT,
         },
-        dispatcher: getNextProxyAgent() || undefined,
+        dispatcher: proxyLease ? proxyLease.agent : undefined,
         signal: AbortSignal.timeout(args.timeoutMs),
       });
 
@@ -230,13 +373,15 @@ async function fetchText(url, args, accept = "text/html,application/xhtml+xml") 
         throw createBotChallengeError(url, response.status);
       }
 
+      recordProxySuccess(proxyLease && proxyLease.proxyUrl);
       return text;
     } catch (error) {
+      recordProxyFailure(proxyLease && proxyLease.proxyUrl, error);
       lastError = error;
       const retryable =
         error.transient || !error.status || error.status === 429 || error.status >= 500;
 
-      if (attempt < args.retries && retryable) {
+      if (attempt < retries && retryable) {
         console.warn(
           `[retry] ${url} failed: ${formatErrorMessage(error)}. Retrying...`
         );
@@ -251,6 +396,27 @@ async function fetchText(url, args, accept = "text/html,application/xhtml+xml") 
   throw lastError;
 }
 
+async function fetchSitemapText(url, args) {
+  const accept = "application/xml,text/xml,*/*";
+  const hasProxyFallback = getProxyUrls().length > 0;
+
+  try {
+    return await fetchTextRaw(url, args, accept, {
+      useProxy: false,
+      retries: hasProxyFallback ? 0 : args.retries,
+    });
+  } catch (error) {
+    if (!hasProxyFallback) throw error;
+
+    console.warn(
+      `[sitemap-fallback] Direct sitemap fetch failed for ${url}: ${formatErrorMessage(
+        error
+      )}. Retrying with proxy rotation...`
+    );
+    return fetchText(url, args, accept);
+  }
+}
+
 function parseSitemapIndex(xml) {
   const parsed = xmlParser.parse(xml);
   const sitemaps = asArray(parsed.sitemapindex && parsed.sitemapindex.sitemap);
@@ -260,12 +426,18 @@ function parseSitemapIndex(xml) {
     .filter((url) => /^https:\/\/cellphones\.com\.vn\/sitemap\/product-sitemap/.test(url));
 }
 
-function parseProductSitemap(xml, sitemapUrl) {
+function productSitemapUrlByIndex(index) {
+  return index === 0
+    ? `${SITE_ORIGIN}/sitemap/product-sitemap.xml`
+    : `${SITE_ORIGIN}/sitemap/product-sitemap${index + 1}.xml`;
+}
+
+function parseProductSitemap(xml, sitemapUrl, sitemapRank = 0) {
   const parsed = xmlParser.parse(xml);
   const nodes = asArray(parsed.urlset && parsed.urlset.url);
 
   return nodes
-    .map((node) => {
+    .map((node, sitemapProductRank) => {
       const url = node.loc;
       if (!url || !url.startsWith(`${SITE_ORIGIN}/`) || !url.endsWith(".html")) {
         return null;
@@ -278,6 +450,9 @@ function parseProductSitemap(xml, sitemapUrl) {
       return {
         url,
         sitemapUrl,
+        sitemapRank,
+        sitemapProductRank,
+        sitemapSortRank: 1_000_000 - sitemapRank * 10_000 - sitemapProductRank,
         sitemapLastmod: node.lastmod || null,
         sitemapImages: uniqueStrings(images),
       };
@@ -290,29 +465,35 @@ function uniqueStrings(values) {
 }
 
 async function collectProductEntries(args) {
-  const indexXml = await fetchText(
-    SITEMAP_INDEX_URL,
-    args,
-    "application/xml,text/xml,*/*"
-  );
-  let productSitemaps = parseSitemapIndex(indexXml);
+  let productSitemaps;
 
-  if (productSitemaps.length === 0) {
-    throw new Error(
-      "No product sitemaps parsed from sitemap index. The site may have returned a challenge page."
+  if (args.directSitemap) {
+    const count = args.sitemapLimit || 1;
+    productSitemaps = Array.from({ length: count }, (_, offset) =>
+      productSitemapUrlByIndex(args.sitemapStart + offset)
+    );
+  } else {
+    const indexXml = await fetchSitemapText(SITEMAP_INDEX_URL, args);
+    productSitemaps = parseSitemapIndex(indexXml);
+
+    if (productSitemaps.length === 0) {
+      throw new Error(
+        "No product sitemaps parsed from sitemap index. The site may have returned a challenge page."
+      );
+    }
+
+    productSitemaps = productSitemaps.slice(
+      args.sitemapStart,
+      args.sitemapLimit ? args.sitemapStart + args.sitemapLimit : undefined
     );
   }
 
-  productSitemaps = productSitemaps.slice(
-    args.sitemapStart,
-    args.sitemapLimit ? args.sitemapStart + args.sitemapLimit : undefined
-  );
-
   const entriesByUrl = new Map();
 
-  for (const sitemapUrl of productSitemaps) {
-    const xml = await fetchText(sitemapUrl, args, "application/xml,text/xml,*/*");
-    const entries = parseProductSitemap(xml, sitemapUrl);
+  for (const [relativeSitemapIndex, sitemapUrl] of productSitemaps.entries()) {
+    const xml = await fetchSitemapText(sitemapUrl, args);
+    const sitemapRank = args.sitemapStart + relativeSitemapIndex;
+    const entries = parseProductSitemap(xml, sitemapUrl, sitemapRank);
 
     if (entries.length === 0) {
       throw new Error(
@@ -327,6 +508,17 @@ async function collectProductEntries(args) {
           ...existing.sitemapImages,
           ...entry.sitemapImages,
         ]);
+        if (
+          Number.isFinite(entry.sitemapSortRank) &&
+          (!Number.isFinite(existing.sitemapSortRank) ||
+            entry.sitemapSortRank > existing.sitemapSortRank)
+        ) {
+          existing.sitemapUrl = entry.sitemapUrl;
+          existing.sitemapRank = entry.sitemapRank;
+          existing.sitemapProductRank = entry.sitemapProductRank;
+          existing.sitemapSortRank = entry.sitemapSortRank;
+          existing.sitemapLastmod = entry.sitemapLastmod;
+        }
       } else {
         entriesByUrl.set(entry.url, entry);
       }
@@ -430,6 +622,72 @@ function normalizeBrand(brand) {
   return textValue(brand.name) || textValue(brand["@id"]);
 }
 
+function slugify(value = "") {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 180);
+}
+
+function searchText(value = "") {
+  return repairMojibake(String(value || ""))
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function detectPageStockStatus($) {
+  const bodyText = searchText($("body").text().replace(/\s+/g, " "));
+
+  if (bodyText.includes("tam het hang")) {
+    return "OutOfStock";
+  }
+
+  if (
+    bodyText.includes("sap ve hang") ||
+    bodyText.includes("gia lien he") ||
+    bodyText.includes("dang ky nhan thong tin")
+  ) {
+    return "Contact";
+  }
+
+  return null;
+}
+
+function normalizeStatusLabel(availability) {
+  const status = availability && availability.status;
+  if (/^instock$/i.test(status || "")) return "Còn hàng";
+  if (/^outofstock$/i.test(status || "")) return "Hết hàng";
+  return "Liên hệ";
+}
+
+function isInStockStatus(status) {
+  return /^instock$/i.test(status || "");
+}
+
+function isOutOfStockStatus(status) {
+  return /^(outofstock|soldout|discontinued)$/i.test(status || "");
+}
+
+function isAvailableOrContactStatus(status) {
+  return !isOutOfStockStatus(status);
+}
+
+function dateScore(value) {
+  const time = Date.parse(value || "");
+  return Number.isFinite(time) ? time : 0;
+}
+
+function yearFromDate(value) {
+  const score = dateScore(value);
+  return score ? new Date(score).getFullYear() : null;
+}
+
 function normalizeSpecifications(product) {
   return asArray(product.additionalProperty)
     .map((property) => ({
@@ -487,7 +745,16 @@ function normalizeProduct(entry, html) {
     $("link[rel='canonical']").attr("href") ||
     metaContent($, "meta[property='og:url']") ||
     entry.url;
-  const availability = normalizeAvailability(offer.availability);
+  let availability = normalizeAvailability(offer.availability);
+  const pageStockStatus = detectPageStockStatus($);
+  if (pageStockStatus === "Contact") {
+    availability = { raw: availability.raw || "UI:Contact", status: "Contact" };
+  } else if (pageStockStatus === "OutOfStock") {
+    availability = {
+      raw: availability.raw || "UI:OutOfStock",
+      status: "OutOfStock",
+    };
+  }
   const normalizedBreadcrumbs = normalizeBreadcrumbs(breadcrumbs[0]);
   const images = uniqueStrings([
     ...imageValues(product.image),
@@ -498,15 +765,27 @@ function normalizeProduct(entry, html) {
   const highPrice = numberValue(offer.highPrice);
   const lowPrice = numberValue(offer.lowPrice);
   const specifications = normalizeSpecifications(product);
+  const name = textValue(product.name) || metaContent($, "meta[property='og:title']");
+  const brand = normalizeBrand(product.brand);
+  const slug = slugFromUrl(entry.url) || slugFromUrl(canonicalUrl);
+  const primaryImage = images[0] || null;
+  const categories = normalizedBreadcrumbs.slice(1, -1).map((item) => item.name);
+  const originalPrice = highPrice && highPrice > price ? highPrice : price;
+  const statusLabel = normalizeStatusLabel(availability);
   const now = new Date();
 
-  return repairObjectText({
+  const baseDoc = {
     source: SOURCE_SITE,
     inputUrl: entry.url,
-    sourceUrls: [entry.url],
-    url: canonicalUrl,
-    slug: slugFromUrl(canonicalUrl),
-    name: textValue(product.name) || metaContent($, "meta[property='og:title']"),
+    sourceUrls: uniqueStrings([entry.url, canonicalUrl]),
+    url: entry.url,
+    productUrl: canonicalUrl,
+    canonicalUrl,
+    slug,
+    id: slug,
+    sku: textValue(product.sku) || slug,
+    name,
+    productName: name,
     title:
       metaContent($, "meta[property='og:title']") ||
       $("title").first().text().trim() ||
@@ -515,21 +794,39 @@ function normalizeProduct(entry, html) {
       textValue(product.description) ||
       metaContent($, "meta[name='description']") ||
       metaContent($, "meta[property='og:description']"),
-    brand: normalizeBrand(product.brand),
-    sku: textValue(product.sku),
+    brand,
+    brandName: brand,
+    brandKey: slugify(brand),
     mpn: textValue(product.mpn),
     price,
+    currentPrice: price,
+    salePrice: price,
+    originalPrice,
+    regularPrice: originalPrice,
     priceCurrency: textValue(offer.priceCurrency || product.priceCurrency),
     priceRange: {
       low: lowPrice,
       high: highPrice,
     },
     availability,
+    stockStatus: availability.status,
+    statusLabel,
+    sitemapLastmod: entry.sitemapLastmod || null,
+    sitemapRank: entry.sitemapRank ?? null,
+    sitemapProductRank: entry.sitemapProductRank ?? null,
+    sitemapSortRank: entry.sitemapSortRank ?? null,
+    webFreshnessScore: dateScore(entry.sitemapLastmod),
+    realWorldYear: yearFromDate(entry.sitemapLastmod),
+    effectiveRealWorldYear: yearFromDate(entry.sitemapLastmod),
     itemCondition: textValue(offer.itemCondition),
     images,
-    primaryImage: images[0] || null,
+    primaryImage,
+    thumbnail: primaryImage,
+    image: primaryImage,
     breadcrumbs: normalizedBreadcrumbs,
-    categories: normalizedBreadcrumbs.slice(1, -1).map((item) => item.name),
+    categories,
+    category: categories[0] || null,
+    categoryName: categories[0] || null,
     specifications,
     attributes: Object.fromEntries(
       specifications
@@ -539,6 +836,9 @@ function normalizeProduct(entry, html) {
     rating: normalizeRating(product),
     sitemap: {
       url: entry.sitemapUrl,
+      rank: entry.sitemapRank ?? null,
+      productRank: entry.sitemapProductRank ?? null,
+      sortRank: entry.sitemapSortRank ?? null,
       lastmod: entry.sitemapLastmod,
       images: entry.sitemapImages,
     },
@@ -546,7 +846,16 @@ function normalizeProduct(entry, html) {
     parseWarnings: errors,
     scrapedAt: now,
     updatedAt: now,
-  });
+  };
+
+  const recency = buildRealWorldRecency(baseDoc);
+  baseDoc.webFreshnessScore = recency.webFreshnessScore;
+  baseDoc.webFreshnessReason = recency.webFreshnessReason;
+  baseDoc.realWorldYear = recency.realWorldYear;
+  baseDoc.effectiveRealWorldYear = recency.effectiveYear;
+  baseDoc.latestDateMs = recency.latestDateMs;
+
+  return repairObjectText(baseDoc);
 }
 
 function validateProduct(doc, entry) {
@@ -578,6 +887,23 @@ async function ensureIndexes(productsCollection, errorsCollection) {
   await retryOperation("create product brand index", () =>
     productsCollection.createIndex({ brand: 1 })
   );
+  await retryOperation("create product freshness index", () =>
+    productsCollection.createIndex({
+      webFreshnessScore: -1,
+      realWorldYear: -1,
+      effectiveRealWorldYear: -1,
+      sitemapSortRank: -1,
+      updatedAt: -1,
+    })
+  );
+  await retryOperation("create seed-only queue index", () =>
+    productsCollection.createIndex({
+      seedOnly: 1,
+      sitemapSortRank: -1,
+      webFreshnessScore: -1,
+      updatedAt: 1,
+    })
+  );
   await retryOperation("create errors url index", () =>
     errorsCollection.createIndex({ url: 1 }, { unique: true })
   );
@@ -586,10 +912,15 @@ async function ensureIndexes(productsCollection, errorsCollection) {
 function productUpsertOps(docs) {
   return docs.map((doc) => ({
     updateOne: {
+      // `url` is the stable document identity in this collection. Do not match
+      // by canonical/productUrl here: CellphoneS often canonicalizes variants
+      // to another URL, and updating that matched document would violate the
+      // unique `url_1` index or collapse distinct variants into one record.
       filter: { url: doc.url },
       update: {
         $set: withoutKeys(doc, ["sourceUrls"]),
         $addToSet: { sourceUrls: { $each: doc.sourceUrls } },
+        $unset: { seedOnly: "", seedReason: "" },
         $setOnInsert: { createdAt: new Date() },
       },
       upsert: true,
@@ -647,7 +978,10 @@ async function filterExisting(entries, collection) {
     const docs = await retryOperation("filter existing products", () =>
       collection
         .find(
-          { $or: [{ url: { $in: urls } }, { sourceUrls: { $in: urls } }] },
+          {
+            seedOnly: { $ne: true },
+            $or: [{ url: { $in: urls } }, { sourceUrls: { $in: urls } }],
+          },
           { projection: { url: 1, sourceUrls: 1 } }
         )
         .toArray()
@@ -661,6 +995,62 @@ async function filterExisting(entries, collection) {
   return entries.filter((entry) => !existing.has(entry.url));
 }
 
+function seedDocToEntry(doc) {
+  const sitemap = doc.sitemap || {};
+  return {
+    url: doc.url,
+    sitemapUrl: sitemap.url || null,
+    sitemapRank: doc.sitemapRank ?? sitemap.rank ?? 0,
+    sitemapProductRank: doc.sitemapProductRank ?? sitemap.productRank ?? 0,
+    sitemapSortRank: doc.sitemapSortRank ?? sitemap.sortRank ?? 0,
+    sitemapLastmod: doc.sitemapLastmod || sitemap.lastmod || null,
+    sitemapImages: uniqueStrings([
+      ...asArray(sitemap.images),
+      ...asArray(doc.images),
+      doc.primaryImage,
+      doc.image,
+      doc.thumbnail,
+    ]),
+  };
+}
+
+async function collectSeedOnlyEntries(products, args) {
+  const limit = args.limit || 5000;
+  const docs = await retryOperation("load seed-only product queue", () =>
+    products
+      .find(
+        {
+          source: SOURCE_SITE,
+          seedOnly: true,
+          url: { $type: "string", $ne: "" },
+        },
+        {
+          projection: {
+            url: 1,
+            sitemap: 1,
+            sitemapRank: 1,
+            sitemapProductRank: 1,
+            sitemapSortRank: 1,
+            sitemapLastmod: 1,
+            images: 1,
+            primaryImage: 1,
+            image: 1,
+            thumbnail: 1,
+          },
+        }
+      )
+      .sort({
+        sitemapSortRank: -1,
+        webFreshnessScore: -1,
+        updatedAt: 1,
+      })
+      .limit(limit)
+      .toArray()
+  );
+
+  return docs.map(seedDocToEntry);
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const proxyCount = getProxyUrls().length;
@@ -670,18 +1060,23 @@ async function main() {
       : "[network] Proxy rotation disabled"
   );
 
-  const entries = await collectProductEntries(args);
-  const slicedEntries = entries.slice(
-    args.start,
-    args.limit ? args.start + args.limit : undefined
-  );
+  let entries = [];
+  let slicedEntries = [];
 
-  console.log(`[crawl] Found ${entries.length} unique product URLs`);
-  console.log(`[crawl] Selected ${slicedEntries.length} URLs`);
+  if (!args.seedOnlyQueue) {
+    entries = await collectProductEntries(args);
+    slicedEntries = entries.slice(
+      args.start,
+      args.limit ? args.start + args.limit : undefined
+    );
 
-  if (args.dryRun) {
-    console.log(JSON.stringify(slicedEntries.slice(0, 5), null, 2));
-    return;
+    console.log(`[crawl] Found ${entries.length} unique product URLs`);
+    console.log(`[crawl] Selected ${slicedEntries.length} URLs`);
+
+    if (args.dryRun) {
+      console.log(JSON.stringify(slicedEntries.slice(0, 5), null, 2));
+      return;
+    }
   }
 
   const client = createMongoClient();
@@ -694,16 +1089,35 @@ async function main() {
     const errorsCollection = db.collection(`${productsCollection}_errors`);
     await ensureIndexes(products, errorsCollection);
 
-    let workEntries = slicedEntries;
-    if (args.skipExisting) {
+    let workEntries;
+    let existingSkipped = 0;
+
+    if (args.seedOnlyQueue) {
+      workEntries = await collectSeedOnlyEntries(products, args);
+      slicedEntries = workEntries;
+      console.log(`[crawl] Loaded ${workEntries.length} seed-only URLs from MongoDB`);
+
+      if (args.dryRun) {
+        console.log(JSON.stringify(workEntries.slice(0, 5), null, 2));
+        return;
+      }
+    } else {
+      workEntries = slicedEntries;
+    }
+
+    if (!args.seedOnlyQueue && args.skipExisting) {
       workEntries = await filterExisting(workEntries, products);
+      existingSkipped = slicedEntries.length - workEntries.length;
       console.log(`[crawl] Remaining after --skip-existing: ${workEntries.length}`);
     }
 
     const stats = {
       selected: slicedEntries.length,
+      existingSkipped,
       processed: 0,
       saved: 0,
+      skipped: 0,
+      skippedByStatus: {},
       failed: 0,
       startedAt: new Date(),
     };
@@ -722,8 +1136,20 @@ async function main() {
         stats.processed += 1;
 
         if (result.status === "fulfilled") {
-          docs.push(result.value);
-          stats.saved += 1;
+          const availabilityStatus = result.value?.availability?.status;
+          const shouldSkipByStock =
+            (args.inStockOnly && !isInStockStatus(availabilityStatus)) ||
+            (args.availableOrContact &&
+              !isAvailableOrContactStatus(availabilityStatus));
+
+          if (shouldSkipByStock) {
+            stats.skipped += 1;
+            const key = availabilityStatus || "Unknown";
+            stats.skippedByStatus[key] = (stats.skippedByStatus[key] || 0) + 1;
+          } else {
+            docs.push(result.value);
+            stats.saved += 1;
+          }
         } else if (result.reason && result.reason.isBotChallenge) {
           botChallengeError = result.reason;
           stats.failed += 1;
@@ -747,9 +1173,15 @@ async function main() {
       await writeBatch(products, errorsCollection, docs, errors);
 
       if (stats.processed % 25 === 0 || stats.processed === workEntries.length) {
+        const skippedBreakdown = Object.entries(stats.skippedByStatus)
+          .sort((a, b) => b[1] - a[1])
+          .map(([status, count]) => `${status}:${count}`)
+          .join(", ");
         console.log(
           `[crawl] ${stats.processed}/${workEntries.length} processed, ` +
-            `${stats.saved} saved, ${stats.failed} failed`
+            `${stats.saved} saved, ${stats.skipped} skipped` +
+            (skippedBreakdown ? ` (${skippedBreakdown})` : "") +
+            `, ${stats.failed} failed`
         );
       }
 

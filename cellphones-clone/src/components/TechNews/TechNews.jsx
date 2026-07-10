@@ -1,5 +1,6 @@
 import './TechNews.css';
 import { techNews } from '../../data/mockData';
+import { getRouteForLabel } from '../../utils/linkRoutes';
 
 export default function TechNews() {
   return (
@@ -8,7 +9,7 @@ export default function TechNews() {
         <div className="tech-news-header">
           <h2 id="tech-news-title">Tin tức</h2>
           <span className="tech-news-divider" aria-hidden="true" />
-          <a className="tech-news-view-all" href="#">
+          <a className="tech-news-view-all" href="/tin-tuc/tin-cong-nghe">
             Xem tất cả
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" aria-hidden="true">
               <polyline points="9 18 15 12 9 6" />
@@ -19,7 +20,7 @@ export default function TechNews() {
         <ul className="tech-news-grid">
           {techNews.map((article) => (
             <li className="tech-news-card" key={article.id}>
-              <a href="#">
+              <a href={getRouteForLabel(article.title, 'news')}>
                 <img src={article.thumbnail} alt={article.title} loading="lazy" />
                 <span>{article.title}</span>
               </a>

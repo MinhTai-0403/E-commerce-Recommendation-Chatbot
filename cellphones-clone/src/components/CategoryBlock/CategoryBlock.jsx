@@ -2,12 +2,21 @@ import { useMemo, useState } from 'react';
 import './CategoryBlock.css';
 import ProductCard, { ProductCardSkeleton } from '../ProductCard/ProductCard';
 import { useApiProducts } from '../../hooks/useApiProducts';
+import { buildCategoryPath } from '../../utils/linkRoutes';
 
 const getSkeletonCount = (query, campaignBanner) => {
   const displayLimit = Number(query?.displayLimit || query?.limit || 8);
   const minimumVisible = campaignBanner ? 5 : 6;
   return Math.max(minimumVisible, Math.min(displayLimit, 12));
 };
+
+const getFilterKey = (filter, index) => (
+  typeof filter === 'string' ? filter : (filter?.id ?? index)
+);
+
+const getFilterLabel = (filter) => (
+  typeof filter === 'string' ? filter : (filter?.name || filter?.label || '')
+);
 
 export default function CategoryBlock({ 
   title, 
@@ -26,6 +35,14 @@ export default function CategoryBlock({
   const fallbackProducts = Array.isArray(products) ? products : [];
   const selectedSubCategory = subCategories?.find((subcat) => subcat.id === activeSubCategory);
   const shouldShowSubCategories = Boolean(subCategories?.length) && activeTab === subCategoryTabIndex;
+  const activeCategoryName = tabs?.[activeTab] || title;
+  const activeCategoryPath = useMemo(() => buildCategoryPath(activeCategoryName, {
+    ...(selectedSubCategory?.query || {}),
+    keyword: selectedSubCategory?.name || activeCategoryName,
+    title: selectedSubCategory?.name || activeCategoryName,
+    segment: selectedSubCategory?.segment || selectedSubCategory?.id || '',
+    brand: activeFilter && activeFilter !== 'all' ? activeFilter : '',
+  }), [activeCategoryName, activeFilter, selectedSubCategory]);
   const effectiveQuery = useMemo(() => {
     if (!productQuery) return null;
 
@@ -53,13 +70,14 @@ export default function CategoryBlock({
   const skeletonCount = getSkeletonCount(effectiveQuery || productQuery, campaignBanner);
   const visibleProducts = productQuery ? productItems : productItems.filter((product) => {
     const productBrand = product.brandKey || product.brand;
+    const productBrandKey = String(productBrand || '').toLowerCase();
     const productBrandName = String(product.brandName || product.brand || '').toLowerCase();
     const filterKey = String(activeFilter).toLowerCase();
 
     return (
       activeFilter === 'all' ||
       !productBrand ||
-      productBrand === activeFilter ||
+      productBrandKey === filterKey ||
       productBrandName.includes(filterKey)
     );
   });
@@ -94,7 +112,7 @@ export default function CategoryBlock({
               </div>
             )}
           </div>
-          <a href="#" className="cb-view-all">
+          <a href={activeCategoryPath} className="cb-view-all">
             Xem tất cả
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <polyline points="9 18 15 12 9 6"/>
@@ -106,7 +124,7 @@ export default function CategoryBlock({
           {/* Campaign Banner (Left) */}
           {campaignBanner && (
             <div className="cb-campaign">
-              <a href="#">
+              <a href={activeCategoryPath}>
                 <img src={campaignBanner} alt="Campaign" className="cb-campaign-img" />
               </a>
             </div>
@@ -135,16 +153,21 @@ export default function CategoryBlock({
             {/* Text Filters */}
             {filters && (
               <div className="cb-filters">
-                {filters.map((filter, idx) => (
-                  <button
-                    key={filter.id || idx}
-                    className={`cb-filter-btn ${activeFilter === (filter.id || idx) ? 'active' : ''}`}
-                    onClick={() => setActiveFilter(filter.id || idx)}
-                    aria-pressed={activeFilter === (filter.id || idx)}
-                  >
-                    {filter.name || filter}
-                  </button>
-                ))}
+                {filters.map((filter, idx) => {
+                  const filterKey = getFilterKey(filter, idx);
+                  const filterLabel = getFilterLabel(filter);
+
+                  return (
+                    <button
+                      key={filterKey}
+                      className={`cb-filter-btn ${activeFilter === filterKey ? 'active' : ''}`}
+                      onClick={() => setActiveFilter(filterKey)}
+                      aria-pressed={activeFilter === filterKey}
+                    >
+                      {filterLabel}
+                    </button>
+                  );
+                })}
               </div>
             )}
 
@@ -166,7 +189,7 @@ export default function CategoryBlock({
                       <ProductCard product={product} />
                     </div>
                   ))}
-                  <a href="#" className="cb-view-all-card">
+                  <a href={activeCategoryPath} className="cb-view-all-card">
                     <div className="cb-view-all-circle">
                       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <polyline points="9 18 15 12 9 6"/>

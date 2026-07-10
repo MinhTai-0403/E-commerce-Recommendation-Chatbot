@@ -95,10 +95,10 @@ export function TopBar() {
           </div>
         </div>
         <nav className="topbar-links" aria-label="Liên kết hỗ trợ">
-          <a href="#stores">
+          <a href="/he-thong-cua-hang">
             <StoreIcon /> Cửa hàng gần bạn
           </a>
-          <a href="#orders">
+          <a href="/tra-cuu-don-hang">
             <OrderIcon /> Tra cứu đơn hàng
           </a>
           <a href="tel:18002097">
@@ -204,7 +204,7 @@ export function MainHeader({
         </button>
 
         {/* Search */}
-        <div className="header-search" id="header-search">
+        <form className="header-search" id="header-search" action="/search" method="get">
           <svg
             className="search-icon"
             width="20"
@@ -219,10 +219,11 @@ export function MainHeader({
           </svg>
           <input
             type="text"
+            name="keyword"
             placeholder="Bạn muốn mua gì hôm nay?"
             className="search-input"
           />
-        </div>
+        </form>
 
         {/* Right Actions */}
         <div className="header-actions">

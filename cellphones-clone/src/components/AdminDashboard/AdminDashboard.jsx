@@ -1,20 +1,39 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  createAdminCoupon,
+  createAdminInventory,
   createAdminProduct,
+  createAdminShipment,
+  deleteAdminCoupon,
+  deleteAdminInventory,
   deleteAdminProduct,
   deleteAdminQuestion,
+  deleteAdminReturn,
   deleteAdminReview,
+  deleteAdminShipment,
   deleteAdminUser,
+  fetchAdminAuditLogs,
+  fetchAdminCoupons,
+  fetchAdminInventory,
   fetchAdminOrders,
+  fetchAdminPayments,
   fetchAdminProducts,
   fetchAdminQuestions,
+  fetchAdminReturns,
+  fetchAdminRevenue,
   fetchAdminReviews,
+  fetchAdminShipments,
   fetchAdminSummary,
   fetchAdminUsers,
+  updateAdminCoupon,
+  updateAdminInventory,
   updateAdminOrder,
+  updateAdminPayment,
   updateAdminProduct,
   updateAdminQuestion,
+  updateAdminReturn,
   updateAdminReview,
+  updateAdminShipment,
   updateAdminUser,
 } from '../../services/apiAdmin';
 import { clearAuthSession } from '../../services/apiAuth';
@@ -32,6 +51,33 @@ const emptyProductForm = {
   description: '',
 };
 
+const emptyCouponForm = {
+  code: '',
+  name: '',
+  description: '',
+  type: 'fixed',
+  value: '',
+  maxDiscount: '',
+  minSubtotal: '',
+  usageLimit: '',
+  userLimit: '',
+  startsAt: '',
+  expiresAt: '',
+  status: 'active',
+};
+
+const couponTypeOptions = [
+  { value: 'fixed', label: 'Giảm tiền cố định' },
+  { value: 'percent', label: 'Giảm theo %' },
+  { value: 'free_shipping', label: 'Miễn phí vận chuyển' },
+];
+
+const couponStatusOptions = [
+  { value: 'active', label: 'Đang bật' },
+  { value: 'inactive', label: 'Tạm tắt' },
+  { value: 'expired', label: 'Hết hạn' },
+];
+
 const orderStatusOptions = [
   { value: 'pending', label: 'Chờ xác nhận' },
   { value: 'confirmed', label: 'Đã xác nhận' },
@@ -44,6 +90,7 @@ const orderStatusOptions = [
 
 const paymentStatusOptions = [
   { value: 'unpaid', label: 'Chưa thanh toán' },
+  { value: 'pending', label: 'Chờ chuyển khoản' },
   { value: 'paid', label: 'Đã thanh toán' },
   { value: 'refunded', label: 'Đã hoàn tiền' },
   { value: 'failed', label: 'Thanh toán lỗi' },
@@ -71,6 +118,48 @@ function splitTextList(value) {
     .split(/[,|\n]/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function readImageFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    if (!file) {
+      resolve('');
+      return;
+    }
+
+    if (!file.type.startsWith('image/')) {
+      reject(new Error('Vui lòng chọn đúng file ảnh.'));
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      reject(new Error('Ảnh quá lớn. Vui lòng chọn ảnh dưới 5MB.'));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Không thể đọc file ảnh.'));
+    reader.onload = () => {
+      const image = new Image();
+      image.onerror = () => reject(new Error('File ảnh không hợp lệ hoặc đã bị lỗi.'));
+      image.onload = () => {
+        const maxSize = 640;
+        const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
+        const width = Math.max(1, Math.round(image.width * scale));
+        const height = Math.max(1, Math.round(image.height * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext('2d');
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, width, height);
+        context.drawImage(image, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.82));
+      };
+      image.src = String(reader.result || '');
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 function productToForm(product) {
@@ -110,6 +199,64 @@ function buildProductPayload(form) {
   };
 }
 
+function toDatetimeLocalValue(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60 * 1000);
+  return localDate.toISOString().slice(0, 16);
+}
+
+function couponToForm(coupon = {}) {
+  return {
+    code: coupon.code || '',
+    name: coupon.name || '',
+    description: coupon.description || '',
+    type: coupon.type || 'fixed',
+    value: coupon.value ?? '',
+    maxDiscount: coupon.maxDiscount ?? '',
+    minSubtotal: coupon.minSubtotal ?? '',
+    usageLimit: coupon.usageLimit ?? '',
+    userLimit: coupon.userLimit ?? '',
+    startsAt: toDatetimeLocalValue(coupon.startsAt),
+    expiresAt: toDatetimeLocalValue(coupon.expiresAt),
+    status: coupon.status || 'active',
+  };
+}
+
+function numberOrUndefined(value) {
+  if (value === '' || value === null || value === undefined) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function dateOrUndefined(value) {
+  return value ? new Date(value).toISOString() : undefined;
+}
+
+function buildCouponPayload(form) {
+  const payload = {
+    code: form.code.trim().toUpperCase(),
+    name: form.name.trim(),
+    description: form.description.trim(),
+    type: form.type || 'fixed',
+    value: numberOrUndefined(form.value) ?? 0,
+    maxDiscount: numberOrUndefined(form.maxDiscount),
+    minSubtotal: numberOrUndefined(form.minSubtotal) ?? 0,
+    usageLimit: numberOrUndefined(form.usageLimit),
+    userLimit: numberOrUndefined(form.userLimit),
+    startsAt: dateOrUndefined(form.startsAt),
+    expiresAt: dateOrUndefined(form.expiresAt),
+    status: form.status || 'active',
+  };
+
+  Object.keys(payload).forEach((key) => {
+    if (payload[key] === undefined) delete payload[key];
+  });
+
+  return payload;
+}
+
 function StatCard({ label, value, tone }) {
   return (
     <div className={`admin-stat-card ${tone || ''}`}>
@@ -131,6 +278,20 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
   const [usersPayload, setUsersPayload] = useState(null);
   const [questionsPayload, setQuestionsPayload] = useState(null);
   const [reviewsPayload, setReviewsPayload] = useState(null);
+  const [couponsPayload, setCouponsPayload] = useState(null);
+  const [inventoryPayload, setInventoryPayload] = useState(null);
+  const [paymentsPayload, setPaymentsPayload] = useState(null);
+  const [shipmentsPayload, setShipmentsPayload] = useState(null);
+  const [returnsPayload, setReturnsPayload] = useState(null);
+  const [revenuePayload, setRevenuePayload] = useState(null);
+  const [auditLogsPayload, setAuditLogsPayload] = useState(null);
+
+  const [couponSearch, setCouponSearch] = useState('');
+  const [inventorySearch, setInventorySearch] = useState('');
+  const [paymentSearch, setPaymentSearch] = useState('');
+  const [shipmentSearch, setShipmentSearch] = useState('');
+  const [returnSearch, setReturnSearch] = useState('');
+  const [returnNotes, setReturnNotes] = useState({});
   const [productSearch, setProductSearch] = useState('');
   const [orderSearch, setOrderSearch] = useState('');
   const [orderStatusFilter, setOrderStatusFilter] = useState('all');
@@ -142,12 +303,20 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
   const [reviewReplies, setReviewReplies] = useState({});
   const [productForm, setProductForm] = useState(emptyProductForm);
   const [editingProduct, setEditingProduct] = useState(null);
+  const [couponForm, setCouponForm] = useState(emptyCouponForm);
+  const [editingCoupon, setEditingCoupon] = useState(null);
 
   const orders = ordersPayload?.data || [];
   const products = productsPayload?.data || [];
   const users = usersPayload?.data || [];
   const questions = questionsPayload?.data || [];
   const reviews = reviewsPayload?.data || [];
+  const coupons = couponsPayload?.data || [];
+  const inventoryItems = inventoryPayload?.data || [];
+  const payments = paymentsPayload?.data || [];
+  const shipments = shipmentsPayload?.data || [];
+  const returns = returnsPayload?.data || [];
+  const auditLogs = auditLogsPayload?.data || [];
   const stats = summary?.cards || {};
   const isAdmin = currentUser?.role === 'admin';
   const adminName = currentUser?.fullName || currentUser?.email || currentUser?.username || 'Quản trị viên';
@@ -159,6 +328,13 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
     { id: 'users', label: 'Người dùng' },
     { id: 'questions', label: 'Hỏi đáp' },
     { id: 'reviews', label: 'Đánh giá' },
+    { id: 'coupons', label: 'Mã giảm giá' },
+    { id: 'inventory', label: 'Tồn kho' },
+    { id: 'payments', label: 'Thanh toán' },
+    { id: 'shipments', label: 'Vận chuyển' },
+    { id: 'returns', label: 'Đổi trả' },
+    { id: 'revenue', label: 'Doanh thu' },
+    { id: 'audit', label: 'Nhật ký' },
   ], []);
 
   useEffect(() => {
@@ -234,6 +410,61 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
             ));
           }
         }
+
+        if (activeTab === 'coupons') {
+          const data = await fetchAdminCoupons({
+            q: couponSearch.trim(),
+            limit: 50,
+          });
+          if (!ignore) setCouponsPayload(data);
+        }
+
+        if (activeTab === 'inventory') {
+          const data = await fetchAdminInventory({
+            q: inventorySearch.trim(),
+            limit: 50,
+          });
+          if (!ignore) setInventoryPayload(data);
+        }
+
+        if (activeTab === 'payments') {
+          const data = await fetchAdminPayments({
+            q: paymentSearch.trim(),
+            limit: 50,
+          });
+          if (!ignore) setPaymentsPayload(data);
+        }
+
+        if (activeTab === 'shipments') {
+          const data = await fetchAdminShipments({
+            q: shipmentSearch.trim(),
+            limit: 50,
+          });
+          if (!ignore) setShipmentsPayload(data);
+        }
+
+        if (activeTab === 'returns') {
+          const data = await fetchAdminReturns({
+            q: returnSearch.trim(),
+            limit: 50,
+          });
+          if (!ignore) {
+            setReturnsPayload(data);
+            setReturnNotes(Object.fromEntries(
+              (data.data || []).map((item) => [item.id, item.adminNote || ''])
+            ));
+          }
+        }
+
+        if (activeTab === 'revenue') {
+          const data = await fetchAdminRevenue();
+          if (!ignore) setRevenuePayload(data);
+        }
+
+        if (activeTab === 'audit') {
+          const data = await fetchAdminAuditLogs({ limit: 50 });
+          if (!ignore) setAuditLogsPayload(data);
+        }
       } catch (loadError) {
         if (!ignore) setError(loadError.message || 'Không thể tải dữ liệu admin.');
       } finally {
@@ -245,7 +476,22 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
     return () => {
       ignore = true;
     };
-  }, [activeTab, isAdmin, orderSearch, orderStatusFilter, productSearch, questionSearch, refreshTick, reviewSearch, userSearch]);
+  }, [
+    activeTab,
+    isAdmin,
+    orderSearch,
+    orderStatusFilter,
+    productSearch,
+    questionSearch,
+    refreshTick,
+    reviewSearch,
+    userSearch,
+    couponSearch,
+    inventorySearch,
+    paymentSearch,
+    shipmentSearch,
+    returnSearch,
+  ]);
 
   const refresh = () => setRefreshTick((value) => value + 1);
 
@@ -311,6 +557,22 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
     setEditingProduct(null);
   };
 
+  const handleProductImageFileChange = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    setError('');
+    setMessage('');
+
+    try {
+      const dataUrl = await readImageFileAsDataUrl(file);
+      if (!dataUrl) return;
+      updateProductField('primaryImage', dataUrl);
+      setMessage('Đã chọn ảnh sản phẩm. Bấm Thêm/Lưu để lưu vào MongoDB.');
+    } catch (imageError) {
+      setError(imageError.message || 'Không thể chọn ảnh sản phẩm.');
+    }
+  };
+
   const handleEditProduct = (product) => {
     setEditingProduct(product);
     setProductForm(productToForm(product));
@@ -360,6 +622,86 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
       refresh();
     } catch (deleteError) {
       setError(deleteError.message || 'Không thể xóa sản phẩm.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateCouponField = (field, value) => {
+    setCouponForm((previous) => ({ ...previous, [field]: value }));
+  };
+
+  const resetCouponForm = () => {
+    setCouponForm(emptyCouponForm);
+    setEditingCoupon(null);
+  };
+
+  const handleEditCoupon = (coupon) => {
+    setEditingCoupon(coupon);
+    setCouponForm(couponToForm(coupon));
+    setActiveTab('coupons');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleSubmitCoupon = async (event) => {
+    event.preventDefault();
+    setError('');
+    setMessage('');
+
+    if (!couponForm.code.trim()) {
+      setError('Vui lòng nhập mã giảm giá.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const payload = buildCouponPayload(couponForm);
+      if (editingCoupon) {
+        await updateAdminCoupon(editingCoupon.id || editingCoupon.code, payload);
+        setMessage('Đã cập nhật mã giảm giá.');
+      } else {
+        await createAdminCoupon(payload);
+        setMessage('Đã thêm mã giảm giá mới.');
+      }
+      resetCouponForm();
+      setActiveTab('coupons');
+      refresh();
+    } catch (submitError) {
+      setError(submitError.message || 'Không thể lưu mã giảm giá.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleQuickUpdateCouponStatus = async (coupon, status) => {
+    setLoading(true);
+    setError('');
+    setMessage('');
+
+    try {
+      await updateAdminCoupon(coupon.id || coupon.code, { status });
+      setMessage('Đã cập nhật trạng thái mã giảm giá.');
+      refresh();
+    } catch (updateError) {
+      setError(updateError.message || 'Không thể cập nhật trạng thái mã giảm giá.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteCoupon = async (coupon) => {
+    if (!window.confirm(`Xóa mã giảm giá "${coupon.code}"?`)) return;
+
+    setLoading(true);
+    setError('');
+
+    try {
+      await deleteAdminCoupon(coupon.id || coupon.code);
+      if (editingCoupon?.id === coupon.id) resetCouponForm();
+      setMessage('Đã xóa mã giảm giá.');
+      refresh();
+    } catch (deleteError) {
+      setError(deleteError.message || 'Không thể xóa mã giảm giá.');
     } finally {
       setLoading(false);
     }
@@ -506,6 +848,60 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
       refresh();
     } catch (deleteError) {
       setError(deleteError.message || 'Không thể xóa đánh giá.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdateReturnStatus = async (returnItem, status) => {
+    setLoading(true);
+    setError('');
+    setMessage('');
+
+    try {
+      await updateAdminReturn(returnItem.id || returnItem.returnCode, {
+        status,
+        adminNote: returnNotes[returnItem.id] || '',
+      });
+      setMessage('Đã cập nhật yêu cầu đổi trả.');
+      refresh();
+    } catch (updateError) {
+      setError(updateError.message || 'Không thể cập nhật yêu cầu đổi trả.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveReturnNote = async (returnItem) => {
+    setLoading(true);
+    setError('');
+    setMessage('');
+
+    try {
+      await updateAdminReturn(returnItem.id || returnItem.returnCode, {
+        adminNote: returnNotes[returnItem.id] || '',
+      });
+      setMessage('Đã lưu ghi chú đổi trả.');
+      refresh();
+    } catch (updateError) {
+      setError(updateError.message || 'Không thể lưu ghi chú đổi trả.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteReturn = async (returnItem) => {
+    if (!window.confirm(`Xóa yêu cầu đổi trả "${returnItem.returnCode}"?`)) return;
+
+    setLoading(true);
+    setError('');
+
+    try {
+      await deleteAdminReturn(returnItem.id || returnItem.returnCode);
+      setMessage('Đã xóa yêu cầu đổi trả.');
+      refresh();
+    } catch (deleteError) {
+      setError(deleteError.message || 'Không thể xóa yêu cầu đổi trả.');
     } finally {
       setLoading(false);
     }
@@ -733,6 +1129,12 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                           <span>Tổng tiền</span>
                           <strong>{formatCurrency(order.totals?.total || order.totals?.roundedTotal)}</strong>
                           <small>{order.payment?.methodLabel || 'Thanh toán COD'}</small>
+                          {order.payment?.transferContent && (
+                            <small>Mã CK: {order.payment.transferContent}</small>
+                          )}
+                          {order.payment?.bankReference && (
+                            <small>GD: {order.payment.bankReference}</small>
+                          )}
                         </div>
                       </div>
 
@@ -875,13 +1277,27 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                 </label>
               </div>
 
-              <label>
+              <label className="admin-image-upload">
                 Ảnh chính
+                {productForm.primaryImage && (
+                  <img src={productForm.primaryImage} alt="Xem trước ảnh sản phẩm" />
+                )}
                 <input
-                  value={productForm.primaryImage}
+                  value={productForm.primaryImage?.startsWith('data:image/') ? '' : productForm.primaryImage}
                   onChange={(event) => updateProductField('primaryImage', event.target.value)}
-                  placeholder="https://..."
+                  placeholder="Dán URL ảnh nếu muốn dùng ảnh online"
                 />
+                <input type="file" accept="image/*" onChange={handleProductImageFileChange} />
+                <small>Ảnh chọn từ máy sẽ được tự nén rồi lưu vào MongoDB trong field primaryImage/images.</small>
+                {productForm.primaryImage?.startsWith('data:image/') && (
+                  <button
+                    type="button"
+                    className="admin-clear-image-btn"
+                    onClick={() => updateProductField('primaryImage', '')}
+                  >
+                    Xóa ảnh đã chọn
+                  </button>
+                )}
               </label>
 
               <label>
@@ -927,6 +1343,445 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                   </div>
                 ))}
                 {!products.length && <p className="admin-empty">Không có sản phẩm phù hợp.</p>}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {activeTab === 'coupons' && (
+          <section className="admin-section admin-coupons-layout">
+            <form className="admin-card admin-product-form" onSubmit={handleSubmitCoupon}>
+              <div className="admin-card-title-row">
+                <div>
+                  <h2>{editingCoupon ? 'Sửa mã giảm giá' : 'Thêm mã giảm giá'}</h2>
+                  <p className="admin-card-subtitle">
+                    Tạo mã voucher dùng cho checkout và trang Smember.
+                  </p>
+                </div>
+                {editingCoupon && (
+                  <button type="button" className="ghost" onClick={resetCouponForm}>Hủy sửa</button>
+                )}
+              </div>
+
+              <div className="admin-form-grid">
+                <label>
+                  Mã giảm giá
+                  <input
+                    value={couponForm.code}
+                    onChange={(event) => updateCouponField('code', event.target.value.toUpperCase())}
+                    placeholder="VD: SMEMBER50"
+                  />
+                </label>
+                <label>
+                  Trạng thái
+                  <select
+                    value={couponForm.status}
+                    onChange={(event) => updateCouponField('status', event.target.value)}
+                  >
+                    {couponStatusOptions.map((status) => (
+                      <option key={status.value} value={status.value}>{status.label}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <label>
+                Tên ưu đãi
+                <input
+                  value={couponForm.name}
+                  onChange={(event) => updateCouponField('name', event.target.value)}
+                  placeholder="VD: Giảm 50K cho thành viên mới"
+                />
+              </label>
+
+              <label>
+                Mô tả
+                <textarea
+                  value={couponForm.description}
+                  onChange={(event) => updateCouponField('description', event.target.value)}
+                  rows="3"
+                  placeholder="Mô tả điều kiện áp dụng mã..."
+                />
+              </label>
+
+              <div className="admin-form-grid">
+                <label>
+                  Loại giảm
+                  <select
+                    value={couponForm.type}
+                    onChange={(event) => updateCouponField('type', event.target.value)}
+                  >
+                    {couponTypeOptions.map((type) => (
+                      <option key={type.value} value={type.value}>{type.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Giá trị
+                  <input
+                    type="number"
+                    min="0"
+                    value={couponForm.value}
+                    onChange={(event) => updateCouponField('value', event.target.value)}
+                    placeholder={couponForm.type === 'percent' ? 'VD: 10' : 'VD: 50000'}
+                  />
+                </label>
+              </div>
+
+              <div className="admin-form-grid">
+                <label>
+                  Giảm tối đa
+                  <input
+                    type="number"
+                    min="0"
+                    value={couponForm.maxDiscount}
+                    onChange={(event) => updateCouponField('maxDiscount', event.target.value)}
+                    placeholder="VD: 300000"
+                  />
+                </label>
+                <label>
+                  Đơn tối thiểu
+                  <input
+                    type="number"
+                    min="0"
+                    value={couponForm.minSubtotal}
+                    onChange={(event) => updateCouponField('minSubtotal', event.target.value)}
+                    placeholder="VD: 1000000"
+                  />
+                </label>
+              </div>
+
+              <div className="admin-form-grid">
+                <label>
+                  Tổng lượt dùng
+                  <input
+                    type="number"
+                    min="0"
+                    value={couponForm.usageLimit}
+                    onChange={(event) => updateCouponField('usageLimit', event.target.value)}
+                    placeholder="Để trống nếu không giới hạn"
+                  />
+                </label>
+                <label>
+                  Lượt/user
+                  <input
+                    type="number"
+                    min="0"
+                    value={couponForm.userLimit}
+                    onChange={(event) => updateCouponField('userLimit', event.target.value)}
+                    placeholder="VD: 1"
+                  />
+                </label>
+              </div>
+
+              <div className="admin-form-grid">
+                <label>
+                  Bắt đầu
+                  <input
+                    type="datetime-local"
+                    value={couponForm.startsAt}
+                    onChange={(event) => updateCouponField('startsAt', event.target.value)}
+                  />
+                </label>
+                <label>
+                  Hết hạn
+                  <input
+                    type="datetime-local"
+                    value={couponForm.expiresAt}
+                    onChange={(event) => updateCouponField('expiresAt', event.target.value)}
+                  />
+                </label>
+              </div>
+
+              <button type="submit" className="admin-primary-btn" disabled={loading}>
+                {editingCoupon ? 'Lưu thay đổi mã' : 'Thêm mã giảm giá'}
+              </button>
+            </form>
+
+            <div className="admin-card admin-table-card">
+              <div className="admin-card-title-row">
+                <div>
+                  <h2>Danh sách mã giảm giá</h2>
+                  <p className="admin-card-subtitle">
+                    Bấm Sửa để chỉnh, Bật/Tắt để đổi trạng thái, Xóa để gỡ mã.
+                  </p>
+                </div>
+                <div className="admin-search">
+                  <input
+                    value={couponSearch}
+                    onChange={(event) => setCouponSearch(event.target.value)}
+                    placeholder="Tìm mã, tên ưu đãi..."
+                  />
+                </div>
+              </div>
+
+              <div className="admin-table">
+                {coupons.map((coupon) => (
+                  <div className="admin-list-row admin-coupon-row" key={coupon.id || coupon.code}>
+                    <div>
+                      <strong>{coupon.code}</strong>
+                      <span>{coupon.name || coupon.description || 'Mã giảm giá'}</span>
+                      <small>
+                        Loại: {coupon.type} · Giá trị: {coupon.type === 'percent' ? `${coupon.value}%` : formatCurrency(coupon.value)}
+                        {coupon.maxDiscount ? ` · Tối đa ${formatCurrency(coupon.maxDiscount)}` : ''}
+                      </small>
+                      <small>
+                        Đơn tối thiểu: {formatCurrency(coupon.minSubtotal || 0)} · Đã dùng: {coupon.usedCount || 0}
+                        {coupon.usageLimit ? `/${coupon.usageLimit}` : ''} · HSD: {formatDate(coupon.expiresAt)}
+                      </small>
+                    </div>
+                    <div className="admin-coupon-actions">
+                      <em className={`admin-status ${coupon.status}`}>{coupon.status}</em>
+                      <div className="admin-row-actions">
+                        <button type="button" onClick={() => handleEditCoupon(coupon)}>Sửa</button>
+                        <button
+                          type="button"
+                          onClick={() => handleQuickUpdateCouponStatus(
+                            coupon,
+                            coupon.status === 'active' ? 'inactive' : 'active'
+                          )}
+                        >
+                          {coupon.status === 'active' ? 'Tắt' : 'Bật'}
+                        </button>
+                        <button type="button" className="danger" onClick={() => handleDeleteCoupon(coupon)}>
+                          Xóa
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {!coupons.length && <p className="admin-empty">Chưa có mã giảm giá.</p>}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {activeTab === 'inventory' && (
+          <section className="admin-section">
+            <div className="admin-card">
+              <div className="admin-card-title-row">
+                <h2>Quản lý tồn kho</h2>
+                <div className="admin-search">
+                  <input
+                    value={inventorySearch}
+                    onChange={(event) => setInventorySearch(event.target.value)}
+                    placeholder="Tìm sản phẩm, SKU, key tồn kho..."
+                  />
+                </div>
+              </div>
+
+              <div className="admin-table">
+                {inventoryItems.map((item) => (
+                  <div className="admin-list-row" key={item.id}>
+                    <div>
+                      <strong>{item.productName || item.productSlug || item.productSku}</strong>
+                      <span>{item.key}</span>
+                      <small>
+                        Tồn: {item.stock} · Giữ chỗ: {item.reservedStock} · Có thể bán: {item.availableStock}
+                      </small>
+                    </div>
+                    <em className={`admin-status ${item.status}`}>{item.status}</em>
+                  </div>
+                ))}
+                {!inventoryItems.length && <p className="admin-empty">Chưa có dữ liệu tồn kho.</p>}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {activeTab === 'payments' && (
+          <section className="admin-section">
+            <div className="admin-card">
+              <div className="admin-card-title-row">
+                <h2>Quản lý thanh toán</h2>
+                <div className="admin-search">
+                  <input
+                    value={paymentSearch}
+                    onChange={(event) => setPaymentSearch(event.target.value)}
+                    placeholder="Tìm mã đơn, giao dịch, ngân hàng..."
+                  />
+                </div>
+              </div>
+
+              <div className="admin-table">
+                {payments.map((payment) => (
+                  <div className="admin-list-row" key={payment.id}>
+                    <div>
+                      <strong>{payment.orderCode || payment.transactionId}</strong>
+                      <span>{formatCurrency(payment.amount)}</span>
+                      <small>
+                        GD: {payment.transactionId || '—'} · Bank ref: {payment.bankReference || '—'}
+                      </small>
+                      <small>{formatDate(payment.createdAt)}</small>
+                    </div>
+                    <em className={`admin-status ${payment.status}`}>{payment.status}</em>
+                  </div>
+                ))}
+                {!payments.length && <p className="admin-empty">Chưa có dữ liệu thanh toán.</p>}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {activeTab === 'shipments' && (
+          <section className="admin-section">
+            <div className="admin-card">
+              <div className="admin-card-title-row">
+                <h2>Quản lý vận chuyển</h2>
+                <div className="admin-search">
+                  <input
+                    value={shipmentSearch}
+                    onChange={(event) => setShipmentSearch(event.target.value)}
+                    placeholder="Tìm mã đơn, mã vận đơn, người nhận..."
+                  />
+                </div>
+              </div>
+
+              <div className="admin-table">
+                {shipments.map((shipment) => (
+                  <div className="admin-list-row" key={shipment.id}>
+                    <div>
+                      <strong>Đơn #{shipment.orderCode}</strong>
+                      <span>{shipment.carrier || 'Đơn vị vận chuyển'} · {shipment.trackingCode || 'Chưa có mã vận đơn'}</span>
+                      <small>{shipment.receiverName} · {shipment.receiverPhone}</small>
+                      <small>ETA: {formatDate(shipment.estimatedDeliveryAt)}</small>
+                    </div>
+                    <em className={`admin-status ${shipment.status}`}>{shipment.status}</em>
+                  </div>
+                ))}
+                {!shipments.length && <p className="admin-empty">Chưa có vận đơn.</p>}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {activeTab === 'returns' && (
+          <section className="admin-section">
+            <div className="admin-card">
+              <div className="admin-card-title-row">
+                <div>
+                  <h2>Quản lý đổi trả</h2>
+                  <p className="admin-card-subtitle">
+                    Tiếp nhận, duyệt, từ chối hoặc hoàn tất yêu cầu đổi trả của khách hàng.
+                  </p>
+                </div>
+                <div className="admin-search">
+                  <input
+                    value={returnSearch}
+                    onChange={(event) => setReturnSearch(event.target.value)}
+                    placeholder="Tìm mã đổi trả, mã đơn, sản phẩm, SĐT..."
+                  />
+                </div>
+              </div>
+
+              <div className="admin-order-list">
+                {returns.map((returnItem) => (
+                  <article className="admin-order-row" key={returnItem.id || returnItem.returnCode}>
+                    <div className="admin-order-head">
+                      <div>
+                        <strong>#{returnItem.returnCode}</strong>
+                        <span>Đơn hàng #{returnItem.orderCode} · {formatDate(returnItem.createdAt)}</span>
+                      </div>
+                      <em className={`admin-status ${returnItem.status}`}>{returnItem.statusLabel || returnItem.status}</em>
+                    </div>
+
+                    <div className="admin-order-body">
+                      <div>
+                        <strong>{returnItem.productName || returnItem.productSlug || 'Sản phẩm đổi trả'}</strong>
+                        <span>SĐT khách: {returnItem.customerPhone || '—'}</span>
+                        <span>Lý do: {returnItem.reason || '—'}</span>
+                        {returnItem.note && <span>Ghi chú khách: {returnItem.note}</span>}
+                      </div>
+                    </div>
+
+                    <div className="admin-order-controls">
+                      <label>
+                        Trạng thái đổi trả
+                        <select
+                          value={returnItem.status || 'pending'}
+                          onChange={(event) => handleUpdateReturnStatus(returnItem, event.target.value)}
+                        >
+                          <option value="pending">Chờ tiếp nhận</option>
+                          <option value="received">Đã tiếp nhận</option>
+                          <option value="approved">Đã duyệt</option>
+                          <option value="rejected">Từ chối</option>
+                          <option value="completed">Hoàn tất</option>
+                          <option value="cancelled">Đã hủy</option>
+                        </select>
+                      </label>
+
+                      <label className="admin-order-note">
+                        Ghi chú admin
+                        <textarea
+                          value={returnNotes[returnItem.id] || ''}
+                          onChange={(event) => setReturnNotes((previous) => ({
+                            ...previous,
+                            [returnItem.id]: event.target.value,
+                          }))}
+                          rows="2"
+                          placeholder="VD: Đã gọi khách, chờ gửi sản phẩm về..."
+                        />
+                      </label>
+
+                      <button type="button" onClick={() => handleSaveReturnNote(returnItem)}>
+                        Lưu ghi chú
+                      </button>
+
+                      <button type="button" className="danger" onClick={() => handleDeleteReturn(returnItem)}>
+                        Xóa
+                      </button>
+                    </div>
+                  </article>
+                ))}
+
+                {!returns.length && <p className="admin-empty">Chưa có yêu cầu đổi trả.</p>}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {activeTab === 'revenue' && (
+          <section className="admin-section">
+            <div className="admin-stat-grid">
+              <StatCard label="Doanh thu" value={formatCurrency(revenuePayload?.summary?.revenue || 0)} tone="green" />
+              <StatCard label="Số đơn" value={revenuePayload?.summary?.orders || 0} tone="blue" />
+              <StatCard label="Số dòng sản phẩm" value={revenuePayload?.summary?.items || 0} tone="orange" />
+            </div>
+
+            <div className="admin-card">
+              <h2>Doanh thu theo ngày</h2>
+              <div className="admin-table">
+                {(revenuePayload?.daily || []).map((row) => (
+                  <div className="admin-list-row" key={row.date}>
+                    <div>
+                      <strong>{row.date}</strong>
+                      <span>{row.orders} đơn hàng</span>
+                    </div>
+                    <em>{formatCurrency(row.revenue)}</em>
+                  </div>
+                ))}
+                {!revenuePayload?.daily?.length && <p className="admin-empty">Chưa có dữ liệu doanh thu.</p>}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {activeTab === 'audit' && (
+          <section className="admin-section">
+            <div className="admin-card">
+              <h2>Nhật ký thao tác admin</h2>
+              <div className="admin-table">
+                {auditLogs.map((log) => (
+                  <div className="admin-list-row" key={log.id}>
+                    <div>
+                      <strong>{log.action} · {log.targetType}</strong>
+                      <span>Target: {log.targetId}</span>
+                      <small>{log.actorEmail || log.actorRole || 'admin'} · {formatDate(log.createdAt)}</small>
+                    </div>
+                    <em>{log.actorRole}</em>
+                  </div>
+                ))}
+                {!auditLogs.length && <p className="admin-empty">Chưa có nhật ký thao tác.</p>}
               </div>
             </div>
           </section>

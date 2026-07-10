@@ -1,11 +1,13 @@
 const { createMongoClient, getMongoConfig } = require("../config/mongodb");
 const { extractCellphonesDetails } = require("../cellphones/cellphones-detail-extractor");
 const {
+  buildProductDetailInlineStorage,
   buildProductDetailManifest,
   writeProductDetailFile,
 } = require("../storage/product-detail-storage");
 const { ProxyAgent } = require("undici");
 const fs = require("fs/promises");
+const path = require("path");
 
 const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
@@ -19,6 +21,7 @@ function parseArgs(argv) {
     dryRun: false,
     includeHtml: false,
     fromProducts: false,
+    fromWeakDetails: false,
     urlFile: "",
     syncProducts: true,
     batchSize: 25,
@@ -30,6 +33,9 @@ function parseArgs(argv) {
     noProxy: false,
     shards: 1,
     shardIndex: 0,
+    inlineGzip: false,
+    minJsonBytes: 5000,
+    failureFile: "",
   };
 
   for (const arg of argv) {
@@ -44,6 +50,8 @@ function parseArgs(argv) {
     else if (name === "--retries") args.retries = Math.max(0, Number(value || 2));
     else if (name === "--shards") args.shards = Math.max(1, Number(value || 1));
     else if (name === "--shard-index") args.shardIndex = Math.max(0, Number(value || 0));
+    else if (name === "--min-json-bytes") args.minJsonBytes = Math.max(0, Number(value || 5000));
+    else if (name === "--failure-file" && value) args.failureFile = value;
     else if ((name === "--proxy" || name === "--proxies") && value) args.proxyInput = value;
     else if (arg === "--dry-run") args.dryRun = true;
     else if (arg === "--fail-fast") args.failFast = true;
@@ -51,6 +59,8 @@ function parseArgs(argv) {
     else if (arg === "--rescrape") args.rescrape = true;
     else if (arg === "--include-html") args.includeHtml = true;
     else if (arg === "--from-products") args.fromProducts = true;
+    else if (arg === "--from-weak-details") args.fromWeakDetails = true;
+    else if (arg === "--inline-gzip") args.inlineGzip = true;
     else if (arg === "--no-sync-products") args.syncProducts = false;
     else if (arg === "--help") {
       printHelp();
@@ -133,6 +143,8 @@ Options:
   --urls=A,B       Scrape multiple comma-separated URLs.
   --url-file=PATH   Scrape URLs from a newline-delimited file.
   --from-products  Pull product URLs from MongoDB products collection.
+  --from-weak-details
+                   Pull only weak/empty URLs from MongoDB details collection.
   --limit=N        Max products when using --from-products. Default: 20.
   --dry-run        Print extracted details without writing MongoDB.
   --include-html   Store article HTML blocks in addition to text.
@@ -144,6 +156,11 @@ Options:
   --shards=N       Split product URL list into N deterministic workers. Default: 1.
   --shard-index=N  Worker index from 0 to N-1. Default: 0.
   --rescrape       Include products already present in details collection.
+  --inline-gzip    Store the compressed detail directly in MongoDB detailBlob.
+  --min-json-bytes=N
+                   Treat smaller manifests as weak. Default: 5000.
+  --failure-file=PATH
+                   Persist unavailable URLs so resume runs can move past them.
   --fail-fast      Stop on the first failed URL. Default: skip failed URLs.
   --no-sync-products
                    Only write details collection, skip products summary upsert.
@@ -173,7 +190,62 @@ async function fetchHtml(url, args) {
     throw error;
   }
 
-  return response.text();
+  const html = await response.text();
+  const title = (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || "";
+  const isChallenge =
+    /Just a moment|Attention Required|cf-chl-widget|challenge-platform/i.test(title) ||
+    /<title[^>]*>\s*(?:Access denied|Forbidden|Captcha)/i.test(html);
+
+  if (isChallenge) {
+    const error = new Error(`Bot protection challenge for ${url}`);
+    error.statusCode = 403;
+    error.proxyId = proxy?.id;
+    throw error;
+  }
+
+  if (html.length < 10000 && !title.trim() && !/"@type"\s*:\s*"Product"/i.test(html)) {
+    const error = new Error(`Source page no longer contains product data for ${url}`);
+    error.statusCode = 410;
+    error.proxyId = proxy?.id;
+    error.permanent = true;
+    throw error;
+  }
+
+  return html;
+}
+
+function detailContentCount(detail = {}) {
+  const fields = [
+    "media",
+    "highlights",
+    "variants",
+    "colors",
+    "promotions",
+    "specifications",
+    "relatedProducts",
+    "news",
+    "faqs",
+  ];
+  return fields.reduce(
+    (sum, field) => sum + (Array.isArray(detail[field]) ? detail[field].length : 0),
+    0
+  );
+}
+
+function validateExtractedDetail(detail, url, minJsonBytes) {
+  const name = String(detail?.name || detail?.productName || "").trim();
+  const image = detail?.thumbnail || detail?.image || detail?.primaryImage || detail?.images?.[0];
+  const jsonBytes = Buffer.byteLength(JSON.stringify(detail || {}), "utf8");
+  const contentCount = detailContentCount(detail);
+
+  if (!name || !image) {
+    throw new Error(`Extracted detail is missing name/image for ${url}`);
+  }
+  if (contentCount === 0) {
+    const error = new Error(`Extracted detail is still empty (${jsonBytes} bytes) for ${url}`);
+    error.permanent = true;
+    throw error;
+  }
 }
 
 async function scrapeDetailUrl(url, args) {
@@ -184,7 +256,9 @@ async function scrapeDetailUrl(url, args) {
     try {
       console.log(`[details] Scraping ${url}${attempt > 1 ? ` (retry ${attempt - 1})` : ""}`);
       const html = await fetchHtml(url, args);
-      return extractCellphonesDetails(html, url, { includeHtml: args.includeHtml });
+      const detail = extractCellphonesDetails(html, url, { includeHtml: args.includeHtml });
+      validateExtractedDetail(detail, url, args.minJsonBytes);
+      return detail;
     } catch (error) {
       lastError = error;
       if (!shouldRetryScrapeError(error) || attempt === attempts) break;
@@ -231,6 +305,123 @@ async function urlsFromProducts(db, args) {
   return urls;
 }
 
+function weakDetailExpression(minJsonBytes) {
+  const countFields = [
+    "media",
+    "highlights",
+    "variants",
+    "colors",
+    "promotions",
+    "specifications",
+    "relatedProducts",
+    "news",
+    "faqs",
+  ];
+
+  return {
+    $or: [
+      { detailBlob: { $exists: false } },
+      { "storage.jsonBytes": { $exists: false } },
+      {
+        $expr: {
+          $eq: [
+            {
+              $add: countFields.map((field) => ({
+                $ifNull: [`$counts.${field}`, 0],
+              })),
+            },
+            0,
+          ],
+        },
+      },
+    ],
+  };
+}
+
+async function urlsFromWeakDetails(db, args) {
+  const { productDetailsCollection } = getMongoConfig();
+  const details = db.collection(productDetailsCollection);
+  const cursor = details
+    .find(
+      {
+        source: "cellphones",
+        url: { $exists: true, $ne: "" },
+        ...weakDetailExpression(args.minJsonBytes),
+      },
+      {
+        projection: {
+          url: 1,
+          slug: 1,
+          sku: 1,
+          sourceUrl: 1,
+          sourceUrls: 1,
+          webFreshnessScore: 1,
+          realWorldYear: 1,
+          updatedAt: 1,
+        },
+      }
+    )
+    .sort({ webFreshnessScore: -1, realWorldYear: -1, updatedAt: 1, _id: 1 })
+    .batchSize(500);
+  const urls = [];
+  const seen = new Set();
+  args.weakTargets = new Map();
+
+  for await (const doc of cursor) {
+    const url = doc.url || doc.sourceUrl || (doc.sourceUrls || [])[0];
+    if (!url || seen.has(url) || args.failedUrls?.has(url)) continue;
+    if (args.shards > 1 && hashString(url) % args.shards !== args.shardIndex) continue;
+    seen.add(url);
+    args.weakTargets.set(url, {
+      id: doc._id,
+      slug: doc.slug,
+      sku: doc.sku,
+    });
+    urls.push(url);
+    if (urls.length >= args.limit) break;
+  }
+
+  return urls;
+}
+
+async function loadFailureUrls(filePath) {
+  if (!filePath) return new Set();
+  try {
+    const content = await fs.readFile(filePath, "utf8");
+    return new Set(
+      content
+        .split(/\r?\n/)
+        .map((line) => line.split("\t")[0].trim())
+        .filter(Boolean)
+    );
+  } catch (error) {
+    if (error.code === "ENOENT") return new Set();
+    throw error;
+  }
+}
+
+function isPermanentDetailFailure(error) {
+  return Boolean(
+    error?.permanent ||
+      [404, 410].includes(error?.statusCode) ||
+      /missing name\/image|still empty|Cannot read properties/i.test(error?.message || "")
+  );
+}
+
+async function appendPermanentFailures(filePath, failures = []) {
+  if (!filePath) return 0;
+  const rows = [...new Map(
+    failures
+      .filter((failure) => failure.permanent)
+      .map((failure) => [failure.url, `${failure.url}\t${failure.error}`])
+  ).values()];
+  if (!rows.length) return 0;
+
+  await fs.mkdir(path.dirname(path.resolve(filePath)), { recursive: true });
+  await fs.appendFile(filePath, `${rows.join("\n")}\n`, "utf8");
+  return rows.length;
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const proxySource = args.noProxy
@@ -238,6 +429,7 @@ async function main() {
     : args.proxyInput || process.env.SCRAPER_PROXIES || "";
   args.proxyPool = createProxyPool(proxySource);
   args.proxyCursor = 0;
+  args.failedUrls = await loadFailureUrls(args.failureFile);
   const client = createMongoClient();
   const { dbName, productsCollection, productDetailsCollection } = getMongoConfig();
 
@@ -250,9 +442,11 @@ async function main() {
         .map((line) => line.trim())
         .filter((line) => line && !line.startsWith("#"))
       : [];
-    const urls = args.fromProducts
-      ? await urlsFromProducts(db, args)
-      : [...new Set([...args.urls, ...fileUrls])];
+    const urls = args.fromWeakDetails
+      ? await urlsFromWeakDetails(db, args)
+      : args.fromProducts
+        ? await urlsFromProducts(db, args)
+        : [...new Set([...args.urls, ...fileUrls])];
 
     if (urls.length === 0) {
       throw new Error("Missing URL. Use --url=... or --from-products.");
@@ -261,7 +455,9 @@ async function main() {
     console.log(
       `[start] ${urls.length} URL(s), concurrency=${args.concurrency}, ` +
         `batchSize=${args.batchSize}, proxies=${args.proxyPool.length}, ` +
-        `shard=${args.shardIndex}/${args.shards}, rescrape=${args.rescrape}`
+        `shard=${args.shardIndex}/${args.shards}, rescrape=${args.rescrape}, ` +
+        `storage=${args.inlineGzip ? "inline-gzip" : "local-gzip"}, ` +
+        `skippedPermanent=${args.failedUrls.size}`
     );
 
     const details = [];
@@ -312,10 +508,23 @@ async function main() {
         const url = urls[index];
         try {
           const detail = await scrapeDetailUrl(url, args);
+          const target = args.weakTargets?.get(url);
+          if (target) {
+            detail.slug = target.slug || detail.slug;
+            detail.sku = target.sku || target.slug || detail.sku;
+            Object.defineProperty(detail, "__targetId", {
+              value: target.id,
+              enumerable: false,
+            });
+          }
           details.push(detail);
           await flushPendingDetails(false);
         } catch (error) {
-          failed.push({ url, error: error.message });
+          failed.push({
+            url,
+            error: error.message,
+            permanent: isPermanentDetailFailure(error),
+          });
           console.warn(`[warn] Worker ${workerIndex} skipped ${url}: ${error.message}`);
           if (args.failFast) {
             fatalError = error;
@@ -337,6 +546,7 @@ async function main() {
       return;
     }
 
+    const persistedFailures = await appendPermanentFailures(args.failureFile, failed);
     await flushPendingDetails(true);
     await flushChain;
 
@@ -352,6 +562,9 @@ async function main() {
     }
     if (failed.length > 0) {
       console.warn(`[done] Skipped ${failed.length} failed URL(s). First failed: ${failed[0].url} (${failed[0].error})`);
+    }
+    if (persistedFailures > 0) {
+      console.warn(`[done] Persisted ${persistedFailures} unavailable URL(s) to ${args.failureFile}`);
     }
   } finally {
     await client.close();
@@ -389,14 +602,39 @@ async function saveDetailsBatch(db, details, args) {
   const manifestDocs = [];
 
   for (const detail of details) {
+    if (args.inlineGzip) {
+      const packed = await buildProductDetailInlineStorage(detail);
+      manifestDocs.push({
+        targetId: detail.__targetId,
+        doc: {
+          ...buildProductDetailManifest(detail, packed.storage),
+          detailBlob: packed.detailBlob,
+        },
+      });
+      continue;
+    }
+
     const storage = await writeProductDetailFile(detail);
-    manifestDocs.push(buildProductDetailManifest(detail, storage));
+    manifestDocs.push({
+      targetId: detail.__targetId,
+      doc: buildProductDetailManifest(detail, storage),
+    });
   }
 
   const detailsResult = await detailsCollection.bulkWrite(
-    manifestDocs.map((doc) => ({
+    manifestDocs.map(({ doc, targetId }) => ({
       updateOne: {
-        filter: { source: doc.source, slug: doc.slug },
+        filter: targetId
+          ? { _id: targetId }
+          : {
+              source: doc.source,
+              $or: [
+                { slug: doc.slug },
+                { url: { $in: doc.sourceUrls || [] } },
+                { sourceUrl: { $in: doc.sourceUrls || [] } },
+                { sourceUrls: { $in: doc.sourceUrls || [] } },
+              ],
+            },
         update: {
           $set: {
             ...doc,
@@ -406,7 +644,7 @@ async function saveDetailsBatch(db, details, args) {
             createdAt: new Date(),
           },
         },
-        upsert: true,
+        upsert: !targetId,
       },
     })),
     { ordered: false }
@@ -428,7 +666,7 @@ async function saveDetailsBatch(db, details, args) {
     }
   }
 
-  console.log(`[batch] Saved ${details.length} detail file(s) + manifest(s)`);
+  console.log(`[batch] Saved ${details.length} detail payload(s) + manifest(s)`);
   return counts;
 }
 

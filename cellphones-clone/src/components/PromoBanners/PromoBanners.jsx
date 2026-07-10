@@ -1,4 +1,5 @@
 import './PromoBanners.css';
+import { getRouteForLabel } from '../../utils/linkRoutes';
 
 export default function PromoBanners() {
   const promos = [
@@ -12,7 +13,7 @@ export default function PromoBanners() {
       <div className="container">
         <div className="promo-banners-grid">
           {promos.map(promo => (
-            <a key={promo.id} href="#" className="promo-banner-item" style={{ background: promo.bgColor }}>
+            <a key={promo.id} href={getRouteForLabel(promo.title, 'promo')} className="promo-banner-item" style={{ background: promo.bgColor }}>
               <div className="promo-banner-content">
                 <h3 className="promo-banner-title">{promo.title}</h3>
                 <p className="promo-banner-desc">{promo.desc}</p>

@@ -21,6 +21,7 @@ import {
   heroSliderTabs,
   subBanners,
 } from "../../data/mockData";
+import { buildCategoryPath } from "../../utils/linkRoutes";
 
 // BẢNG MAPPING ĐỂ KHỬ SẠCH CÁC LỖI HARDCODE STRING MATCHING
 const CATEGORY_MAP = {
@@ -47,6 +48,106 @@ const getCategorySlug = (name, fallbackId) => {
     if (name.includes(key)) return CATEGORY_MAP[key];
   }
   return fallbackId;
+};
+
+const getBrandName = (brand = "") => (
+  typeof brand === "string" ? brand : brand?.name || ""
+);
+
+const getBrandFilter = (brand = "") => {
+  const name = getBrandName(brand);
+  if (/iphone|ipad|airpods|apple watch|macbook|apple/i.test(name)) return "apple";
+  if (/oppo/i.test(name)) return "oppo";
+  if (/samsung/i.test(name)) return "samsung";
+  if (/xiaomi|redmi|poco/i.test(name)) return "xiaomi";
+  if (/huawei/i.test(name)) return "huawei";
+  if (/asus|rog|tuf/i.test(name)) return "asus";
+  if (/msi/i.test(name)) return "msi";
+  if (/acer/i.test(name)) return "acer";
+  if (/dell/i.test(name)) return "dell";
+  if (/hp/i.test(name)) return "hp";
+  if (/lg/i.test(name)) return "lg";
+  return name;
+};
+
+const getCategoryTopicPath = (category = "", label = "", options = {}) => (
+  buildCategoryPath(category, {
+    keyword: label,
+    title: label,
+    q: label,
+    ...options,
+  })
+);
+
+const getCategoryBrandPath = (category = "", brand = "", title = "", options = {}) => {
+  const name = getBrandName(brand);
+  const finalTitle = title || name;
+  return buildCategoryPath(category, {
+    brand: getBrandFilter(name),
+    keyword: finalTitle,
+    title: finalTitle,
+    ...options,
+  });
+};
+
+const getSidebarCategoryPath = (cat = {}, slug = "") => {
+  const categoryByPanel = {
+    phone: "Điện thoại",
+    laptop: "Laptop",
+    audio: "Âm thanh",
+    watch: "Đồng hồ thông minh",
+    appliance: "Đồ gia dụng",
+    accessory: "Phụ kiện",
+    pc: "PC",
+    tv: "Tivi",
+    tradein: "Hàng cũ",
+    promo: "Khuyến mãi",
+  };
+  const category = categoryByPanel[slug] || cat.name;
+
+  return buildCategoryPath(category, {
+    keyword: cat.name,
+    title: cat.name,
+  });
+};
+
+const getPhoneBrandPath = (brandName = "") => {
+  const name = String(brandName || "").trim();
+  const isIphone = /iphone|apple/i.test(name);
+  return buildCategoryPath("Điện thoại", {
+    brand: isIphone ? "apple" : name,
+    keyword: isIphone ? "iPhone" : name,
+    title: isIphone ? "iPhone" : name,
+  });
+};
+
+const getTabletBrandPath = (brandName = "") => {
+  const name = String(brandName || "").trim();
+  const isApple = /iphone|ipad|apple/i.test(name);
+  return buildCategoryPath("Máy tính bảng", {
+    brand: isApple ? "apple" : name,
+    keyword: isApple ? "iPad" : name,
+    title: isApple ? "iPad" : name,
+  });
+};
+
+const getPhoneTopicPath = (label = "", options = {}) => (
+  getCategoryTopicPath("Điện thoại", label, options)
+);
+
+const getPhonePricePath = (label = "") => {
+  const price = String(label || "");
+  const title = `Điện thoại ${price}`;
+  const options = { q: "", title, keyword: title };
+
+  if (price.includes("Dưới 2")) return getPhoneTopicPath(title, { ...options, priceMax: 2_000_000 });
+  if (price.includes("2 - 4")) return getPhoneTopicPath(title, { ...options, priceMin: 2_000_000, priceMax: 4_000_000 });
+  if (price.includes("4 - 7")) return getPhoneTopicPath(title, { ...options, priceMin: 4_000_000, priceMax: 7_000_000 });
+  if (price.includes("7 - 13")) return getPhoneTopicPath(title, { ...options, priceMin: 7_000_000, priceMax: 13_000_000 });
+  if (price.includes("13 - 20")) return getPhoneTopicPath(title, { ...options, priceMin: 13_000_000, priceMax: 20_000_000 });
+  if (price.includes("Trên 20")) return getPhoneTopicPath(title, { ...options, priceMin: 20_000_000 });
+
+  return getPhoneTopicPath(title, options);
 };
 
 // ==================== BỘ CÁC ICON SVG TIỆN ÍCH BÊN PHẢI ====================
@@ -164,7 +265,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     className={`category-item ${isItemHovered ? "active-hover-item" : ""}`}
                     onMouseEnter={() => setHoveredCategory(currentSlug)}
                   >
-                    <a href="#">
+                    <a href={getSidebarCategoryPath(cat, currentSlug)}>
                       <div className="category-item-left">
                         <img className="category-icon" src={cat.icon} alt="" />
                         <span>{cat.name}</span>
@@ -201,14 +302,14 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {PHONE_BRANDS.map((brand, i) => (
                       <a
                         key={i}
-                        href={`#${brand.name}`}
+                        href={getPhoneBrandPath(brand.name)}
                         className="mega-brand-logo-card-item relative-pill"
                       >
                         <SafeBrandImage src={brand.logo} alt={brand.name} />
                       </a>
                     ))}
                     <a
-                      href="#pho-thong"
+                      href={getPhoneTopicPath("Điện thoại phổ thông", { q: "Điện thoại phổ thông" })}
                       className="mega-brand-logo-card-item wide-text-pill"
                     >
                       <span>Điện thoại phổ thông</span>
@@ -228,7 +329,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     ].map((price, i) => (
                       <a
                         key={i}
-                        href={`#price-${i}`}
+                        href={getPhonePricePath(price)}
                         className="mega-pill-item"
                         style={{ gridColumn: "span 2" }}
                       >
@@ -245,7 +346,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {hotPhoneModels.map((phone, i) => (
                       <a
                         key={i}
-                        href={`#model-${i}`}
+                        href={getPhoneTopicPath(phone.name, { q: phone.name })}
                         className="mega-pill-item relative-pill"
                         style={{ gridColumn: `span ${phone.span}` }}
                       >
@@ -269,7 +370,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {TABLET_BRANDS.map((brand, i) => (
                       <a
                         key={i}
-                        href={`#tablet-${brand.name}`}
+                        href={getTabletBrandPath(brand.name)}
                         className="mega-brand-logo-card-item relative-pill"
                       >
                         <SafeBrandImage src={brand.logo} alt={brand.name} />
@@ -294,7 +395,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {LAPTOP_BRANDS.map((brand, i) => (
                       <a
                         key={i}
-                        href={`#${brand.name}`}
+                        href={getCategoryBrandPath("Laptop", brand)}
                         className="mega-brand-logo-card-item relative-pill"
                       >
                         <SafeBrandImage src={brand.logo} alt={brand.name} />
@@ -314,7 +415,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     ].map((p, i) => (
                       <a
                         key={i}
-                        href={`#price-lp-${i}`}
+                        href={getCategoryTopicPath("Laptop", `Laptop ${p}`, { q: p })}
                         className="mega-pill-item"
                         style={{ gridColumn: "span 3" }}
                       >
@@ -331,7 +432,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {laptopNeedsData.map((item, i) => (
                       <a
                         key={i}
-                        href={`#need-${i}`}
+                        href={getCategoryTopicPath("Laptop", item.name)}
                         className="mega-laptop-need-card"
                       >
                         <img
@@ -348,7 +449,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                       </a>
                     ))}
                     <a
-                      href="#mac-cto"
+                      href={getCategoryTopicPath("Laptop", "Mac CTO", { brand: "apple" })}
                       className="mega-laptop-need-card grid-wide-row"
                     >
                       <img
@@ -368,7 +469,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {laptopChipsData.map((chip, i) => (
                       <a
                         key={i}
-                        href={`#chip-${i}`}
+                        href={getCategoryTopicPath("Laptop", chip.name)}
                         className="mega-pill-item relative-pill"
                         style={{ gridColumn: `span ${chip.span}` }}
                       >
@@ -401,7 +502,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {audioTypesSquare.map((item, i) => (
                       <a
                         key={i}
-                        href={`#audio-type-${i}`}
+                        href={getCategoryTopicPath("Tai nghe", item.name)}
                         className="mega-laptop-need-card"
                       >
                         <img
@@ -413,7 +514,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                       </a>
                     ))}
                     <a
-                      href="#all-audio-types"
+                      href={buildCategoryPath("Tai nghe")}
                       className="mega-pill-item full-width-row-pill"
                       style={{ gridColumn: "span 2", marginTop: "4px" }}
                     >
@@ -427,7 +528,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {micTypesSquare.map((item, i) => (
                       <a
                         key={i}
-                        href={`#mic-type-${i}`}
+                        href={getCategoryTopicPath("Âm thanh", item.name)}
                         className="mega-laptop-need-card"
                       >
                         <img
@@ -448,7 +549,9 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {AUDIO_BRANDS.map((brand, i) => (
                       <a
                         key={i}
-                        href={`#audio-brand-${brand.name}`}
+                        href={brand.name === "AirPods"
+                          ? getCategoryTopicPath("Tai nghe", "AirPods")
+                          : getCategoryBrandPath("Tai nghe", brand)}
                         className="mega-brand-logo-card-item relative-pill"
                       >
                         <SafeBrandImage src={brand.logo} alt={brand.name} />
@@ -471,7 +574,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     ].map((p, i) => (
                       <a
                         key={i}
-                        href={`#audio-price-${i}`}
+                        href={getCategoryTopicPath("Tai nghe", p)}
                         className="mega-pill-item"
                         style={{ gridColumn: "span 3" }}
                       >
@@ -486,7 +589,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {speakerTypesSquare.map((item, i) => (
                       <a
                         key={i}
-                        href={`#speaker-type-${i}`}
+                        href={getCategoryTopicPath("Loa", item.name)}
                         className="mega-laptop-need-card"
                       >
                         <img
@@ -498,7 +601,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                       </a>
                     ))}
                     <a
-                      href="#all-speakers"
+                      href={buildCategoryPath("Loa")}
                       className="mega-pill-item full-width-row-pill"
                       style={{ gridColumn: "span 2", marginTop: "4px" }}
                     >
@@ -514,7 +617,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {SPEAKER_BRANDS.map((brand, i) => (
                       <a
                         key={i}
-                        href={`#speaker-brand-${brand.name}`}
+                        href={getCategoryBrandPath("Loa", brand)}
                         className="mega-brand-logo-card-item relative-pill"
                       >
                         <SafeBrandImage src={brand.logo} alt={brand.name} />
@@ -531,7 +634,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {hotAudioProducts.map((prod, i) => (
                       <a
                         key={i}
-                        href={`#hot-audio-prod-${i}`}
+                        href={getCategoryTopicPath("Âm thanh", prod.name)}
                         className="mega-pill-item relative-pill"
                         style={{ gridColumn: `span ${prod.span}` }}
                       >
@@ -564,7 +667,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {watchRowsData.map((item, i) => (
                       <a
                         key={i}
-                        href={`#watch-type-${i}`}
+                        href={getCategoryTopicPath("Đồng hồ thông minh", item.name)}
                         className="mega-laptop-need-card grid-wide-row"
                       >
                         <img
@@ -585,7 +688,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {WATCH_BRANDS.map((brand, i) => (
                       <a
                         key={i}
-                        href={`#watch-brand-${brand.name}`}
+                        href={getCategoryBrandPath("Đồng hồ thông minh", brand)}
                         className="mega-brand-logo-card-item relative-pill"
                       >
                         <SafeBrandImage src={brand.logo} alt={brand.name} />
@@ -604,7 +707,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {hotWatchProducts.map((prod, i) => (
                       <a
                         key={i}
-                        href={`#hot-watch-${i}`}
+                        href={getCategoryTopicPath("Đồng hồ thông minh", prod.name)}
                         className="mega-pill-item relative-pill"
                         style={{ gridColumn: `span ${prod.span}` }}
                       >
@@ -628,7 +731,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {cameraTypesSquare.map((item, i) => (
                       <a
                         key={i}
-                        href={`#camera-type-${i}`}
+                        href={getCategoryTopicPath("Camera", item.name)}
                         className="mega-laptop-need-card"
                       >
                         <img
@@ -640,7 +743,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                       </a>
                     ))}
                     <a
-                      href="#all-cameras"
+                      href={buildCategoryPath("Camera")}
                       className="mega-pill-item full-width-row-pill"
                       style={{ gridColumn: "span 2", marginTop: "4px" }}
                     >
@@ -654,7 +757,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {hotCameraProducts.map((prod, i) => (
                       <a
                         key={i}
-                        href={`#hot-camera-${i}`}
+                        href={getCategoryTopicPath("Camera", prod.name)}
                         className="mega-pill-item relative-pill"
                         style={{ gridColumn: `span ${prod.span}` }}
                       >
@@ -687,7 +790,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {householdDevices.map((item, i) => (
                       <a
                         key={i}
-                        href={`#house-${i}`}
+                        href={getCategoryTopicPath("Đồ gia dụng", item.name)}
                         className="mega-laptop-need-card"
                       >
                         <img
@@ -711,7 +814,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {kitchenDevices.map((item, i) => (
                       <a
                         key={i}
-                        href={`#kitchen-${i}`}
+                        href={getCategoryTopicPath("Đồ gia dụng", item.name)}
                         className="mega-laptop-need-card"
                       >
                         <img
@@ -737,7 +840,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {beautyDevices.map((item, i) => (
                       <a
                         key={i}
-                        href={`#beauty-${i}`}
+                        href={getCategoryTopicPath("Đồ gia dụng", item.name)}
                         className="mega-laptop-need-card"
                       >
                         <img
@@ -758,7 +861,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {hotApplianceProducts.map((prod, i) => (
                       <a
                         key={i}
-                        href={`#hot-appliance-${i}`}
+                        href={getCategoryTopicPath("Đồ gia dụng", prod.name)}
                         className="mega-pill-item"
                         style={{ gridColumn: `span ${prod.span}` }}
                       >
@@ -773,7 +876,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {HOME_APPLIANCE_BRANDS.map((brand, i) => (
                       <a
                         key={i}
-                        href={`#appliance-brand-${i}`}
+                        href={getCategoryBrandPath("Đồ gia dụng", brand)}
                         className="mega-pill-item"
                         style={{
                           gridColumn: "span 3",
@@ -802,7 +905,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {mobileAccessories.map((item, i) => (
                       <a
                         key={i}
-                        href={`#mob-acc-${i}`}
+                        href={getCategoryTopicPath("Phụ kiện", item.name)}
                         className="mega-laptop-need-card"
                       >
                         <img
@@ -821,7 +924,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {pcAccessories.map((item, i) => (
                       <a
                         key={i}
-                        href={`#pc-acc-${i}`}
+                        href={getCategoryTopicPath("Phụ kiện", item.name)}
                         className="mega-laptop-need-card"
                       >
                         <img
@@ -842,7 +945,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {networkDevices.map((item, i) => (
                       <a
                         key={i}
-                        href={`#net-${i}`}
+                        href={getCategoryTopicPath("Thiết bị mạng", item.name)}
                         className="mega-laptop-need-card"
                       >
                         <img
@@ -854,7 +957,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                       </a>
                     ))}
                     <a
-                      href="#all-nets"
+                      href={buildCategoryPath("Thiết bị mạng")}
                       className="mega-pill-item full-width-row-pill"
                       style={{ gridColumn: "span 2", marginTop: "4px" }}
                     >
@@ -868,7 +971,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {storageDevices.map((item, i) => (
                       <a
                         key={i}
-                        href={`#stor-${i}`}
+                        href={getCategoryTopicPath("Phụ kiện", item.name)}
                         className="mega-laptop-need-card"
                       >
                         <img
@@ -887,7 +990,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {otherAccessories.map((item, i) => (
                       <a
                         key={i}
-                        href={`#other-${i}`}
+                        href={getCategoryTopicPath("Phụ kiện", item.name)}
                         className="mega-laptop-need-card"
                       >
                         <img
@@ -908,7 +1011,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {hotAccessoryProducts.map((prod, i) => (
                       <a
                         key={i}
-                        href={`#hot-acc-${i}`}
+                        href={getCategoryTopicPath("Phụ kiện", prod.name)}
                         className="mega-laptop-need-card grid-wide-row"
                       >
                         <img
@@ -945,7 +1048,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {pcTypeRows.map((item, i) => (
                       <a
                         key={i}
-                        href={`#pc-type-${i}`}
+                        href={getCategoryTopicPath("PC", item.name)}
                         className="mega-laptop-need-card grid-wide-row"
                       >
                         <img
@@ -964,7 +1067,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {pcNeedRows.map((item, i) => (
                       <a
                         key={i}
-                        href={`#pc-need-${i}`}
+                        href={getCategoryTopicPath("PC", item.name)}
                         className="mega-laptop-need-card grid-wide-row"
                       >
                         <img
@@ -983,7 +1086,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {pcHardwareComponents.map((item, i) => (
                       <a
                         key={i}
-                        href={`#hardware-${i}`}
+                        href={getCategoryTopicPath("Linh kiện máy tính", item.name)}
                         className="mega-laptop-need-card"
                       >
                         <img
@@ -995,7 +1098,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                       </a>
                     ))}
                     <a
-                      href="#all-hardware"
+                      href={buildCategoryPath("Linh kiện máy tính")}
                       className="mega-pill-item full-width-row-pill"
                       style={{ gridColumn: "span 2", marginTop: "4px" }}
                     >
@@ -1013,7 +1116,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {MONITOR_PC_BRANDS.map((brand, i) => (
                       <a
                         key={i}
-                        href={`#monitor-brand-${brand.name}`}
+                        href={getCategoryBrandPath("Màn hình", brand, "", { segment: "monitor" })}
                         className="mega-brand-logo-card-item"
                       >
                         <SafeBrandImage src={brand.logo} alt={brand.name} />
@@ -1029,7 +1132,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {monitorNeedsRows.map((item, i) => (
                       <a
                         key={i}
-                        href={`#monitor-need-${i}`}
+                        href={getCategoryTopicPath("Màn hình", item.name, { segment: "monitor" })}
                         className="mega-laptop-need-card grid-wide-row"
                       >
                         <img
@@ -1041,7 +1144,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                       </a>
                     ))}
                     <a
-                      href="#all-monitors"
+                      href={buildCategoryPath("Màn hình", { segment: "monitor" })}
                       className="mega-pill-item full-width-row-pill"
                       style={{ gridColumn: "span 2", marginTop: "4px" }}
                     >
@@ -1054,7 +1157,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                 <div className="mega-section">
                   <div className="mega-section-header-row">
                     <div className="mega-section-title">Gaming Gear</div>
-                    <a href="#all-gears" className="mega-inline-text-link">
+                    <a href={buildCategoryPath("Gaming Gear")} className="mega-inline-text-link">
                       Xem tất cả
                     </a>
                   </div>
@@ -1062,7 +1165,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {pcGamingGearRows.map((item, i) => (
                       <a
                         key={i}
-                        href={`#gear-${i}`}
+                        href={getCategoryTopicPath("Gaming Gear", item.name)}
                         className="mega-laptop-need-card grid-wide-row"
                       >
                         <img
@@ -1081,7 +1184,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {officeDeviceRows.map((item, i) => (
                       <a
                         key={i}
-                        href={`#office-${i}`}
+                        href={getCategoryTopicPath("Thiết bị văn phòng", item.name)}
                         className="mega-laptop-need-card grid-wide-row"
                       >
                         <img
@@ -1121,7 +1224,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     ).map((brand, i) => (
                       <a
                         key={i}
-                        href={`#tv-${brand.name}`}
+                        href={getCategoryBrandPath("Tivi", brand)}
                         className="mega-brand-logo-card-item"
                       >
                         <SafeBrandImage src={brand.logo} alt={brand.name} />
@@ -1129,7 +1232,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     ))}
                   </div>
                   <a
-                    href="#all-tivi"
+                    href={buildCategoryPath("Tivi")}
                     className="mega-pill-item full-width-row-pill"
                     style={{ marginTop: "4px" }}
                   >
@@ -1151,7 +1254,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     ).map((brand, i) => (
                       <a
                         key={i}
-                        href={`#fridge-${brand.name}`}
+                        href={getCategoryBrandPath("Tủ lạnh", brand)}
                         className="mega-brand-logo-card-item"
                       >
                         <SafeBrandImage src={brand.logo} alt={brand.name} />
@@ -1159,7 +1262,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     ))}
                   </div>
                   <a
-                    href="#all-fridges"
+                    href={buildCategoryPath("Tủ lạnh")}
                     className="mega-pill-item full-width-row-pill"
                     style={{ marginTop: "4px" }}
                   >
@@ -1183,7 +1286,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     ).map((brand, i) => (
                       <a
                         key={i}
-                        href={`#washer-${brand.name}`}
+                        href={getCategoryBrandPath("Máy giặt", brand)}
                         className="mega-brand-logo-card-item"
                       >
                         <SafeBrandImage src={brand.logo} alt={brand.name} />
@@ -1191,7 +1294,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     ))}
                   </div>
                   <a
-                    href="#all-washers"
+                    href={buildCategoryPath("Máy giặt")}
                     className="mega-pill-item full-width-row-pill"
                     style={{ marginTop: "4px" }}
                   >
@@ -1219,7 +1322,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     ).map((brand, i) => (
                       <a
                         key={i}
-                        href={`#air-con-${brand.name}`}
+                        href={getCategoryBrandPath("Điều hòa - Máy lạnh", brand)}
                         className="mega-brand-logo-card-item"
                       >
                         <SafeBrandImage src={brand.logo} alt={brand.name} />
@@ -1227,7 +1330,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     ))}
                   </div>
                   <a
-                    href="#all-air-con"
+                    href={buildCategoryPath("Điều hòa - Máy lạnh")}
                     className="mega-pill-item full-width-row-pill"
                     style={{ marginTop: "4px" }}
                   >
@@ -1240,7 +1343,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {hotTvProducts.map((prod, i) => (
                       <a
                         key={i}
-                        href={`#hot-tv-prod-${i}`}
+                        href={getCategoryTopicPath("Tivi", prod.name)}
                         className="mega-pill-item relative-pill"
                         style={{ gridColumn: `span ${prod.span}` }}
                       >
@@ -1271,7 +1374,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                   <div className="mega-section-title">Chương trình nổi bật</div>
                   <div className="mega-grid-pills-flexible">
                     <a
-                      href="#sbuyback"
+                      href={buildCategoryPath("Thu cũ đổi mới")}
                       className="mega-pill-item relative-pill"
                       style={{ gridColumn: "span 6" }}
                     >
@@ -1286,7 +1389,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {tradeInBrands.map((brand, i) => (
                       <a
                         key={i}
-                        href={`#trade-brand-${i}`}
+                        href={getCategoryTopicPath("Hàng cũ", brand)}
                         className="mega-pill-item"
                         style={{ gridColumn: "span 3" }}
                       >
@@ -1303,7 +1406,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {tradeInSubsidy.map((item, i) => (
                       <a
                         key={i}
-                        href={`#subsidy-${i}`}
+                        href={getCategoryTopicPath("Hàng cũ", item)}
                         className="mega-pill-item"
                         style={{ gridColumn: "span 6" }}
                       >
@@ -1322,7 +1425,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {tradeInHighValue.map((item, i) => (
                       <a
                         key={i}
-                        href={`#highvalue-${i}`}
+                        href={getCategoryTopicPath("Hàng cũ", item)}
                         className="mega-pill-item"
                         style={{ gridColumn: "span 6" }}
                       >
@@ -1349,7 +1452,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {promoMainItems.map((item, i) => (
                       <a
                         key={i}
-                        href={`#promo-main-${i}`}
+                        href={getCategoryTopicPath("Khuyến mãi", item.name)}
                         className="mega-pill-item relative-pill"
                         style={{ gridColumn: `span ${item.span}` }}
                       >
@@ -1377,7 +1480,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {promoTradeInItems.map((item, i) => (
                       <a
                         key={i}
-                        href={`#promo-trade-${i}`}
+                        href={getCategoryTopicPath("Khuyến mãi", item.name)}
                         className="mega-pill-item relative-pill"
                         style={{ gridColumn: "span 6" }}
                       >
@@ -1392,7 +1495,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {promoMemberItems.map((item, i) => (
                       <a
                         key={i}
-                        href={`#promo-member-${i}`}
+                        href={getCategoryTopicPath("Khuyến mãi", item.name)}
                         className="mega-pill-item relative-pill"
                         style={{ gridColumn: "span 6" }}
                       >
@@ -1418,7 +1521,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {promoStudentItems.map((item, i) => (
                       <a
                         key={i}
-                        href={`#promo-student-${i}`}
+                        href={getCategoryTopicPath("Khuyến mãi", item.name)}
                         className="mega-pill-item relative-pill"
                         style={{ gridColumn: `span ${item.span}` }}
                       >
@@ -1510,7 +1613,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
             <div className="mini-banners">
               {subBanners.map((banner) => (
                 <a
-                  href="#promotions"
+                  href={getCategoryTopicPath("Khuyến mãi", banner.title || banner.alt || "Khuyến mãi CellphoneS")}
                   key={banner.id}
                   className="mini-banner-item"
                 >
@@ -1572,7 +1675,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                   </div>
                 </>
               )}
-              <a href="#smember-perks" className="welcome-footer-perks-btn">
+              <a href="/smember/uu-dai" className="welcome-footer-perks-btn">
                 <div className="footer-perks-left">
                   <GiftRedIcon />
                   <span
@@ -1671,7 +1774,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
             </div>
 
             <div className="sidebar-absolute-bottom-banner">
-              <a href="#promo-landing">
+              <a href="/khuyen-mai/hang-moi-ve">
                 <img
                   src="https://cdn2.cellphones.com.vn/x/media/wysiwyg/Web/landing-page/hang-moi-ve/promotion_banner04.png"
                   alt=""

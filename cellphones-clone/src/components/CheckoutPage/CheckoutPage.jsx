@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import './CheckoutPage.css';
 import { formatPrice } from '../../data/mockData';
-import { createOrder } from '../../services/apiOrders';
+import { applyCouponCode, createOrder, fetchMyOrders, fetchOrderByCode } from '../../services/apiOrders';
+import { fetchCustomerAddresses } from '../../services/apiCustomer';
 
 const VIETNAM_PROVINCES = [
   'An Giang',
@@ -128,8 +129,65 @@ const initialForm = {
   marketingOptIn: true,
   companyInvoice: false,
   educationOffer: false,
+  paymentMethod: 'bank_qr',
   termsAccepted: true,
 };
+
+function buildFullAddress(address = {}) {
+  address = address || {};
+  return address.fullAddress || [
+    address.addressLine || address.address || address.street,
+    address.ward,
+    address.district,
+    address.province || address.city,
+  ].filter(Boolean).join(', ');
+}
+
+function normalizeSavedAddress(input = {}, source = 'account') {
+  input = input || {};
+  const addressLine = input.addressLine || input.address || input.street || '';
+  const province = input.province || input.city || '';
+  const item = {
+    id: String(input.id || input._id || input.orderCode || `${source}-${buildFullAddress(input)}`),
+    source,
+    fullName: input.fullName || input.receiverName || input.name || '',
+    phone: normalizePhone(input.phone || input.receiverPhone || ''),
+    province,
+    district: input.district || '',
+    ward: input.ward || '',
+    addressLine,
+    fullAddress: buildFullAddress({ ...input, addressLine, province }),
+    isDefault: Boolean(input.isDefault),
+  };
+
+  return item.province && item.district && item.addressLine ? item : null;
+}
+
+function addressFromOrder(order = {}) {
+  const shippingAddress = order.shippingAddress || {};
+  if (!shippingAddress.addressLine || order.shippingChoice?.type === 'store') return null;
+
+  return normalizeSavedAddress({
+    id: `order-${order.orderCode || order.id}`,
+    orderCode: order.orderCode,
+    fullName: order.receiver?.fullName || order.customer?.fullName,
+    phone: order.receiver?.phone || order.customer?.phone,
+    province: shippingAddress.province,
+    district: shippingAddress.district,
+    ward: shippingAddress.ward,
+    addressLine: shippingAddress.addressLine,
+    fullAddress: shippingAddress.fullAddress,
+  }, 'order');
+}
+
+function uniqueAddresses(addresses = []) {
+  const map = new Map();
+  addresses.filter(Boolean).forEach((address) => {
+    const key = [address.phone, address.fullAddress].join('|').toLowerCase();
+    if (!map.has(key) || address.isDefault) map.set(key, address);
+  });
+  return [...map.values()];
+}
 
 function CheckoutStepper({ step }) {
   return (
@@ -172,7 +230,7 @@ function CheckoutProduct({ item }) {
   );
 }
 
-function SummaryRows({ summary, educationDiscount, total }) {
+function SummaryRows({ summary, educationDiscount, appliedCoupon, total }) {
   return (
     <div className="checkout-summary-box">
       <div className="checkout-summary-row">
@@ -199,6 +257,12 @@ function SummaryRows({ summary, educationDiscount, total }) {
           <strong>- {formatPrice(educationDiscount)}</strong>
         </div>
       )}
+      {appliedCoupon?.discount > 0 && (
+        <div className="checkout-summary-row discount">
+          <span>Mã giảm giá {appliedCoupon.code}</span>
+          <strong>- {formatPrice(appliedCoupon.discount)}</strong>
+        </div>
+      )}
       <div className="checkout-summary-total">
         <div>
           <span>Tổng tiền</span>
@@ -218,9 +282,16 @@ export default function CheckoutPage({ cart, currentUser, onGoCart, onGoHome, on
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [createdOrder, setCreatedOrder] = useState(null);
+  const [savedAddresses, setSavedAddresses] = useState([]);
+  const [selectedAddressId, setSelectedAddressId] = useState('');
+  const [couponCode, setCouponCode] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState(null);
+  const [couponLoading, setCouponLoading] = useState(false);
+  const [couponMessage, setCouponMessage] = useState('');
   const isStorePickup = form.fulfillmentMethod === 'store';
   const educationDiscount = form.educationOffer ? Math.min(300000, summary.subtotal || 0) : 0;
-  const total = Math.max(0, Number(summary.subtotal || 0) - educationDiscount);
+  const couponDiscount = Number(appliedCoupon?.discount || 0);
+  const total = Math.max(0, Number(summary.subtotal || 0) - educationDiscount - couponDiscount);
   const shippingOptions = useMemo(() => ([
     { type: 'express', label: getShippingEta('express') },
     { type: 'standard', label: getShippingEta('standard') },
@@ -231,6 +302,98 @@ export default function CheckoutPage({ cart, currentUser, onGoCart, onGoHome, on
   const wardOptions = useMemo(() => (
     LOCATION_DATA[form.province]?.districts?.[form.district] || []
   ), [form.province, form.district]);
+
+  const applySavedAddress = (address) => {
+    if (!address) return;
+    setSelectedAddressId(address.id || '');
+    setError('');
+    setForm((previous) => ({
+      ...previous,
+      customerFullName: address.fullName || previous.customerFullName || currentUser?.fullName || currentUser?.email || '',
+      customerPhone: normalizePhone(address.phone || previous.customerPhone || currentUser?.phone || ''),
+      customerEmail: previous.customerEmail || currentUser?.email || '',
+      fulfillmentMethod: 'delivery',
+      province: address.province || '',
+      district: address.district || '',
+      ward: address.ward || '',
+      addressLine: address.addressLine || '',
+      storeLocation: '',
+    }));
+  };
+
+  useEffect(() => {
+    if (!currentUser) return;
+    setForm((previous) => ({
+      ...previous,
+      customerFullName: previous.customerFullName || currentUser.fullName || currentUser.name || currentUser.username || '',
+      customerPhone: previous.customerPhone || normalizePhone(currentUser.phone || ''),
+      customerEmail: previous.customerEmail || currentUser.email || '',
+    }));
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser) return undefined;
+    let ignore = false;
+
+    async function loadSavedAddresses() {
+      const [addressResult, orderResult] = await Promise.allSettled([
+        fetchCustomerAddresses(),
+        fetchMyOrders(),
+      ]);
+      if (ignore) return;
+
+      const accountAddresses = addressResult.status === 'fulfilled'
+        ? addressResult.value.map((item) => normalizeSavedAddress(item, 'account')).filter(Boolean)
+        : [];
+      const orderAddresses = orderResult.status === 'fulfilled'
+        ? orderResult.value.map(addressFromOrder).filter(Boolean)
+        : [];
+      const userAddresses = [
+        ...(Array.isArray(currentUser.addresses) ? currentUser.addresses : []),
+        currentUser.defaultAddress,
+        currentUser.address,
+      ].map((item) => normalizeSavedAddress(item, 'user')).filter(Boolean);
+
+      const addresses = uniqueAddresses([
+        ...accountAddresses,
+        ...userAddresses,
+        ...orderAddresses,
+      ]);
+
+      setSavedAddresses(addresses);
+      const defaultAddress = addresses.find((item) => item.isDefault) || addresses[0];
+      if (defaultAddress) applySavedAddress(defaultAddress);
+    }
+
+    loadSavedAddresses();
+    return () => {
+      ignore = true;
+    };
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!createdOrder?.orderCode) return undefined;
+    if (createdOrder.paymentMethod !== 'bank_qr' && createdOrder.payment?.method !== 'bank_qr') return undefined;
+    if ((createdOrder.paymentStatus || createdOrder.payment?.status) === 'paid') return undefined;
+
+    const controller = new AbortController();
+    const timer = window.setInterval(async () => {
+      try {
+        const nextOrder = await fetchOrderByCode(createdOrder.orderCode, controller.signal);
+        if (nextOrder?.paymentStatus === 'paid' || nextOrder?.payment?.status === 'paid') {
+          setCreatedOrder(nextOrder);
+          window.clearInterval(timer);
+        }
+      } catch {
+        // polling is best-effort; the order remains visible with pending payment info
+      }
+    }, 5000);
+
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, [createdOrder?.orderCode, createdOrder?.paymentMethod, createdOrder?.payment?.method, createdOrder?.paymentStatus, createdOrder?.payment?.status]);
 
   const updateField = (field, value) => {
     setForm((previous) => {
@@ -282,6 +445,40 @@ export default function CheckoutPage({ cart, currentUser, onGoCart, onGoHome, on
     setError('');
     setStep('payment');
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleApplyCoupon = async () => {
+    const code = couponCode.trim().toUpperCase();
+    if (!code) {
+      setCouponMessage('Vui lòng nhập mã giảm giá.');
+      return;
+    }
+
+    setCouponLoading(true);
+    setCouponMessage('');
+    setError('');
+
+    try {
+      const coupon = await applyCouponCode({
+        code,
+        subtotal: summary.subtotal || 0,
+        shippingFee: 0,
+      });
+      setAppliedCoupon(coupon);
+      setCouponCode(coupon.code || code);
+      setCouponMessage(`Đã áp dụng mã ${coupon.code}.`);
+    } catch (applyError) {
+      setAppliedCoupon(null);
+      setCouponMessage(applyError.message || 'Mã giảm giá không hợp lệ hoặc chưa đủ điều kiện.');
+    } finally {
+      setCouponLoading(false);
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponCode('');
+    setCouponMessage('Đã bỏ mã giảm giá.');
   };
 
   const submitOrder = async () => {
@@ -339,7 +536,8 @@ export default function CheckoutPage({ cart, currentUser, onGoCart, onGoHome, on
         companyInvoice: {
           requested: form.educationOffer ? false : form.companyInvoice,
         },
-        paymentMethod: 'cod',
+        paymentMethod: form.paymentMethod,
+        couponCode: appliedCoupon?.code || '',
         note: form.note,
         termsAccepted: form.termsAccepted,
         gifts: ['Tặng Túi phụ kiện phiên bản CellphoneS'],
@@ -361,6 +559,10 @@ export default function CheckoutPage({ cart, currentUser, onGoCart, onGoHome, on
     : [form.addressLine, form.ward, form.district, form.province].filter(Boolean).join(', ');
 
   if (createdOrder) {
+    const payment = createdOrder.payment || {};
+    const isBankQrPayment = payment.method === 'bank_qr' || createdOrder.paymentMethod === 'bank_qr';
+    const isPaid = payment.status === 'paid' || createdOrder.paymentStatus === 'paid';
+
     return (
       <section className="checkout-page">
         <div className="container checkout-container">
@@ -368,8 +570,38 @@ export default function CheckoutPage({ cart, currentUser, onGoCart, onGoHome, on
             <img src="https://cdn2.cellphones.com.vn/x/media/wysiwyg/chibi2.png" alt="" />
             <h1>Đặt hàng thành công</h1>
             <p>Mã đơn hàng của bạn là <strong>{createdOrder.orderCode}</strong>.</p>
-            <p>Phương thức thanh toán: <strong>Thanh toán khi nhận hàng (COD)</strong></p>
+            <p>Phương thức thanh toán: <strong>{payment.methodLabel || 'Thanh toán khi nhận hàng (COD)'}</strong></p>
             <p>Tổng tiền: <strong>{formatPrice(createdOrder.totals?.total || total)}</strong></p>
+
+            {isBankQrPayment && (
+              <div className={`checkout-success-qr ${isPaid ? 'paid' : ''}`}>
+                <div>
+                  <h2>{isPaid ? 'Đã nhận thanh toán' : 'Quét mã QR để thanh toán'}</h2>
+                  <p>
+                    Trạng thái: <strong>{payment.statusLabel || (isPaid ? 'Đã thanh toán' : 'Chờ chuyển khoản')}</strong>
+                  </p>
+                  <ul>
+                    <li>Số tiền: <strong>{formatPrice(payment.amount || createdOrder.totals?.total || total)}</strong></li>
+                    <li>Nội dung CK: <strong>{payment.transferContent || createdOrder.orderCode}</strong></li>
+                    {payment.bank?.bankId && <li>Ngân hàng: <strong>{payment.bank.bankId}</strong></li>}
+                    {payment.bank?.accountNumber && <li>Số tài khoản: <strong>{payment.bank.accountNumber}</strong></li>}
+                    {payment.bank?.accountName && <li>Chủ tài khoản: <strong>{payment.bank.accountName}</strong></li>}
+                  </ul>
+                  <small>{payment.instructions || 'Hệ thống sẽ tự cập nhật khi giao dịch được xác nhận.'}</small>
+                </div>
+                {payment.qrImageUrl ? (
+                  <a className="checkout-bank-qr-link" href={payment.qrImageUrl} target="_blank" rel="noreferrer">
+                    <img className="checkout-bank-qr" src={payment.qrImageUrl} alt={`QR thanh toán ${createdOrder.orderCode}`} />
+                    <span>Mở mã QR</span>
+                  </a>
+                ) : (
+                  <div className="checkout-bank-qr-placeholder">
+                    Chưa cấu hình tài khoản nhận QR trong .env
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="checkout-success-actions">
               {currentUser && onGoAccount && (
                 <button type="button" onClick={onGoAccount}>Xem lịch sử mua hàng</button>
@@ -456,6 +688,30 @@ export default function CheckoutPage({ cart, currentUser, onGoCart, onGoHome, on
                       <span>Giao hàng tận nơi</span>
                     </label>
                   </div>
+
+                  {savedAddresses.length > 0 && (
+                    <div className="checkout-saved-address-box">
+                      <span>Địa chỉ đã lưu</span>
+                      <div className="checkout-saved-address-list">
+                        {savedAddresses.map((address) => (
+                          <article
+                            className={selectedAddressId === address.id ? 'active' : ''}
+                            key={address.id}
+                          >
+                            <div>
+                              <strong>{address.fullName || 'Người nhận'}</strong>
+                              <small>{address.phone || 'Chưa có SĐT'}</small>
+                              <p>{address.fullAddress}</p>
+                              <em>{address.source === 'order' ? 'Lấy từ đơn đã đặt' : address.isDefault ? 'Địa chỉ mặc định' : 'Sổ địa chỉ'}</em>
+                            </div>
+                            <button type="button" onClick={() => applySavedAddress(address)}>
+                              Dùng địa chỉ này
+                            </button>
+                          </article>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="checkout-location-grid">
                     <label>
@@ -547,18 +803,80 @@ export default function CheckoutPage({ cart, currentUser, onGoCart, onGoHome, on
             ) : (
               <>
                 <h1>Thanh toán</h1>
-                <div className="checkout-coupon-box">Nhập mã giảm giá (chỉ áp dụng 1 lần)</div>
-                <SummaryRows summary={summary} educationDiscount={educationDiscount} total={total} />
+                <div className="checkout-coupon-box">
+                  <div>
+                    <strong>Mã giảm giá</strong>
+                    <small>Nhập mã do admin tạo. Mã chỉ giảm khi đơn đủ điều kiện.</small>
+                  </div>
+                  <form
+                    className="checkout-coupon-form"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      if (!appliedCoupon) handleApplyCoupon();
+                    }}
+                  >
+                    <input
+                      type="text"
+                      value={couponCode}
+                      onChange={(event) => {
+                        setCouponCode(event.target.value);
+                        setCouponMessage('');
+                        if (appliedCoupon) setAppliedCoupon(null);
+                      }}
+                      onFocus={() => setCouponMessage('')}
+                      placeholder="Nhập mã giảm giá"
+                      autoComplete="off"
+                      spellCheck="false"
+                    />
+                    {appliedCoupon ? (
+                      <button type="button" className="secondary" onClick={handleRemoveCoupon}>Bỏ mã</button>
+                    ) : (
+                      <button type="submit" disabled={couponLoading}>
+                        {couponLoading ? 'Đang kiểm tra...' : 'Áp dụng'}
+                      </button>
+                    )}
+                  </form>
+                  {couponMessage && (
+                    <p className={appliedCoupon ? 'success' : 'error'}>{couponMessage}</p>
+                  )}
+                </div>
+                <SummaryRows summary={summary} educationDiscount={educationDiscount} appliedCoupon={appliedCoupon} total={total} />
 
                 <section className="checkout-payment-card">
                   <h2>Thông tin thanh toán</h2>
-                  <label className="checkout-payment-method active">
-                    <input type="radio" checked readOnly />
+                  <label className={`checkout-payment-method ${form.paymentMethod === 'cod' ? 'active' : ''}`}>
+                    <input
+                      type="radio"
+                      name="paymentMethod"
+                      checked={form.paymentMethod === 'cod'}
+                      onChange={() => updateField('paymentMethod', 'cod')}
+                    />
                     <span>
                       <strong>Thanh toán khi nhận hàng (COD)</strong>
                       <small>Quý khách thanh toán trực tiếp khi nhận hàng.</small>
                     </span>
                   </label>
+                  <label className={`checkout-payment-method ${form.paymentMethod === 'bank_qr' ? 'active' : ''}`}>
+                    <input
+                      type="radio"
+                      name="paymentMethod"
+                      checked={form.paymentMethod === 'bank_qr'}
+                      onChange={() => updateField('paymentMethod', 'bank_qr')}
+                    />
+                    <span>
+                      <strong>Chuyển khoản ngân hàng bằng mã QR</strong>
+                      <small>Sau khi đặt hàng, hệ thống tạo QR đúng số tiền và mã đơn để đối soát tự động.</small>
+                    </span>
+                  </label>
+                  {form.paymentMethod === 'bank_qr' && (
+                    <div className="checkout-bank-transfer-preview">
+                      <strong>Thanh toán tự động bằng QR ngân hàng</strong>
+                      <p>
+                        Mã QR sẽ được tạo theo tổng tiền <b>{formatPrice(total)}</b> và nội dung chuyển khoản là mã đơn hàng.
+                        Khi ngân hàng/webhook gửi giao dịch về hệ thống, trạng thái sẽ tự đổi sang <b>Đã thanh toán</b>.
+                      </p>
+                    </div>
+                  )}
                 </section>
 
                 <section className="checkout-review-card">
@@ -585,7 +903,7 @@ export default function CheckoutPage({ cart, currentUser, onGoCart, onGoHome, on
                 </label>
 
                 <button type="button" className="checkout-primary-btn" onClick={submitOrder} disabled={submitting}>
-                  {submitting ? 'Đang lưu đơn hàng...' : 'Đặt hàng COD'}
+                  {submitting ? 'Đang lưu đơn hàng...' : form.paymentMethod === 'bank_qr' ? 'Đặt hàng và tạo mã QR' : 'Đặt hàng COD'}
                 </button>
               </>
             )}
@@ -594,7 +912,7 @@ export default function CheckoutPage({ cart, currentUser, onGoCart, onGoHome, on
           <aside className="checkout-side-card">
             <h2>Tổng tiền tạm tính:</h2>
             <strong>{formatPrice(total)}</strong>
-            <SummaryRows summary={summary} educationDiscount={educationDiscount} total={total} />
+            <SummaryRows summary={summary} educationDiscount={educationDiscount} appliedCoupon={appliedCoupon} total={total} />
           </aside>
         </div>
       </div>

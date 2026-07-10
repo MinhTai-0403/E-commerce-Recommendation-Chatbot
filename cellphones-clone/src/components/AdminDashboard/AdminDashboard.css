@@ -262,7 +262,8 @@
 .admin-key-form input,
 .admin-search input,
 .admin-product-form input,
-.admin-product-form textarea {
+.admin-product-form textarea,
+.admin-product-form select {
   width: 100%;
   border: 1px solid #dbe2ea;
   border-radius: 12px;
@@ -275,7 +276,8 @@
 .admin-key-form input:focus,
 .admin-search input:focus,
 .admin-product-form input:focus,
-.admin-product-form textarea:focus {
+.admin-product-form textarea:focus,
+.admin-product-form select:focus {
   border-color: #d70018;
   box-shadow: 0 0 0 3px rgba(215, 0, 24, 0.1);
 }
@@ -339,7 +341,8 @@
 }
 
 .admin-two-columns,
-.admin-products-layout {
+.admin-products-layout,
+.admin-coupons-layout {
   display: grid;
   grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
   gap: 18px;
@@ -417,6 +420,34 @@
   color: #334155;
   font-size: 13px;
   font-weight: 800;
+}
+
+.admin-image-upload img {
+  width: 120px;
+  height: 120px;
+  border-radius: 14px;
+  object-fit: contain;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  padding: 6px;
+}
+
+.admin-image-upload small {
+  color: #64748b;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.admin-clear-image-btn {
+  width: fit-content;
+  min-height: 34px;
+  border: 1px solid #fecdd3;
+  border-radius: 999px;
+  background: #fff;
+  color: #d70018;
+  font-weight: 800;
+  padding: 0 12px;
+  cursor: pointer;
 }
 
 .admin-form-grid {
@@ -781,6 +812,22 @@
   color: #991b1b;
 }
 
+.admin-coupon-row {
+  align-items: flex-start;
+}
+
+.admin-coupon-actions {
+  display: grid;
+  justify-items: end;
+  gap: 10px;
+}
+
+.admin-status.inactive,
+.admin-status.expired {
+  background: #f1f5f9;
+  color: #475569;
+}
+
 .admin-interaction-content {
   margin: 0;
   color: #334155;
@@ -830,6 +877,7 @@
 
   .admin-two-columns,
   .admin-products-layout,
+  .admin-coupons-layout,
   .admin-key-panel {
     grid-template-columns: 1fr;
   }

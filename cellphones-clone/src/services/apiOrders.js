@@ -12,6 +12,7 @@ export async function createOrder(orderPayload) {
   const token = getAuthToken();
   const response = await fetch(buildApiUrl('/api/orders'), {
     method: 'POST',
+    credentials: 'include',
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json',
@@ -28,14 +29,35 @@ export async function createOrder(orderPayload) {
   return payload.data;
 }
 
-export async function fetchMyOrders(signal) {
+export async function applyCouponCode(body) {
   const token = getAuthToken();
-  if (!token) return [];
-
-  const response = await fetch(buildApiUrl('/api/orders'), {
+  const response = await fetch(buildApiUrl('/api/coupons/apply'), {
+    method: 'POST',
+    credentials: 'include',
     headers: {
       Accept: 'application/json',
-      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.ok === false) {
+    throw new Error(getErrorMessage(payload, 'Không thể áp dụng mã giảm giá.'));
+  }
+
+  return payload.data;
+}
+
+export async function fetchMyOrders(signal) {
+  const token = getAuthToken();
+
+  const response = await fetch(buildApiUrl('/api/orders'), {
+    credentials: 'include',
+    headers: {
+      Accept: 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     signal,
   });
@@ -46,4 +68,43 @@ export async function fetchMyOrders(signal) {
   }
 
   return payload.data || [];
+}
+
+export async function fetchOrderByCode(orderCode, signal) {
+  const token = getAuthToken();
+  const response = await fetch(buildApiUrl(`/api/orders/${encodeURIComponent(orderCode)}`), {
+    credentials: 'include',
+    headers: {
+      Accept: 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    signal,
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.ok === false) {
+    throw new Error(getErrorMessage(payload, 'Không thể tải thông tin đơn hàng.'));
+  }
+
+  return payload.data;
+}
+
+export async function fetchOrderPaymentQr(orderCode, signal) {
+  const token = getAuthToken();
+  const response = await fetch(buildApiUrl(`/api/orders/${encodeURIComponent(orderCode)}/payment/qr`), {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      Accept: 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    signal,
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.ok === false) {
+    throw new Error(getErrorMessage(payload, 'Không thể tạo mã QR thanh toán.'));
+  }
+
+  return payload.data;
 }

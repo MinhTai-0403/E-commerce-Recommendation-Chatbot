@@ -5,6 +5,8 @@ import ProductCard from '../ProductCard/ProductCard';
 
 export default function FlashSale() {
   const [activeTab, setActiveTab] = useState('flashsale');
+  const [activeDate, setActiveDate] = useState(() => flashSaleDates.find((date) => date.active)?.id || flashSaleDates[0]?.id);
+  const [activeTimeSlot, setActiveTimeSlot] = useState(() => flashSaleTimeSlots.find((slot) => slot.active)?.id || flashSaleTimeSlots[0]?.id);
   const [timeLeft, setTimeLeft] = useState({ hours: '00', minutes: '01', seconds: '38', milliseconds: '25' });
 
   useEffect(() => {
@@ -65,7 +67,12 @@ export default function FlashSale() {
             <div className="flash-sale-header">
               <div className="fs-dates">
                 {flashSaleDates.map(date => (
-                  <button key={date.id} className={`fs-date-btn ${date.active ? 'active' : ''}`}>
+                  <button
+                    key={date.id}
+                    type="button"
+                    className={`fs-date-btn ${activeDate === date.id ? 'active' : ''}`}
+                    onClick={() => setActiveDate(date.id)}
+                  >
                     {date.date}
                   </button>
                 ))}
@@ -86,7 +93,12 @@ export default function FlashSale() {
 
             <div className="fs-time-slots">
               {flashSaleTimeSlots.map(slot => (
-                <button key={slot.id} className={`fs-time-btn ${slot.active ? 'active' : ''}`}>
+                <button
+                  key={slot.id}
+                  type="button"
+                  className={`fs-time-btn ${activeTimeSlot === slot.id ? 'active' : ''}`}
+                  onClick={() => setActiveTimeSlot(slot.id)}
+                >
                   {slot.time}
                 </button>
               ))}

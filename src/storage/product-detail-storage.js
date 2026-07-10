@@ -2,6 +2,7 @@ const fs = require("fs/promises");
 const path = require("path");
 const zlib = require("zlib");
 const { promisify } = require("util");
+const { Binary } = require("mongodb");
 
 const gzip = promisify(zlib.gzip);
 const gunzip = promisify(zlib.gunzip);
@@ -44,8 +45,27 @@ function detailAbsolutePath(relativePath) {
   return resolved;
 }
 
+function getBinaryBuffer(value) {
+  if (!value) return null;
+  if (Buffer.isBuffer(value)) return value;
+  if (value.buffer) return Buffer.from(value.buffer);
+  if (value.value) return Buffer.from(value.value);
+  if (value.data) return Buffer.from(value.data);
+  return null;
+}
+
 function stripMongoOnlyFields(detail = {}) {
-  const { _id, createdAt, updatedAt, storage, storageStatus, storageVersion, storagePath, ...rest } = detail;
+  const {
+    _id,
+    createdAt,
+    updatedAt,
+    storage,
+    storageStatus,
+    storageVersion,
+    storagePath,
+    detailBlob,
+    ...rest
+  } = detail;
   return rest;
 }
 
@@ -82,8 +102,40 @@ async function readProductDetailFile(storage = {}) {
   }
 }
 
+async function buildProductDetailInlineStorage(detail) {
+  const payload = stripMongoOnlyFields(detail);
+  const relativePath = detailRelativePath(payload);
+  const json = JSON.stringify(payload);
+  const compressed = await gzip(Buffer.from(json, "utf8"), { level: 9 });
+
+  return {
+    detailBlob: new Binary(compressed),
+    storage: {
+      type: "inline-gzip",
+      version: STORAGE_VERSION,
+      path: relativePath,
+      bytes: compressed.length,
+      jsonBytes: Buffer.byteLength(json, "utf8"),
+      updatedAt: new Date(),
+    },
+  };
+}
+
+async function readProductDetailInline(manifest = {}) {
+  const compressed = getBinaryBuffer(manifest.detailBlob || manifest.storage?.blob);
+  if (!compressed) return null;
+
+  const json = await gunzip(compressed);
+  return JSON.parse(json.toString("utf8"));
+}
+
 async function hydrateProductDetail(manifest) {
   if (!manifest) return null;
+
+  if (manifest.storage?.type === "inline-gzip") {
+    const detail = await readProductDetailInline(manifest);
+    if (detail) return detail;
+  }
 
   if (manifest.storage?.type === "local-gzip") {
     const detail = await readProductDetailFile(manifest.storage);
@@ -134,7 +186,7 @@ function buildProductDetailManifest(detail, storage) {
     primaryImage: detail.primaryImage || detail.thumbnail || detail.image,
     images: Array.isArray(detail.images) ? detail.images.slice(0, 8) : [],
     storage,
-    storageStatus: "file-backed",
+    storageStatus: storage?.type === "inline-gzip" ? "inline-backed" : "file-backed",
     storageVersion: STORAGE_VERSION,
     hasArticleHtml: Boolean(detail.articleHtml),
     counts: {
@@ -157,11 +209,13 @@ function buildProductDetailManifest(detail, storage) {
 }
 
 module.exports = {
+  buildProductDetailInlineStorage,
   buildProductDetailManifest,
   detailAbsolutePath,
   detailRelativePath,
   getDetailStorageRoot,
   hydrateProductDetail,
+  readProductDetailInline,
   readProductDetailFile,
   writeProductDetailFile,
 };

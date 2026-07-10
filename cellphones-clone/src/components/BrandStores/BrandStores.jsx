@@ -1,5 +1,19 @@
 import './BrandStores.css';
 import { brandStores } from '../../data/mockData';
+import { buildCategoryPath } from '../../utils/linkRoutes';
+
+const getBrandStorePath = (brandName = '') => {
+  const name = String(brandName || '').trim();
+  const phoneBrands = new Set(['Apple', 'Samsung', 'Xiaomi', 'OPPO']);
+  const laptopBrands = new Set(['ASUS', 'Lenovo']);
+  const category = laptopBrands.has(name) ? 'Laptop' : phoneBrands.has(name) ? 'Điện thoại' : 'Sản phẩm';
+
+  return buildCategoryPath(category, {
+    brand: /apple/i.test(name) ? 'apple' : name,
+    keyword: name,
+    title: name,
+  });
+};
 
 export default function BrandStores() {
   return (
@@ -19,7 +33,7 @@ export default function BrandStores() {
             {brandStores.map(brand => (
               <a
                 key={brand.id}
-                href="#"
+                href={getBrandStorePath(brand.name)}
                 className="brand-store-item"
                 style={{ background: brand.color, color: brand.textColor }}
               >

@@ -2,9 +2,23 @@ const http = require("http");
 const { ObjectId } = require("mongodb");
 const { ProxyAgent } = require("undici");
 const { handleAdminRequest, isAdminAuthorized } = require("../services/admin-service");
-const { handleAuthRequest, verifyJwt } = require("../services/auth-service");
+const { handleAuthRequest, getAuthToken, verifyJwt } = require("../services/auth-service");
+const { ensureCommerceDatabase } = require("../services/db-maintenance");
 const { extractCellphonesDetails } = require("../cellphones/cellphones-detail-extractor");
 const { createMongoClient, getMongoConfig } = require("../config/mongodb");
+const { rateLimitOrSend } = require("../middlewares/rate-limit");
+const {
+  addressSchema,
+  addressUpdateSchema,
+  couponSchema,
+  invoiceUpdateSchema,
+  orderPayloadSchema,
+  parseWithSchema,
+  questionCreateSchema,
+  reviewCreateSchema,
+  returnRequestSchema,
+  wishlistItemSchema,
+} = require("../validators/ecommerce-validators");
 const {
   buildProductDetailManifest,
   hydrateProductDetail,
@@ -12,27 +26,39 @@ const {
 } = require("../storage/product-detail-storage");
 
 const API_PORT = Number(process.env.API_PORT || 5050);
-const CORS_ORIGIN = process.env.CORS_ORIGIN || "*";
+const CORS_ORIGIN = process.env.CORS_ORIGIN || "http://localhost:5173";
 const MAX_LIMIT = 100;
 const DEFAULT_LIMIT = 20;
 const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+const LAZY_SCRAPE_ENABLED = String(process.env.LAZY_SCRAPE_ENABLED || "false") === "true";
 const LAZY_SCRAPE_TIMEOUT_MS = Number(process.env.LAZY_SCRAPE_TIMEOUT_MS || 45000);
 const LAZY_SCRAPE_RETRIES = Number(process.env.LAZY_SCRAPE_RETRIES || 2);
+const LAZY_SCRAPE_FAILURE_COOLDOWN_MS = Number(
+  process.env.LAZY_SCRAPE_FAILURE_COOLDOWN_MS || 10 * 60 * 1000
+);
+const LAZY_SCRAPE_DEBUG = String(process.env.LAZY_SCRAPE_DEBUG || "false") === "true";
 
 let mongoClient;
 let lazyProxyPool;
 let lazyProxyCursor = 0;
+const lazyScrapeFailures = new Map();
+const lazyScrapeInflight = new Map();
 let cartIndexesReady = false;
 let orderIndexesReady = false;
+let inventoryIndexesReady = false;
+let couponIndexesReady = false;
+let userEventIndexesReady = false;
 
 function sendJson(res, statusCode, payload) {
   res.writeHead(statusCode, {
     "Content-Type": "application/json; charset=utf-8",
     "Access-Control-Allow-Origin": CORS_ORIGIN,
+    "Access-Control-Allow-Credentials": "true",
+    "Vary": "Origin",
     "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Admin-Api-Key",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Admin-Api-Key, X-Bank-Webhook-Secret",
   });
   res.end(JSON.stringify(payload, null, 2));
 }
@@ -179,11 +205,82 @@ async function scrapeCellphonesDetail(url) {
     } catch (error) {
       lastError = error;
       if (!shouldRetryScrapeError(error) || attempt === attempts) break;
-      console.warn(`[lazy-detail-retry] ${url}: ${error.message}${error.proxyId ? ` via ${error.proxyId}` : ""}`);
+      if (LAZY_SCRAPE_DEBUG) {
+        console.warn(`[lazy-detail-retry] ${url}: ${error.message}${error.proxyId ? ` via ${error.proxyId}` : ""}`);
+      }
     }
   }
 
   throw lastError;
+}
+
+function getLazyScrapeKey(url = "") {
+  return String(url || "").trim().toLowerCase();
+}
+
+function getLazyScrapeCooldown(url) {
+  const key = getLazyScrapeKey(url);
+  const failure = lazyScrapeFailures.get(key);
+  if (!failure) return null;
+
+  if (failure.expiresAt <= Date.now()) {
+    lazyScrapeFailures.delete(key);
+    return null;
+  }
+
+  return failure;
+}
+
+function rememberLazyScrapeFailure(url, error) {
+  const key = getLazyScrapeKey(url);
+  if (!key) return;
+
+  lazyScrapeFailures.set(key, {
+    message: error?.message || "fetch failed",
+    failedAt: Date.now(),
+    expiresAt: Date.now() + LAZY_SCRAPE_FAILURE_COOLDOWN_MS,
+  });
+}
+
+async function scrapeCellphonesDetailCached(url, { force = false } = {}) {
+  if (!LAZY_SCRAPE_ENABLED && !force) {
+    const error = new Error("Lazy scrape is disabled. Use LAZY_SCRAPE_ENABLED=true or ?lazy=true to enable on-demand scraping.");
+    error.code = "LAZY_SCRAPE_DISABLED";
+    throw error;
+  }
+
+  const key = getLazyScrapeKey(url);
+  if (!force) {
+    const cooldown = getLazyScrapeCooldown(url);
+    if (cooldown) {
+      const error = new Error(`Lazy scrape is cooling down after previous failure: ${cooldown.message}`);
+      error.code = "LAZY_SCRAPE_COOLDOWN";
+      throw error;
+    }
+  } else {
+    lazyScrapeFailures.delete(key);
+  }
+
+  if (lazyScrapeInflight.has(key)) return lazyScrapeInflight.get(key);
+
+  const task = scrapeCellphonesDetail(url)
+    .then((detail) => {
+      lazyScrapeFailures.delete(key);
+      return detail;
+    })
+    .catch((error) => {
+      rememberLazyScrapeFailure(url, error);
+      if (!["LAZY_SCRAPE_DISABLED", "LAZY_SCRAPE_COOLDOWN"].includes(error.code)) {
+        console.warn(`[lazy-detail-failed] ${url}: ${error.message}`);
+      }
+      throw error;
+    })
+    .finally(() => {
+      lazyScrapeInflight.delete(key);
+    });
+
+  lazyScrapeInflight.set(key, task);
+  return task;
 }
 
 function getSlugFromUrl(url) {
@@ -409,6 +506,8 @@ function normalizeProduct(product) {
     rating: typeof product.rating === "number" ? product.rating : null,
     ratingCount: typeof product.ratingCount === "number" ? product.ratingCount : null,
     installment: product.installment,
+    stock: Number.isFinite(Number(product.stock)) ? Number(product.stock) : null,
+    inventory: Number.isFinite(Number(product.inventory)) ? Number(product.inventory) : null,
     currentPrice: price,
     originalPrice: toPositiveNumber(product.originalPrice) || price,
     priceCurrency: product.priceCurrency || "VND",
@@ -638,6 +737,13 @@ function buildListQuery(searchParams) {
   const brand = searchParams.get("brand");
   const segment = searchParams.get("segment");
   const inStock = searchParams.get("inStock");
+  const filter = searchParams.get("filter");
+  const facet = searchParams.get("facet");
+  const priceMin = toPositiveNumber(searchParams.get("priceMin") || searchParams.get("price_min") || searchParams.get("minPrice"));
+  const priceMax = toPositiveNumber(searchParams.get("priceMax") || searchParams.get("price_max") || searchParams.get("maxPrice"));
+  const ram = searchParams.get("ram");
+  const storage = searchParams.get("storage");
+  const screenSize = searchParams.get("screen_size") || searchParams.get("screenSize");
 
   if (source !== "all") query.source = source;
 
@@ -656,6 +762,12 @@ function buildListQuery(searchParams) {
   if (category) appendAndCondition(query, buildCategoryCondition(category));
   if (brand && brand !== "all") appendAndCondition(query, buildBrandCondition(brand));
   if (segment) appendAndCondition(query, buildSegmentCondition(segment));
+  if (facet) appendAndCondition(query, buildFacetCondition(facet));
+  if (filter) appendAndCondition(query, buildFilterCondition(filter));
+  if (ram) appendAndCondition(query, buildFeatureValueCondition("ram", ram));
+  if (storage) appendAndCondition(query, buildFeatureValueCondition("storage", storage));
+  if (screenSize) appendAndCondition(query, buildFeatureValueCondition("screen-size", screenSize));
+  if (priceMin || priceMax) appendAndCondition(query, buildPriceRangeCondition(priceMin, priceMax));
 
   if (inStock === "true") appendAndCondition(query, buildStockCondition(true));
   if (inStock === "false") appendAndCondition(query, buildStockCondition(false));
@@ -668,7 +780,9 @@ function buildStockCondition(inStock = true) {
     $or: [
       { "availability.status": "InStock" },
       { availability: "InStock" },
-      { statusLabel: { $regex: "^C.n h.ng$", $options: "i" } },
+      { stockStatus: "InStock" },
+      { inStock: true },
+      { statusLabel: { $regex: "C.n h.ng|Còn hàng|Con hang|InStock", $options: "i" } },
     ],
   };
 
@@ -683,8 +797,131 @@ function buildStockCondition(inStock = true) {
   };
 }
 
+function buildPriceRangeCondition(min, max) {
+  const range = {};
+  if (min) range.$gte = min;
+  if (max) range.$lte = max;
+
+  if (!Object.keys(range).length) return {};
+
+  return {
+    $or: [
+      { currentPrice: range },
+      { price: range },
+    ],
+  };
+}
+
+function buildFeatureValueCondition(kind = "", value = "") {
+  const clean = cleanLimitedText(value, 80);
+  if (!clean) return {};
+
+  const normalized = normalizeSearchKey(clean);
+  const compact = normalized.replace(/\s+/g, "");
+  const fields = [
+    "name",
+    "slug",
+    "sku",
+    "description",
+    "category",
+    "categories",
+    "specifications.name",
+    "specifications.value",
+    "specifications.label",
+    "specifications.rows.label",
+    "specifications.rows.value",
+    "articleSections.heading",
+    "articleSections.paragraphs",
+    "rawProductJsonLd.additionalProperty.name",
+    "rawProductJsonLd.additionalProperty.value",
+    "trainingLabels.productName",
+  ];
+  const escaped = escapeRegex(clean);
+  const compactEscaped = escapeRegex(compact);
+
+  if (kind === "ram") {
+    const number = compact.match(/\d+/)?.[0];
+    const regex = number
+      ? new RegExp(`\\b${escapeRegex(number)}\\s?gb\\s?(ram)?\\b|ram\\s?${escapeRegex(number)}\\s?gb`, "i")
+      : new RegExp(escaped, "i");
+    return regexCondition(fields, regex);
+  }
+
+  if (kind === "storage") {
+    const regex = new RegExp(`${escaped}|${compactEscaped}|\\b${compactEscaped.replace(/gb|tb/gi, "")}\\s?(gb|tb)\\b`, "i");
+    return regexCondition(fields, regex);
+  }
+
+  if (kind === "screen-size") {
+    const number = compact.match(/\d+(?:\\.\\d+)?/)?.[0];
+    const regex = number
+      ? new RegExp(`${escapeRegex(number)}\\s?(inch|inches|\"|”|in)`, "i")
+      : new RegExp(escaped, "i");
+    return regexCondition(fields, regex);
+  }
+
+  return regexCondition(fields, new RegExp(escaped, "i"));
+}
+
+function buildFilterCondition(filter = "") {
+  const key = normalizeSearchKey(filter).replace(/[^a-z0-9]+/g, "-");
+
+  if (key === "hot-deal" || key === "discount" || key === "khuyen-mai-hot") {
+    return {
+      $or: [
+        { discount: { $gt: 0 } },
+        { promotions: { $exists: true, $ne: [] } },
+        { priceBenefits: { $exists: true, $ne: [] } },
+      ],
+    };
+  }
+
+  return {};
+}
+
+function buildFacetCondition(facet = "") {
+  const key = normalizeSearchKey(facet).replace(/[^a-z0-9]+/g, "-");
+  const fields = [
+    "name",
+    "slug",
+    "sku",
+    "category",
+    "categories",
+    "description",
+    "articleTitle",
+    "articleSections.heading",
+    "articleSections.paragraphs",
+    "specifications.name",
+    "specifications.value",
+    "specifications.label",
+    "specifications.rows.label",
+    "specifications.rows.value",
+    "rawProductJsonLd.name",
+    "rawProductJsonLd.description",
+    "rawProductJsonLd.additionalProperty.name",
+    "rawProductJsonLd.additionalProperty.value",
+    "trainingLabels.labelPathText",
+    "trainingLabels.productName",
+    "trainingLabels.deviceLine",
+  ];
+  const facetRegexes = {
+    storage: /\b(32|64|128|256|512)\s?gb\b|\b(1|2|4)\s?tb\b|rom|bộ nhớ|bo nho|storage/i,
+    ram: /\b(2|3|4|6|8|12|16|18|24|32|64)\s?gb\s?(ram)?\b|ram/i,
+    "screen-size": /\b([1-9]|1[0-9]|2[0-9]|3[0-9])(\.\d)?\s?(inch|inches|")\b|màn hình|man hinh|display/i,
+    usage: /gaming|chơi game|choi game|văn phòng|van phong|đồ họa|do hoa|học tập|hoc tap|pin trâu|pin trau|mỏng nhẹ|mong nhe/i,
+    display: /oled|amoled|ips|retina|mini-?led|qled|lcd|tft|màn hình|man hinh/i,
+    camera: /camera|chụp|chup|zoom|ois|leica|zeiss|hasselblad|gimbal|chống rung|chong rung/i,
+    "refresh-rate": /\b(60|75|90|100|120|144|165|180|240|360)\s?hz\b|tần số quét|tan so quet/i,
+    special: /5g|nfc|ai|wifi|wi-fi|bluetooth|sạc nhanh|sac nhanh|kháng nước|khang nuoc|chống nước|chong nuoc|active|magsafe/i,
+  };
+  const regex = facetRegexes[key];
+
+  return regex ? regexCondition(fields, regex) : {};
+}
+
 function buildSort(sortKey) {
-  switch (sortKey) {
+  const key = String(sortKey || "").trim().toLowerCase().replace(/-/g, "_");
+  switch (key) {
     case "price_asc":
       return { currentPrice: 1, price: 1, name: 1 };
     case "price_desc":
@@ -693,12 +930,17 @@ function buildSort(sortKey) {
       return { name: 1 };
     case "oldest":
       return { scrapedAt: 1, name: 1 };
+    case "hot_deal":
+    case "promotion_hot":
+    case "popular":
+      return { discount: -1, webFreshnessScore: -1, updatedAt: -1, scrapedAt: -1, name: 1 };
     case "latest":
     default:
       return {
         webFreshnessScore: -1,
         realWorldYear: -1,
         effectiveRealWorldYear: -1,
+        sitemapSortRank: -1,
         updatedAt: -1,
         scrapedAt: -1,
         name: 1,
@@ -804,6 +1046,7 @@ function scoreProductCandidate(product = {}, requestedSlug = "", canonicalSlugs 
   score += getStockScore(product);
   score += getDetailSignalScore(product);
   score += Number(product.webFreshnessScore || 0) * 2_000;
+  score += Number(product.sitemapSortRank || 0);
   score += Number(product.realWorldYear || product.effectiveRealWorldYear || 0);
 
   return score;
@@ -825,6 +1068,7 @@ async function findBestProductForLookup(products, lookup, requestedSlug, canonic
       webFreshnessScore: -1,
       realWorldYear: -1,
       effectiveRealWorldYear: -1,
+      sitemapSortRank: -1,
       updatedAt: -1,
       scrapedAt: -1,
     })
@@ -881,6 +1125,7 @@ async function findProductByIdentifier(products, identifier) {
         webFreshnessScore: -1,
         realWorldYear: -1,
         effectiveRealWorldYear: -1,
+        sitemapSortRank: -1,
         updatedAt: -1,
         scrapedAt: -1,
       })
@@ -899,6 +1144,7 @@ async function findBestProductDetailForLookup(productDetails, lookup, requestedS
       webFreshnessScore: -1,
       realWorldYear: -1,
       effectiveRealWorldYear: -1,
+      sitemapSortRank: -1,
       updatedAt: -1,
       scrapedAt: -1,
     })
@@ -976,13 +1222,13 @@ function buildSummaryBackedDetail(product, detail = {}, identifier = "") {
   const media = Array.isArray(detail.media) && detail.media.length
     ? detail.media
     : images.map((src, index) => ({
-        id: `${slug}-summary-image-${index + 1}`,
-        type: "image",
-        label: index === 0 ? "Ảnh chính" : `Ảnh ${index + 1}`,
-        src,
-        thumbnail: src,
-        alt: summary.name,
-      }));
+      id: `${slug}-summary-image-${index + 1}`,
+      type: "image",
+      label: index === 0 ? "Ảnh chính" : `Ảnh ${index + 1}`,
+      src,
+      thumbnail: src,
+      alt: summary.name,
+    }));
   const specifications = Array.isArray(detail.specifications) && detail.specifications.some((group) => group.rows?.length)
     ? detail.specifications
     : summary.specifications || [];
@@ -1188,10 +1434,10 @@ function buildCategoryCondition(category = "") {
   const regexes = aliasCategories[key]
     ? aliasCategories[key].map((alias) => new RegExp(`^${escapeRegex(alias)}$`, "i"))
     : exactOnlyCategories.has(key)
-    ? [new RegExp(`^${escaped}$`, "i")]
-    : prefixCategories.has(key)
-      ? [new RegExp(`^${escaped}(\\b|\\s|$)`, "i")]
-      : [
+      ? [new RegExp(`^${escaped}$`, "i")]
+      : prefixCategories.has(key)
+        ? [new RegExp(`^${escaped}(\\b|\\s|$)`, "i")]
+        : [
           new RegExp(`^${escaped}$`, "i"),
           new RegExp(`^${escaped}(\\b|\\s|$)`, "i"),
         ];
@@ -1283,10 +1529,16 @@ function buildSegmentCondition(segment = "") {
         regexCondition(monitorFields, /màn hình|man hinh|monitor|gaming monitor/i),
         {
           $nor: [
+            { category: /tivi/i },
             { categories: /tivi/i },
+            { "categoryTrail.name": /tivi/i },
+            { "categoryTrail.label": /tivi/i },
             { name: /tivi|smart tv|smart tivi/i },
             { slug: /tivi|smart-tv|smart-tivi/i },
+            { category: /laptop/i },
             { categories: /laptop/i },
+            { "categoryTrail.name": /laptop/i },
+            { "categoryTrail.label": /laptop/i },
             { name: /laptop/i },
             { slug: /laptop/i },
           ],
@@ -1376,6 +1628,8 @@ function sanitizeProductInput(input, { isCreate = false } = {}) {
     "originalPrice",
     "priceCurrency",
     "availability",
+    "stock",
+    "inventory",
     "categories",
     "breadcrumbs",
     "primaryImage",
@@ -1439,9 +1693,20 @@ async function getDb() {
     productQuestionsCollection,
     cartsCollection,
     ordersCollection,
+    paymentsCollection,
+    couponsCollection,
+    inventoryCollection,
+    userEventsCollection,
+    shipmentsCollection,
+    wishlistsCollection,
+    notificationsCollection,
+    addressesCollection,
+    returnsCollection,
+    warrantiesCollection,
+    adminAuditLogsCollection,
   } = getMongoConfig();
   const db = mongoClient.db(dbName);
-  return {
+  const context = {
     db,
     dbName,
     productsCollection,
@@ -1450,13 +1715,55 @@ async function getDb() {
     productQuestionsCollection,
     cartsCollection,
     ordersCollection,
+    paymentsCollection,
+    couponsCollection,
+    inventoryCollection,
+    userEventsCollection,
+    shipmentsCollection,
+    wishlistsCollection,
+    notificationsCollection,
+    addressesCollection,
+    returnsCollection,
+    warrantiesCollection,
+    adminAuditLogsCollection,
     products: db.collection(productsCollection),
     productDetails: db.collection(productDetailsCollection),
     productReviews: db.collection(productReviewsCollection),
     productQuestions: db.collection(productQuestionsCollection),
     carts: db.collection(cartsCollection),
     orders: db.collection(ordersCollection),
+    payments: db.collection(paymentsCollection),
+    coupons: db.collection(couponsCollection),
+    inventory: db.collection(inventoryCollection),
+    userEvents: db.collection(userEventsCollection),
+    shipments: db.collection(shipmentsCollection),
+    wishlists: db.collection(wishlistsCollection),
+    notifications: db.collection(notificationsCollection),
+    addresses: db.collection(addressesCollection),
+    returns: db.collection(returnsCollection),
+    warranties: db.collection(warrantiesCollection),
+    adminAuditLogs: db.collection(adminAuditLogsCollection),
   };
+  await ensureCommerceDatabase({
+    ...context,
+    collectionNames: {
+      productDetailsCollection,
+      productReviewsCollection,
+      productQuestionsCollection,
+      cartsCollection,
+      ordersCollection,
+      couponsCollection,
+      inventoryCollection,
+      paymentsCollection,
+      shipmentsCollection,
+      wishlistsCollection,
+      notificationsCollection,
+      addressesCollection,
+      returnsCollection,
+      warrantiesCollection,
+    },
+  });
+  return context;
 }
 
 async function handleHealth(_req, res) {
@@ -1469,12 +1776,30 @@ async function handleHealth(_req, res) {
     productQuestionsCollection,
     cartsCollection,
     ordersCollection,
+    paymentsCollection,
+    couponsCollection,
+    inventoryCollection,
+    userEventsCollection,
+    shipmentsCollection,
+    wishlistsCollection,
+    notificationsCollection,
+    addressesCollection,
+    adminAuditLogsCollection,
     products,
     productDetails,
     productReviews,
     productQuestions,
     carts,
     orders,
+    payments,
+    coupons,
+    inventory,
+    userEvents,
+    shipments,
+    wishlists,
+    notifications,
+    addresses,
+    adminAuditLogs,
   } =
     await getDb();
   await db.command({ ping: 1 });
@@ -1485,6 +1810,15 @@ async function handleHealth(_req, res) {
     totalQuestions,
     totalCarts,
     totalOrders,
+    totalPayments,
+    totalCoupons,
+    totalInventory,
+    totalUserEvents,
+    totalShipments,
+    totalWishlists,
+    totalNotifications,
+    totalAddresses,
+    totalAdminAuditLogs,
   ] = await Promise.all([
     products.estimatedDocumentCount(),
     productDetails.estimatedDocumentCount(),
@@ -1492,6 +1826,15 @@ async function handleHealth(_req, res) {
     productQuestions.estimatedDocumentCount(),
     carts.estimatedDocumentCount(),
     orders.estimatedDocumentCount(),
+    payments.estimatedDocumentCount(),
+    coupons.estimatedDocumentCount(),
+    inventory.estimatedDocumentCount(),
+    userEvents.estimatedDocumentCount(),
+    shipments.estimatedDocumentCount(),
+    wishlists.estimatedDocumentCount(),
+    notifications.estimatedDocumentCount(),
+    addresses.estimatedDocumentCount(),
+    adminAuditLogs.estimatedDocumentCount(),
   ]);
   sendJson(res, 200, {
     ok: true,
@@ -1502,12 +1845,30 @@ async function handleHealth(_req, res) {
     productQuestionsCollection,
     cartsCollection,
     ordersCollection,
+    paymentsCollection,
+    couponsCollection,
+    inventoryCollection,
+    userEventsCollection,
+    shipmentsCollection,
+    wishlistsCollection,
+    notificationsCollection,
+    addressesCollection,
+    adminAuditLogsCollection,
     totalProducts,
     totalProductDetails,
     totalReviews,
     totalQuestions,
     totalCarts,
     totalOrders,
+    totalPayments,
+    totalCoupons,
+    totalInventory,
+    totalUserEvents,
+    totalShipments,
+    totalWishlists,
+    totalNotifications,
+    totalAddresses,
+    totalAdminAuditLogs,
   });
 }
 
@@ -1520,6 +1881,15 @@ async function handleApiIndex(_req, res) {
     productQuestionsCollection,
     cartsCollection,
     ordersCollection,
+    paymentsCollection,
+    couponsCollection,
+    inventoryCollection,
+    userEventsCollection,
+    shipmentsCollection,
+    wishlistsCollection,
+    notificationsCollection,
+    addressesCollection,
+    adminAuditLogsCollection,
   } = getMongoConfig();
   sendJson(res, 200, {
     ok: true,
@@ -1531,6 +1901,15 @@ async function handleApiIndex(_req, res) {
     productQuestionsCollection,
     cartsCollection,
     ordersCollection,
+    paymentsCollection,
+    couponsCollection,
+    inventoryCollection,
+    userEventsCollection,
+    shipmentsCollection,
+    wishlistsCollection,
+    notificationsCollection,
+    addressesCollection,
+    adminAuditLogsCollection,
     endpoints: {
       health: "/api/health",
       products: "/api/products",
@@ -1541,15 +1920,26 @@ async function handleApiIndex(_req, res) {
       cart: "/api/cart",
       cartItems: "/api/cart/items",
       orders: "/api/orders",
+      addresses: "/api/addresses",
+      wishlist: "/api/wishlist",
+      notifications: "/api/notifications",
+      bankPaymentWebhook: "/api/payments/bank-transfer-webhook",
+      confirmOrderPayment: "/api/orders/:orderCode/payment/confirm",
       requestRegisterOtp: "/api/auth/request-register-otp",
       verifyRegisterOtp: "/api/auth/verify-register-otp",
       login: "/api/auth/login",
       me: "/api/auth/me",
       adminSummary: "/api/admin/summary",
       adminOrders: "/api/admin/orders",
+      adminShipments: "/api/admin/shipments",
+      adminPayments: "/api/admin/payments",
+      adminInventory: "/api/admin/inventory",
       adminUsers: "/api/admin/users",
       adminReviews: "/api/admin/reviews",
       adminQuestions: "/api/admin/questions",
+      adminCoupons: "/api/admin/coupons",
+      adminRevenue: "/api/admin/revenue",
+      adminAuditLogs: "/api/admin/audit-logs",
     },
   });
 }
@@ -1569,59 +1959,61 @@ async function handleListProducts(req, res) {
   const projection = includeRaw
     ? undefined
     : {
-        name: 1,
-        brand: 1,
-        brandKey: 1,
-        url: 1,
-        sku: 1,
-        slug: 1,
-        detailAvailable: 1,
-        detailBacked: 1,
-        detailSlug: 1,
-        detailUrl: 1,
-        price: 1,
-        currentPrice: 1,
-        originalPrice: 1,
-        discount: 1,
-        rating: 1,
-        ratingCount: 1,
-        installment: 1,
-        statusLabel: 1,
-        city: 1,
-        priceCurrency: 1,
-        availability: 1,
-        category: 1,
-        categories: 1,
-        categoryTrail: 1,
-        breadcrumbs: 1,
-        primaryImage: 1,
-        thumbnail: 1,
-        image: 1,
-        images: { $slice: 5 },
-        source: 1,
-        sourceUrls: 1,
-        scrapedAt: 1,
-        updatedAt: 1,
-        ...(includeDetails
-          ? {
-              title: 1,
-              inputUrl: 1,
-              attributes: 1,
-              rawProductJsonLd: 1,
-              sitemap: 1,
-              trainingLabels: 1,
-              description: 1,
-              specifications: 1,
-              variants: 1,
-              colors: 1,
-              promotions: 1,
-              policies: 1,
-              relatedProducts: 1,
-              articleSections: 1,
-              faqs: 1,
-            }
-          : {}),
-      };
+      name: 1,
+      brand: 1,
+      brandKey: 1,
+      url: 1,
+      sku: 1,
+      slug: 1,
+      detailAvailable: 1,
+      detailBacked: 1,
+      detailSlug: 1,
+      detailUrl: 1,
+      price: 1,
+      currentPrice: 1,
+      originalPrice: 1,
+      discount: 1,
+      rating: 1,
+      ratingCount: 1,
+      installment: 1,
+      statusLabel: 1,
+      city: 1,
+      priceCurrency: 1,
+      availability: 1,
+      stock: 1,
+      inventory: 1,
+      category: 1,
+      categories: 1,
+      categoryTrail: 1,
+      breadcrumbs: 1,
+      primaryImage: 1,
+      thumbnail: 1,
+      image: 1,
+      images: { $slice: 5 },
+      source: 1,
+      sourceUrls: 1,
+      scrapedAt: 1,
+      updatedAt: 1,
+      ...(includeDetails
+        ? {
+          title: 1,
+          inputUrl: 1,
+          attributes: 1,
+          rawProductJsonLd: 1,
+          sitemap: 1,
+          trainingLabels: 1,
+          description: 1,
+          specifications: 1,
+          variants: 1,
+          colors: 1,
+          promotions: 1,
+          policies: 1,
+          relatedProducts: 1,
+          articleSections: 1,
+          faqs: 1,
+        }
+        : {}),
+    };
 
   const [total, docs] = await Promise.all([
     webProducts.countDocuments(query),
@@ -1660,6 +2052,7 @@ async function handleGetProductDetails(req, res, identifier) {
   const { productDetails } = await getDb();
   const url = new URL(req.url, `http://${req.headers.host}`);
   const includeRaw = url.searchParams.get("raw") === "true";
+  const forceLazyScrape = url.searchParams.get("lazy") === "true" || url.searchParams.get("forceLazy") === "true";
   const product = await findProductByIdentifier(productDetails, identifier);
   const manifest = await findProductDetailByIdentifier(productDetails, identifier, product);
   let detail = await hydrateProductDetail(manifest);
@@ -1674,17 +2067,22 @@ async function handleGetProductDetails(req, res, identifier) {
     }
 
     try {
-      detail = await scrapeCellphonesDetail(detailUrl);
+      detail = await scrapeCellphonesDetailCached(detailUrl, { force: forceLazyScrape });
       await persistProductDetailManifest({ productDetails, detail });
       cacheStatus = "lazy-scraped";
     } catch (error) {
       if (!product) {
-        sendError(res, 502, "Product details not found and lazy scrape failed.", error.message);
+        const statusCode = ["LAZY_SCRAPE_DISABLED", "LAZY_SCRAPE_COOLDOWN"].includes(error.code) ? 404 : 502;
+        sendError(res, statusCode, "Product details not found and lazy scrape is unavailable.", error.message);
         return;
       }
 
       detail = buildSummaryBackedDetail(product, {}, identifier);
-      cacheStatus = "summary-fallback:lazy-scrape-failed";
+      cacheStatus = error.code === "LAZY_SCRAPE_DISABLED"
+        ? "summary-fallback:lazy-scrape-disabled"
+        : error.code === "LAZY_SCRAPE_COOLDOWN"
+          ? "summary-fallback:lazy-scrape-cooldown"
+          : "summary-fallback:lazy-scrape-failed";
     }
   }
 
@@ -1734,22 +2132,22 @@ async function handleRelatedProducts(req, res, identifier) {
     product.brand ? { $cond: [{ $eq: ["$brand", product.brand] }, 6, 0] } : 0,
     focusedCategories.length
       ? {
-          $multiply: [
-            {
-              $size: {
-                $setIntersection: [{ $ifNull: ["$categories", []] }, focusedCategories],
-              },
+        $multiply: [
+          {
+            $size: {
+              $setIntersection: [{ $ifNull: ["$categories", []] }, focusedCategories],
             },
-            3,
-          ],
-        }
+          },
+          3,
+        ],
+      }
       : 0,
     broadCategories.length
       ? {
-          $size: {
-            $setIntersection: [{ $ifNull: ["$categories", []] }, broadCategories],
-          },
-        }
+        $size: {
+          $setIntersection: [{ $ifNull: ["$categories", []] }, broadCategories],
+        },
+      }
       : 0,
   ];
 
@@ -1788,12 +2186,11 @@ async function handleRelatedProducts(req, res, identifier) {
 }
 
 function getBearerToken(req) {
-  const authHeader = req.headers.authorization || "";
-  return authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length).trim() : "";
+  return getAuthToken(req);
 }
 
 function getRequestUser(req) {
-  const token = getBearerToken(req);
+  const token = getAuthToken(req);
   if (!token) return null;
 
   try {
@@ -1889,11 +2286,11 @@ function getCartImage(input = {}) {
 
   return cleanCartText(
     input.image ||
-      input.thumbnail ||
-      input.primaryImage ||
-      firstMedia.src ||
-      firstMedia.thumbnail ||
-      images[0],
+    input.thumbnail ||
+    input.primaryImage ||
+    firstMedia.src ||
+    firstMedia.thumbnail ||
+    images[0],
     700
   );
 }
@@ -1901,11 +2298,11 @@ function getCartImage(input = {}) {
 function buildCartItemId(item = {}) {
   const base = cleanCartText(
     item.productId ||
-      item.mongoId ||
-      item.sku ||
-      item.slug ||
-      getSlugFromUrl(item.url) ||
-      item.name,
+    item.mongoId ||
+    item.sku ||
+    item.slug ||
+    getSlugFromUrl(item.url) ||
+    item.name,
     160
   );
   const optionSuffix = uniqueStrings([
@@ -1926,9 +2323,9 @@ function sanitizeCartItem(input = {}) {
   const name = cleanCartText(product.name, 300);
   const slug = stripHtmlExtension(
     product.slug ||
-      product.detailSlug ||
-      getSlugFromUrl(product.url || product.productUrl) ||
-      slugify(name)
+    product.detailSlug ||
+    getSlugFromUrl(product.url || product.productUrl) ||
+    slugify(name)
   );
   const selectedOptions = sanitizeCartOptions(product);
   const item = {
@@ -2175,6 +2572,9 @@ async function ensureOrderIndexes(orders) {
     orders.createIndex({ orderCode: 1 }, { unique: true, name: "unique_order_code" }),
     orders.createIndex({ userId: 1, createdAt: -1 }, { name: "orders_user_created_at" }),
     orders.createIndex({ status: 1, createdAt: -1 }, { name: "orders_status_created_at" }),
+    orders.createIndex({ "payment.reference": 1 }, { name: "orders_payment_reference" }),
+    orders.createIndex({ "payment.status": 1, createdAt: -1 }, { name: "orders_payment_status_created_at" }),
+    orders.createIndex({ "paymentHistory.transactionId": 1 }, { sparse: true, name: "orders_payment_history_transaction" }),
     orders.createIndex({ "customer.phone": 1 }, { name: "orders_customer_phone" }),
     orders.createIndex({ "customer.email": 1 }, { name: "orders_customer_email" }),
   ]);
@@ -2197,6 +2597,15 @@ function getOptionalOrderOwner(req) {
   };
 }
 
+function getRequiredCustomer(req, res) {
+  const owner = getOptionalOrderOwner(req);
+  if (!owner?.userId) {
+    sendError(res, 401, "Vui lòng đăng nhập để sử dụng tính năng này.");
+    return null;
+  }
+  return owner;
+}
+
 function generateOrderCode() {
   const now = new Date();
   const datePart = [
@@ -2206,6 +2615,84 @@ function generateOrderCode() {
   ].join("");
   const randomPart = Math.random().toString(36).slice(2, 8).toUpperCase();
   return `CPS${datePart}${randomPart}`;
+}
+
+const ORDER_TRACKING_LABELS = {
+  pending: "Chờ xác nhận",
+  confirmed: "Đã xác nhận",
+  packing: "Đang chuẩn bị hàng",
+  ready_for_pickup: "Sẵn sàng nhận tại cửa hàng",
+  shipping: "Đang giao",
+  completed: "Giao thành công",
+  cancelled: "Đã hủy",
+  refunded: "Hoàn tiền",
+};
+
+const ORDER_TRACKING_FLOW = [
+  "pending",
+  "confirmed",
+  "packing",
+  "shipping",
+  "completed",
+];
+
+function normalizeTimelineEntry(entry = {}, fallbackStatus = "pending") {
+  const status = entry.status || fallbackStatus;
+  return {
+    status,
+    label: entry.label || ORDER_TRACKING_LABELS[status] || status,
+    note: entry.note || "",
+    changedBy: entry.changedBy || "",
+    changedByRole: entry.changedByRole || "",
+    time: entry.changedAt || entry.createdAt || null,
+  };
+}
+
+function buildOrderTracking(order = {}) {
+  const currentStatus = order.status || "pending";
+  const history = Array.isArray(order.statusHistory) && order.statusHistory.length
+    ? order.statusHistory.map((entry) => normalizeTimelineEntry(entry, currentStatus))
+    : [
+      {
+        status: "pending",
+        label: ORDER_TRACKING_LABELS.pending,
+        note: "Đặt hàng thành công.",
+        changedBy: order.userId || "guest",
+        changedByRole: order.userRole || "guest",
+        time: order.createdAt || null,
+      },
+    ];
+
+  const completedStatuses = new Set(history.map((entry) => entry.status));
+  const flow = ORDER_TRACKING_FLOW.map((status) => ({
+    status,
+    label: ORDER_TRACKING_LABELS[status],
+    completed: completedStatuses.has(status) || ORDER_TRACKING_FLOW.indexOf(status) <= ORDER_TRACKING_FLOW.indexOf(currentStatus),
+    current: status === currentStatus,
+  }));
+
+  if (["cancelled", "refunded"].includes(currentStatus)) {
+    flow.push({
+      status: currentStatus,
+      label: ORDER_TRACKING_LABELS[currentStatus],
+      completed: true,
+      current: true,
+    });
+  }
+
+  return {
+    orderCode: order.orderCode || "",
+    status: currentStatus,
+    statusLabel: order.statusLabel || ORDER_TRACKING_LABELS[currentStatus] || "",
+    paymentStatus: order.payment?.status || "unpaid",
+    paymentLabel: order.payment?.statusLabel || "",
+    trackingCode: order.shippingChoice?.trackingCode || order.shipment?.trackingCode || "",
+    carrier: order.shippingChoice?.carrier || order.shipment?.carrier || "",
+    etaText: order.shippingChoice?.etaText || "",
+    timeline: history.sort((a, b) => new Date(a.time || 0) - new Date(b.time || 0)),
+    flow,
+    updatedAt: order.updatedAt || order.createdAt || null,
+  };
 }
 
 function sanitizeOrderPerson(input = {}, fallback = {}) {
@@ -2240,12 +2727,16 @@ function sanitizeShippingAddress(input = {}) {
 
 function sanitizeCompanyInvoice(input = {}) {
   const requested = Boolean(input.requested);
+  const invoiceEmail = requested ? normalizeEmail(input.invoiceEmail || input.email) : "";
   return {
     requested,
     companyName: requested ? cleanLimitedText(input.companyName, 180) : "",
     taxCode: requested ? cleanLimitedText(input.taxCode, 40) : "",
     companyAddress: requested ? cleanLimitedText(input.companyAddress, 320) : "",
-    email: requested ? normalizeEmail(input.email) : "",
+    invoiceEmail,
+    email: invoiceEmail,
+    invoiceStatus: requested ? cleanLimitedText(input.invoiceStatus || "pending", 40) : "not_requested",
+    note: requested ? cleanLimitedText(input.note, 1000) : "",
   };
 }
 
@@ -2263,14 +2754,100 @@ function sanitizeShippingChoice(input = {}) {
   };
 }
 
+function sanitizePaymentMethod(value = "") {
+  const raw = String(value || "").trim().toLowerCase();
+  if (["bank_qr", "bank-qr", "vietqr", "qr", "bank_transfer", "bank-transfer"].includes(raw)) {
+    return "bank_qr";
+  }
+  return "cod";
+}
+
+function getBankQrConfig() {
+  const bankId = cleanLimitedText(
+    process.env.BANK_QR_BANK_ID || process.env.BANK_QR_BANK_CODE,
+    40
+  );
+  const accountNumber = cleanLimitedText(
+    process.env.BANK_QR_ACCOUNT_NUMBER || process.env.BANK_ACCOUNT_NUMBER,
+    80
+  );
+  const accountName = cleanLimitedText(
+    process.env.BANK_QR_ACCOUNT_NAME || process.env.BANK_ACCOUNT_NAME || "CELLPHONES CLONE",
+    120
+  );
+  const template = cleanLimitedText(process.env.BANK_QR_TEMPLATE || "compact2", 32);
+
+  return {
+    provider: "vietqr",
+    enabled: Boolean(bankId && accountNumber),
+    bankId,
+    accountNumber,
+    accountName,
+    template,
+  };
+}
+
+function buildBankQrImageUrl({ amount, transferContent }) {
+  const config = getBankQrConfig();
+  if (!config.enabled) return "";
+
+  const base = `https://img.vietqr.io/image/${encodeURIComponent(config.bankId)}-${encodeURIComponent(config.accountNumber)}-${encodeURIComponent(config.template)}.png`;
+  const params = new URLSearchParams({
+    amount: String(Math.max(0, Math.round(Number(amount || 0)))),
+    addInfo: transferContent,
+    accountName: config.accountName,
+  });
+
+  return `${base}?${params.toString()}`;
+}
+
+function buildOrderPayment({ method, orderCode, totals }) {
+  if (method === "bank_qr") {
+    const amount = Math.max(0, Math.round(Number(totals.total || totals.roundedTotal || 0)));
+    const transferContent = orderCode;
+    const bankConfig = getBankQrConfig();
+
+    return {
+      method: "bank_qr",
+      methodLabel: "Chuyển khoản ngân hàng qua mã QR",
+      status: "pending",
+      statusLabel: "Chờ chuyển khoản",
+      provider: bankConfig.provider,
+      reference: orderCode,
+      transferContent,
+      amount,
+      currency: totals.currency || "VND",
+      qrImageUrl: buildBankQrImageUrl({ amount, transferContent }),
+      expiresAt: new Date(Date.now() + Number(process.env.BANK_QR_EXPIRES_MINUTES || 30) * 60 * 1000),
+      bank: {
+        bankId: bankConfig.bankId,
+        accountNumber: bankConfig.accountNumber,
+        accountName: bankConfig.accountName,
+      },
+      instructions: bankConfig.enabled
+        ? "Quét mã QR và giữ nguyên nội dung chuyển khoản để hệ thống tự xác nhận khi ngân hàng gửi thông báo giao dịch."
+        : "Chưa cấu hình BANK_QR_BANK_ID và BANK_QR_ACCOUNT_NUMBER trong .env.",
+      createdAt: new Date(),
+    };
+  }
+
+  return {
+    method: "cod",
+    methodLabel: "Thanh toán khi nhận hàng",
+    status: "unpaid",
+    statusLabel: "Chưa thanh toán",
+  };
+}
+
 function buildOrderTotals(items = [], options = {}) {
   const cartSummary = summarizeCart(items);
   const shippingFee = cleanCartPrice(options.shippingFee);
   const educationOffer = Boolean(options.educationOffer);
+  const couponDiscount = cleanCartPrice(options.couponDiscount);
   const educationDiscount = educationOffer
     ? Math.min(300000, cartSummary.subtotal)
     : 0;
-  const totalBeforePayment = Math.max(0, cartSummary.subtotal + shippingFee - educationDiscount);
+  const totalBeforePayment = Math.max(0, cartSummary.subtotal + shippingFee - educationDiscount - couponDiscount);
 
   return {
     currency: "VND",
@@ -2281,12 +2858,401 @@ function buildOrderTotals(items = [], options = {}) {
     discounts: {
       direct: cartSummary.discount,
       education: educationDiscount,
+      coupon: couponDiscount,
     },
-    totalDiscount: cartSummary.discount + educationDiscount,
+    totalDiscount: cartSummary.discount + educationDiscount + couponDiscount,
     total: totalBeforePayment,
     roundedTotal: totalBeforePayment,
     vatIncluded: true,
   };
+}
+
+function computeCouponDiscount(coupon = {}, totalsBase = {}) {
+  if (!coupon || coupon.status !== "active") return 0;
+
+  const now = new Date();
+  if (coupon.startsAt && new Date(coupon.startsAt) > now) return 0;
+  if (coupon.expiresAt && new Date(coupon.expiresAt) < now) return 0;
+  if (coupon.usageLimit && Number(coupon.usedCount || 0) >= Number(coupon.usageLimit)) return 0;
+
+  const subtotal = cleanCartPrice(totalsBase.subtotal);
+  if (subtotal < cleanCartPrice(coupon.minSubtotal)) return 0;
+
+  if (coupon.type === "free_shipping") return cleanCartPrice(totalsBase.shippingFee);
+  if (coupon.type === "percent") {
+    const rawDiscount = Math.floor((subtotal * Number(coupon.value || 0)) / 100);
+    return coupon.maxDiscount ? Math.min(rawDiscount, cleanCartPrice(coupon.maxDiscount)) : rawDiscount;
+  }
+
+  return Math.min(subtotal, cleanCartPrice(coupon.value));
+}
+
+function normalizeCouponForPublic(coupon = {}, discount = 0) {
+  if (!coupon) return null;
+  return {
+    id: String(coupon._id || ""),
+    code: coupon.code || "",
+    name: coupon.name || "",
+    description: coupon.description || "",
+    type: coupon.type || "fixed",
+    value: coupon.value || 0,
+    minSubtotal: coupon.minSubtotal || 0,
+    maxDiscount: coupon.maxDiscount || 0,
+    discount,
+    startsAt: coupon.startsAt || null,
+    expiresAt: coupon.expiresAt || null,
+  };
+}
+
+function getCouponInvalidReason(coupon = null, totalsBase = {}) {
+  if (!coupon) return "Mã giảm giá không tồn tại hoặc đã ngừng áp dụng.";
+  if (coupon.status !== "active") return "Mã giảm giá đang không hoạt động.";
+
+  const now = new Date();
+  if (coupon.startsAt && new Date(coupon.startsAt) > now) return "Mã giảm giá chưa tới thời gian áp dụng.";
+  if (coupon.expiresAt && new Date(coupon.expiresAt) < now) return "Mã giảm giá đã hết hạn.";
+  if (coupon.usageLimit && Number(coupon.usedCount || 0) >= Number(coupon.usageLimit)) {
+    return "Mã giảm giá đã hết lượt sử dụng.";
+  }
+
+  const subtotal = cleanCartPrice(totalsBase.subtotal);
+  if (subtotal < cleanCartPrice(coupon.minSubtotal)) {
+    return `Đơn hàng cần tối thiểu ${cleanCartPrice(coupon.minSubtotal).toLocaleString("vi-VN")}đ để áp dụng mã này.`;
+  }
+
+  return "";
+}
+
+async function findActiveCoupon(coupons, code = "") {
+  const couponCode = cleanLimitedText(code, 80).toUpperCase();
+  if (!couponCode) return null;
+  await ensureCouponIndexes(coupons);
+  return coupons.findOne({ code: couponCode, status: "active" });
+}
+
+async function buildCheckoutPreview({ productDetails, products, coupons, body = {} }) {
+  const parsed = parseWithSchema(orderPayloadSchema, {
+    ...body,
+    items: Array.isArray(body.items)
+      ? body.items
+      : Array.isArray(body.cart?.items)
+        ? body.cart.items
+        : [],
+  });
+
+  if (!parsed.ok) {
+    const error = new Error(parsed.message);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const bodyData = parsed.data;
+  const items = await resolveOrderItemsFromDb({
+    productDetails,
+    products,
+    rawItems: bodyData.items,
+  });
+  const shippingChoice = sanitizeShippingChoice(bodyData.shippingChoice || bodyData.shipping || {});
+  const educationOffer = Boolean(bodyData.educationOffer);
+  const preCouponTotals = buildOrderTotals(items, {
+    shippingFee: shippingChoice.fee,
+    educationOffer,
+  });
+
+  let coupon = null;
+  let couponDiscount = 0;
+  let couponError = "";
+  if (bodyData.couponCode || body.coupon?.code) {
+    coupon = await findActiveCoupon(coupons, bodyData.couponCode || body.coupon?.code);
+    couponError = getCouponInvalidReason(coupon, preCouponTotals);
+    couponDiscount = couponError ? 0 : computeCouponDiscount(coupon, preCouponTotals);
+    if (!couponError && couponDiscount <= 0) {
+      couponError = "Đơn hàng chưa đủ điều kiện áp dụng mã giảm giá.";
+    }
+  }
+
+  const totals = buildOrderTotals(items, {
+    shippingFee: shippingChoice.fee,
+    educationOffer,
+    couponDiscount,
+  });
+
+  return {
+    items,
+    shippingChoice,
+    educationOffer,
+    coupon: coupon && !couponError ? normalizeCouponForPublic(coupon, couponDiscount) : null,
+    couponError,
+    totals,
+  };
+}
+
+function firstPositiveNumber(...values) {
+  for (const value of values) {
+    const parsed = toPositiveNumber(value);
+    if (parsed > 0) return parsed;
+  }
+  return 0;
+}
+
+function collectOptionCandidates(product = {}) {
+  return [
+    ...(Array.isArray(product.variants) ? product.variants : []),
+    ...(Array.isArray(product.variantOptions) ? product.variantOptions : []),
+    ...(Array.isArray(product.options) ? product.options : []),
+    ...(Array.isArray(product.storageOptions) ? product.storageOptions : []),
+    ...(Array.isArray(product.memoryOptions) ? product.memoryOptions : []),
+    ...(Array.isArray(product.colors) ? product.colors : []),
+  ].filter(Boolean);
+}
+
+function matchProductOption(product = {}, selectedOptions = {}) {
+  const candidates = collectOptionCandidates(product);
+  const wanted = uniqueStrings([
+    selectedOptions.variantId,
+    selectedOptions.variantName,
+    selectedOptions.optionId,
+    selectedOptions.optionName,
+    selectedOptions.storage,
+    selectedOptions.memory,
+    selectedOptions.colorId,
+    selectedOptions.colorName,
+  ]).map((value) => slugify(value));
+
+  if (!wanted.length || !candidates.length) return null;
+
+  return candidates.find((candidate) => {
+    const candidateValues = uniqueStrings([
+      candidate.id,
+      candidate._id,
+      candidate.sku,
+      candidate.slug,
+      candidate.name,
+      candidate.label,
+      candidate.title,
+      candidate.value,
+      candidate.colorName,
+      candidate.storage,
+      candidate.memory,
+    ]).map((value) => slugify(value));
+
+    return wanted.some((needle) =>
+      candidateValues.some((value) => value === needle || value.includes(needle) || needle.includes(value))
+    );
+  }) || null;
+}
+
+function buildOrderItemFromProduct(product = {}, rawItem = {}) {
+  const normalized = normalizeProduct(product);
+  const selectedOptions = {
+    ...sanitizeCartOptions(rawItem),
+    ...(rawItem.selectedOptions || {}),
+    ...(rawItem.option || {}),
+    ...(rawItem.options || {}),
+  };
+  const matchedOption = matchProductOption(product, selectedOptions);
+  const price = firstPositiveNumber(
+    matchedOption?.currentPrice,
+    matchedOption?.price,
+    matchedOption?.salePrice,
+    matchedOption?.specialPrice,
+    product.currentPrice,
+    product.price,
+    normalized.currentPrice,
+    normalized.price
+  );
+  const originalPrice = firstPositiveNumber(
+    matchedOption?.originalPrice,
+    matchedOption?.listedPrice,
+    matchedOption?.priceBeforeDiscount,
+    product.originalPrice,
+    product.listedPrice,
+    normalized.originalPrice,
+    price
+  );
+  const quantity = cleanCartQuantity(rawItem.quantity || 1);
+
+  if (!price) {
+    throw new Error(`Sản phẩm "${normalized.name || rawItem.name || rawItem.slug}" chưa có giá bán hợp lệ.`);
+  }
+
+  const item = sanitizeCartItem({
+    productId: String(product._id || normalized.id || rawItem.productId || normalized.slug),
+    mongoId: String(product._id || rawItem.mongoId || ""),
+    sku: normalized.sku || product.sku || rawItem.sku,
+    slug: normalized.slug || product.slug || rawItem.slug,
+    name: normalized.name || product.name || rawItem.name,
+    image: normalized.image || normalized.primaryImage || rawItem.image,
+    url: normalized.url || product.url || rawItem.url,
+    price,
+    currentPrice: price,
+    originalPrice,
+    brand: normalized.brand || product.brand,
+    quantity,
+    selectedOptions: {
+      ...selectedOptions,
+      ...(matchedOption
+        ? {
+          variantId: selectedOptions.variantId || String(matchedOption.id || matchedOption._id || ""),
+          variantName: selectedOptions.variantName || matchedOption.name || matchedOption.label || "",
+        }
+        : {}),
+    },
+  });
+
+  item.productSnapshot = {
+    productId: item.productId,
+    slug: item.slug,
+    sku: item.sku,
+    name: item.name,
+    image: item.image,
+    url: item.url,
+    brand: item.brand,
+    price,
+    originalPrice,
+  };
+
+  return item;
+}
+
+function getOrderItemIdentifier(rawItem = {}) {
+  return cleanCartText(
+    rawItem.productId ||
+    rawItem.mongoId ||
+    rawItem.id ||
+    rawItem.slug ||
+    rawItem.sku ||
+    getSlugFromUrl(rawItem.url || rawItem.productUrl) ||
+    rawItem.name,
+    240
+  );
+}
+
+async function resolveOrderItemsFromDb({ productDetails, products, rawItems = [] }) {
+  const resolvedItems = [];
+
+  for (const rawItem of rawItems) {
+    const identifier = getOrderItemIdentifier(rawItem);
+    if (!identifier) throw new Error("Thiếu mã sản phẩm trong giỏ hàng.");
+
+    const product =
+      (await findProductByIdentifier(productDetails, identifier)) ||
+      (await findProductByIdentifier(products, identifier));
+
+    if (!product) {
+      throw new Error(`Không tìm thấy sản phẩm "${identifier}" trong MongoDB.`);
+    }
+
+    resolvedItems.push(buildOrderItemFromProduct(product, rawItem));
+  }
+
+  return replaceCartItems(resolvedItems);
+}
+
+function buildInventoryKey(item = {}) {
+  return [
+    item.productId || item.mongoId || item.slug || item.sku,
+    item.selectedOptions?.variantId || item.selectedOptions?.variantName || "",
+    item.selectedOptions?.colorId || item.selectedOptions?.colorName || "",
+  ].map((value) => slugify(value)).filter(Boolean).join("::");
+}
+
+async function ensureInventoryIndexes(inventory) {
+  if (inventoryIndexesReady) return;
+
+  await Promise.all([
+    inventory.createIndex({ key: 1 }, { unique: true, name: "unique_inventory_key" }),
+    inventory.createIndex({ productId: 1 }, { name: "inventory_product_id" }),
+    inventory.createIndex({ updatedAt: -1 }, { name: "inventory_updated_at" }),
+  ]);
+
+  inventoryIndexesReady = true;
+}
+
+async function reserveInventoryForOrder(inventory, items = [], orderCode = "") {
+  await ensureInventoryIndexes(inventory);
+  const reserved = [];
+
+  try {
+    for (const item of items) {
+      const key = buildInventoryKey(item);
+      const quantity = cleanCartQuantity(item.quantity);
+      const now = new Date();
+      let doc = await inventory.findOne({ key });
+
+      if (!doc) {
+        const initialStock = Number(item.stock || item.availableStock || 100);
+        await inventory.updateOne(
+          { key },
+          {
+            $setOnInsert: {
+              key,
+              productId: item.productId,
+              slug: item.slug,
+              sku: item.sku,
+              name: item.name,
+              variantId: item.selectedOptions?.variantId || "",
+              colorId: item.selectedOptions?.colorId || "",
+              stock: Number.isFinite(initialStock) && initialStock > 0 ? initialStock : 100,
+              reservedStock: 0,
+              soldCount: 0,
+              createdAt: now,
+            },
+            $set: { updatedAt: now },
+          },
+          { upsert: true }
+        );
+        doc = await inventory.findOne({ key });
+      }
+
+      const stock = Number(doc.stock || 0);
+      const reservedStock = Number(doc.reservedStock || 0);
+      const availableStock = Math.max(0, stock - reservedStock);
+      if (availableStock < quantity) {
+        throw new Error(`Sản phẩm "${item.name}" chỉ còn ${availableStock} sản phẩm trong kho.`);
+      }
+
+      await inventory.updateOne(
+        { key },
+        {
+          $inc: { reservedStock: quantity },
+          $push: {
+            reservations: {
+              orderCode,
+              quantity,
+              createdAt: now,
+              status: "reserved",
+            },
+          },
+          $set: { updatedAt: now },
+        }
+      );
+      reserved.push({ key, quantity });
+    }
+  } catch (error) {
+    await Promise.all(
+      reserved.map((entry) =>
+        inventory.updateOne(
+          { key: entry.key },
+          { $inc: { reservedStock: -entry.quantity }, $set: { updatedAt: new Date() } }
+        )
+      )
+    );
+    throw error;
+  }
+
+  return reserved;
+}
+
+async function releaseInventoryReservations(inventory, reservations = []) {
+  await Promise.all(
+    reservations.map((entry) =>
+      inventory.updateOne(
+        { key: entry.key },
+        { $inc: { reservedStock: -entry.quantity }, $set: { updatedAt: new Date() } }
+      )
+    )
+  );
 }
 
 function validateOrderPayload({ customer, receiver, shippingAddress, shippingChoice, items }) {
@@ -2334,8 +3300,294 @@ function normalizeOrder(doc = {}) {
   };
 }
 
+function extractOrderCodeFromPaymentText(value = "") {
+  const match = String(value || "").toUpperCase().match(/CPS\d{8}[A-Z0-9]{6}/);
+  return match ? match[0] : "";
+}
+
+function getPaymentConfirmationReference(body = {}, fallback = "") {
+  const candidates = [
+    fallback,
+    body.orderCode,
+    body.paymentCode,
+    body.reference,
+    body.transferContent,
+    body.content,
+    body.description,
+    body.memo,
+    body.transactionId,
+    body.bankReference,
+    body.transaction?.description,
+    body.transaction?.content,
+    body.transaction?.memo,
+    body.transaction?.referenceCode,
+    body.data?.description,
+    body.data?.content,
+    body.data?.memo,
+    body.data?.referenceCode,
+    body.referenceCode,
+    body.tid,
+    body.code,
+  ];
+
+  for (const candidate of candidates) {
+    const direct = cleanLimitedText(candidate, 120);
+    if (!direct) continue;
+    const extracted = extractOrderCodeFromPaymentText(direct);
+    if (extracted) return extracted;
+    if (/^CPS\d{8}[A-Z0-9]{6}$/i.test(direct)) return direct.toUpperCase();
+  }
+
+  return "";
+}
+
+function getPaymentConfirmationAmount(body = {}) {
+  return cleanCartPrice(
+    body.amount ??
+    body.transferAmount ??
+    body.paidAmount ??
+    body.creditAmount ??
+    body.inAmount ??
+    body.value ??
+    body.transaction?.amount ??
+    body.transaction?.transferAmount ??
+    body.data?.amount ??
+    body.data?.transferAmount
+  );
+}
+
+function isBankPaymentConfirmationAuthorized(req, body = {}) {
+  if (isAdminAuthorized(req)) return true;
+
+  const expectedSecret = process.env.BANK_QR_WEBHOOK_SECRET;
+  if (!expectedSecret) return false;
+
+  const providedSecret =
+    req.headers["x-bank-webhook-secret"] ||
+    req.headers["x-webhook-secret"] ||
+    body.secret ||
+    body.webhookSecret;
+
+  return String(providedSecret || "") === String(expectedSecret);
+}
+
+function compactPaymentConfirmation(body = {}) {
+  return {
+    transactionId: cleanLimitedText(
+      body.transactionId || body.bankReference || body.reference || body.referenceCode || body.tid || body.transaction?.id || body.data?.id,
+      120
+    ),
+    bankReference: cleanLimitedText(body.bankReference || body.refNo || body.referenceCode || body.transaction?.reference || body.data?.reference, 120),
+    description: cleanLimitedText(body.description || body.content || body.memo || body.transaction?.description || body.data?.description, 500),
+    amount: getPaymentConfirmationAmount(body),
+    receivedAt: new Date(),
+  };
+}
+
+function normalizeBankWebhookTransactions(body = {}) {
+  const candidates = [
+    body,
+    body.transaction,
+    ...(Array.isArray(body.transactions) ? body.transactions : []),
+    ...(Array.isArray(body.records) ? body.records : []),
+    ...(Array.isArray(body.data) ? body.data : []),
+  ];
+
+  const seen = new Set();
+  return candidates
+    .filter((item) => item && typeof item === "object")
+    .filter((item) => {
+      const signature = JSON.stringify({
+        id: item.id || item.transactionId || item.tid || item.referenceCode || "",
+        content: item.content || item.description || item.memo || "",
+        amount: item.amount || item.transferAmount || "",
+      });
+      if (seen.has(signature)) return false;
+      seen.add(signature);
+      return true;
+    })
+    .filter((item) => {
+      const type = cleanLimitedText(item.transferType || item.type || item.direction, 40).toLowerCase();
+      return !type || !["out", "withdraw", "debit", "chi"].includes(type);
+    });
+}
+
+async function markOrderBankPaymentPaid({ orders, identifier = "", body = {}, actor = "webhook" }) {
+  const paymentReference = getPaymentConfirmationReference(body, identifier);
+  const query = {
+    $or: [
+      ...(paymentReference
+        ? [
+          { orderCode: paymentReference },
+          { "payment.reference": paymentReference },
+          { "payment.transferContent": paymentReference },
+          { "payment.transferContent": `CPS ${paymentReference}` },
+        ]
+        : []),
+      ...(identifier
+        ? [
+          { orderCode: identifier },
+          { "payment.reference": identifier },
+          ...(ObjectId.isValid(identifier) ? [{ _id: new ObjectId(identifier) }] : []),
+        ]
+        : []),
+    ],
+  };
+
+  if (!query.$or.length) {
+    return { error: "Không tìm thấy mã đơn trong nội dung thanh toán." };
+  }
+
+  const order = await orders.findOne(query);
+  if (!order) {
+    return { error: "Không tìm thấy đơn hàng tương ứng với giao dịch." };
+  }
+
+  const confirmation = compactPaymentConfirmation(body);
+  if (confirmation.transactionId) {
+    const duplicate = await orders.findOne({
+      "paymentHistory.transactionId": confirmation.transactionId,
+    });
+    if (duplicate) {
+      return {
+        order: duplicate,
+        duplicate: true,
+      };
+    }
+  }
+
+  const expectedAmount = Number(order.totals?.total || order.totals?.roundedTotal || order.payment?.amount || 0);
+  const receivedAmount = getPaymentConfirmationAmount(body);
+  if (receivedAmount > 0 && expectedAmount > 0 && receivedAmount < expectedAmount) {
+    return {
+      error: `Số tiền thanh toán chưa đủ. Cần ${expectedAmount}, đã nhận ${receivedAmount}.`,
+      statusCode: 400,
+    };
+  }
+
+  const now = new Date();
+  const result = await orders.findOneAndUpdate(
+    { _id: order._id },
+    {
+      $set: {
+        status: order.status === "pending" ? "confirmed" : order.status,
+        statusLabel: order.status === "pending" ? "Đã xác nhận" : order.statusLabel,
+        "payment.status": "paid",
+        "payment.statusLabel": "Đã thanh toán",
+        "payment.paidAt": now,
+        "payment.confirmedBy": actor,
+        "payment.receivedAmount": receivedAmount || expectedAmount,
+        "payment.transactionId": confirmation.transactionId,
+        "payment.bankReference": confirmation.bankReference,
+        "payment.lastConfirmation": confirmation,
+        updatedAt: now,
+      },
+      $push: {
+        paymentHistory: {
+          status: "paid",
+          label: "Đã thanh toán",
+          note: `Xác nhận thanh toán qua QR ngân hàng (${actor}).`,
+          amount: receivedAmount || expectedAmount,
+          transactionId: confirmation.transactionId,
+          changedAt: now,
+        },
+        statusHistory: {
+          status: order.status === "pending" ? "confirmed" : order.status,
+          label: order.status === "pending" ? "Đã xác nhận" : order.statusLabel,
+          note: `Tự động cập nhật sau khi nhận thanh toán QR (${actor}).`,
+          changedBy: actor,
+          changedByRole: actor,
+          changedAt: now,
+        },
+      },
+    },
+    { returnDocument: "after" }
+  );
+
+  return { order: result };
+}
+
+async function handleBankPaymentWebhook(req, res) {
+  const { orders, payments, notifications } = await getDb();
+  await ensureOrderIndexes(orders);
+  const body = await parseJsonBody(req);
+
+  if (!isBankPaymentConfirmationAuthorized(req, body)) {
+    sendError(res, 401, "Webhook thanh toán không hợp lệ.");
+    return;
+  }
+
+  const transactions = normalizeBankWebhookTransactions(body);
+  const results = [];
+
+  for (const transaction of transactions) {
+    const result = await markOrderBankPaymentPaid({ orders, body: transaction, actor: "bank-webhook" });
+    const confirmation = compactPaymentConfirmation(transaction);
+    if (confirmation.transactionId || result.order?.orderCode) {
+      try {
+        await payments.updateOne(
+          {
+            transactionId: confirmation.transactionId || `${result.order?.orderCode || "unmatched"}-${confirmation.receivedAt.getTime()}`,
+          },
+          {
+            $setOnInsert: {
+              transactionId: confirmation.transactionId || `${result.order?.orderCode || "unmatched"}-${confirmation.receivedAt.getTime()}`,
+              orderCode: result.order?.orderCode || getPaymentConfirmationReference(transaction),
+              amount: confirmation.amount,
+              status: result.error ? "unmatched" : "paid",
+              raw: transaction,
+              createdAt: new Date(),
+            },
+            $set: {
+              updatedAt: new Date(),
+            },
+          },
+          { upsert: true }
+        );
+      } catch (error) {
+        if (error?.code !== 11000) throw error;
+      }
+    }
+    if (!result.error && !result.duplicate && result.order?.userId) {
+      await createUserNotification(notifications, {
+        userId: result.order.userId,
+        type: "payment_paid",
+        title: "Thanh toán đã được xác nhận",
+        message: `Đơn hàng ${result.order.orderCode} đã được xác nhận thanh toán tự động.`,
+        orderCode: result.order.orderCode,
+        metadata: { paymentStatus: "paid" },
+      });
+    }
+    results.push({
+      ok: !result.error,
+      duplicate: Boolean(result.duplicate),
+      error: result.error || "",
+      orderCode: result.order?.orderCode || "",
+      paymentStatus: result.order?.payment?.status || "",
+    });
+  }
+
+  const matched = results.filter((item) => item.ok).length;
+  if (!matched) {
+    sendJson(res, 200, {
+      ok: true,
+      matched: 0,
+      message: "Đã nhận webhook nhưng chưa tìm thấy đơn hàng khớp nội dung chuyển khoản.",
+      results,
+    });
+    return;
+  }
+
+  sendJson(res, 200, {
+    ok: true,
+    matched,
+    message: "Đã tự động xác nhận thanh toán QR ngân hàng.",
+    results,
+  });
+}
+
 async function handleOrdersRequest(req, res, pathParts) {
-  const { orders, carts } = await getDb();
+  const { orders, carts, products, productDetails, inventory, coupons, userEvents, notifications } = await getDb();
   await ensureOrderIndexes(orders);
 
   const owner = getOptionalOrderOwner(req);
@@ -2343,25 +3595,58 @@ async function handleOrdersRequest(req, res, pathParts) {
 
   if (!identifier && req.method === "POST") {
     const body = await parseJsonBody(req);
-    const rawItems = Array.isArray(body.items)
-      ? body.items
-      : Array.isArray(body.cart?.items)
-        ? body.cart.items
-        : [];
-    const items = replaceCartItems(rawItems);
-    const customer = sanitizeOrderPerson(body.customer, owner || {});
-    const receiver = sanitizeOrderPerson(body.receiver || body.recipient, customer);
+    const parsed = parseWithSchema(orderPayloadSchema, {
+      ...body,
+      items: Array.isArray(body.items)
+        ? body.items
+        : Array.isArray(body.cart?.items)
+          ? body.cart.items
+          : [],
+    });
+
+    if (!parsed.ok) {
+      sendError(res, 400, "Dữ liệu đặt hàng không hợp lệ.", parsed.message);
+      return;
+    }
+
+    if (
+      !rateLimitOrSend({
+        req,
+        res,
+        sendError,
+        scope: "orders:create",
+        identifier: owner?.userId || parsed.data.customer?.email || parsed.data.customer?.phone || "",
+        max: Number(process.env.RATE_LIMIT_ORDER_MAX || 20),
+        message: "Bạn tạo đơn hàng quá nhanh. Vui lòng thử lại sau ít phút.",
+      })
+    ) {
+      return;
+    }
+
+    const bodyData = parsed.data;
+    const rawItems = Array.isArray(bodyData.items) ? bodyData.items : [];
+    let items;
+
+    try {
+      items = await resolveOrderItemsFromDb({ productDetails, products, rawItems });
+    } catch (error) {
+      sendError(res, 400, error.message || "Không thể xác thực sản phẩm trong đơn hàng.");
+      return;
+    }
+
+    const customer = sanitizeOrderPerson(bodyData.customer, owner || {});
+    const receiver = sanitizeOrderPerson(bodyData.receiver || bodyData.recipient, customer);
     const shippingAddress = sanitizeShippingAddress({
-      ...(body.shippingAddress || body.address || {}),
+      ...(bodyData.shippingAddress || bodyData.address || {}),
       receiverName: receiver.fullName,
       receiverPhone: receiver.phone,
     });
-    const educationOffer = Boolean(body.educationOffer);
+    const educationOffer = Boolean(bodyData.educationOffer);
     const companyInvoice = sanitizeCompanyInvoice({
-      ...(body.companyInvoice || {}),
-      requested: educationOffer ? false : Boolean(body.companyInvoice?.requested),
+      ...(bodyData.companyInvoice || {}),
+      requested: educationOffer ? false : Boolean(bodyData.companyInvoice?.requested),
     });
-    const shippingChoice = sanitizeShippingChoice(body.shippingChoice || body.shipping || {});
+    const shippingChoice = sanitizeShippingChoice(bodyData.shippingChoice || bodyData.shipping || {});
     const validationError = validateOrderPayload({ customer, receiver, shippingAddress, shippingChoice, items });
 
     if (validationError) {
@@ -2369,23 +3654,55 @@ async function handleOrdersRequest(req, res, pathParts) {
       return;
     }
 
+    const orderCode = generateOrderCode();
     const now = new Date();
-    const totals = buildOrderTotals(items, {
+    let appliedCoupon = null;
+    let couponDiscount = 0;
+    const preCouponTotals = buildOrderTotals(items, {
       shippingFee: shippingChoice.fee,
       educationOffer,
     });
-    const orderCode = generateOrderCode();
+
+    if (bodyData.couponCode) {
+      appliedCoupon = await findActiveCoupon(coupons, bodyData.couponCode);
+      const couponError = getCouponInvalidReason(appliedCoupon, preCouponTotals);
+      if (couponError) {
+        sendError(res, 400, couponError);
+        return;
+      }
+      couponDiscount = computeCouponDiscount(appliedCoupon, preCouponTotals);
+      if (couponDiscount <= 0) {
+        sendError(res, 400, "Đơn hàng chưa đủ điều kiện áp dụng mã giảm giá.");
+        return;
+      }
+    }
+
+    const totals = buildOrderTotals(items, {
+      shippingFee: shippingChoice.fee,
+      educationOffer,
+      couponDiscount,
+    });
+    const paymentMethod = sanitizePaymentMethod(bodyData.paymentMethod || bodyData.payment?.method);
+    let reservations = [];
+
+    try {
+      reservations = await reserveInventoryForOrder(inventory, items, orderCode);
+    } catch (error) {
+      sendError(res, 409, error.message || "Không đủ tồn kho để tạo đơn hàng.");
+      return;
+    }
+
     const doc = {
       orderCode,
       userId: owner?.userId || "",
       userRole: owner?.role || "guest",
       status: "pending",
-      statusLabel: "Chờ xác nhận",
+      statusLabel: ORDER_TRACKING_LABELS.pending,
       statusHistory: [
         {
           status: "pending",
-          label: "Chờ xác nhận",
-          note: "Đơn hàng đã được tạo từ website CellphoneS Clone.",
+          label: ORDER_TRACKING_LABELS.pending,
+          note: "Đặt hàng thành công trên website CellphoneS Clone.",
           changedBy: owner?.userId || "guest",
           changedByRole: owner?.role || "guest",
           changedAt: now,
@@ -2397,40 +3714,85 @@ async function handleOrdersRequest(req, res, pathParts) {
       shippingAddress,
       shippingChoice,
       items,
-      gifts: Array.isArray(body.gifts)
-        ? body.gifts.map((gift) => cleanLimitedText(gift, 180)).filter(Boolean).slice(0, 10)
+      gifts: Array.isArray(bodyData.gifts)
+        ? bodyData.gifts.map((gift) => cleanLimitedText(gift, 180)).filter(Boolean).slice(0, 10)
         : ["Tặng Túi phụ kiện phiên bản CellphoneS"],
       totals,
-      payment: {
-        method: "cod",
-        methodLabel: "Thanh toán khi nhận hàng",
-        status: "unpaid",
-      },
-      marketingOptIn: Boolean(body.marketingOptIn),
+      coupon: appliedCoupon
+        ? {
+          couponId: String(appliedCoupon._id),
+          code: appliedCoupon.code,
+          type: appliedCoupon.type,
+          value: appliedCoupon.value,
+          discount: couponDiscount,
+        }
+        : null,
+      payment: buildOrderPayment({ method: paymentMethod, orderCode, totals }),
+      marketingOptIn: Boolean(bodyData.marketingOptIn),
       educationOffer,
       companyInvoice,
-      note: cleanLimitedText(body.note, 1000),
-      termsAccepted: Boolean(body.termsAccepted),
+      note: cleanLimitedText(bodyData.note, 1000),
+      termsAccepted: Boolean(bodyData.termsAccepted),
       ip: req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "",
       userAgent: req.headers["user-agent"] || "",
       createdAt: now,
       updatedAt: now,
     };
 
-    const result = await orders.insertOne(doc);
-    const inserted = await orders.findOne({ _id: result.insertedId });
+    let inserted;
+    try {
+      const result = await orders.insertOne(doc);
+      inserted = await orders.findOne({ _id: result.insertedId });
 
-    if (owner?.userId && body.clearCart !== false) {
-      await carts.updateOne(
-        { userId: owner.userId },
-        { $set: { items: [], updatedAt: now } }
-      );
+      if (appliedCoupon && couponDiscount > 0) {
+        await coupons.updateOne(
+          { _id: appliedCoupon._id },
+          { $inc: { usedCount: 1 }, $set: { updatedAt: now } }
+        );
+      }
+
+      await userEvents.insertOne({
+        type: "order_created",
+        userId: owner?.userId || "",
+        orderCode,
+        productIds: items.map((item) => item.productId).filter(Boolean),
+        slugs: items.map((item) => item.slug).filter(Boolean),
+        total: totals.total,
+        createdAt: now,
+      });
+
+      if (owner?.userId) {
+        await createUserNotification(notifications, {
+          userId: owner.userId,
+          type: "order_created",
+          title: "Đặt hàng thành công",
+          message: `Đơn hàng ${orderCode} đã được tạo và đang chờ xác nhận.`,
+          orderCode,
+          metadata: { total: totals.total, paymentMethod },
+        });
+      }
+
+      if (owner?.userId && bodyData.clearCart !== false) {
+        await carts.updateOne(
+          { userId: owner.userId },
+          { $set: { items: [], updatedAt: now } }
+        );
+      }
+    } catch (error) {
+      await releaseInventoryReservations(inventory, reservations);
+      throw error;
     }
 
+    const normalized = normalizeOrder(inserted);
     sendJson(res, 201, {
       ok: true,
       message: "Đặt hàng thành công. Đơn hàng đã được lưu vào MongoDB.",
-      data: normalizeOrder(inserted),
+      data: {
+        ...normalized,
+        order: normalized,
+        totals: normalized.totals,
+        payment: normalized.payment,
+      },
     });
     return;
   }
@@ -2446,6 +3808,124 @@ async function handleOrdersRequest(req, res, pathParts) {
     const query = owner.role === "admin" ? {} : { userId: owner.userId };
     const docs = await orders.find(query).sort({ createdAt: -1, _id: -1 }).limit(limit).toArray();
     sendJson(res, 200, { ok: true, data: docs.map(normalizeOrder) });
+    return;
+  }
+
+  if (identifier && pathParts[3] === "tracking" && req.method === "GET") {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const phone = sanitizePhone(url.searchParams.get("phone"));
+    const doc = await orders.findOne({
+      $or: [
+        { orderCode: identifier },
+        ...(ObjectId.isValid(identifier) ? [{ _id: new ObjectId(identifier) }] : []),
+      ],
+    });
+
+    if (!doc) {
+      sendError(res, 404, "Order not found.");
+      return;
+    }
+
+    const canViewByOwner = doc.userId && (owner?.role === "admin" || owner?.userId === doc.userId);
+    const canViewByPhone = !doc.userId && phone && [doc.customer?.phone, doc.receiver?.phone].filter(Boolean).includes(phone);
+    if (!canViewByOwner && !canViewByPhone) {
+      sendError(res, 403, "Bạn không có quyền xem trạng thái đơn hàng này.");
+      return;
+    }
+
+    sendJson(res, 200, {
+      ok: true,
+      data: buildOrderTracking(doc),
+    });
+    return;
+  }
+
+  if (identifier && pathParts[3] === "invoice" && req.method === "GET") {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const phone = sanitizePhone(url.searchParams.get("phone"));
+    const doc = await orders.findOne({
+      $or: [
+        { orderCode: identifier },
+        ...(ObjectId.isValid(identifier) ? [{ _id: new ObjectId(identifier) }] : []),
+      ],
+    });
+
+    if (!doc) {
+      sendError(res, 404, "Order not found.");
+      return;
+    }
+
+    const access = getOrderAccess(owner, doc, phone);
+    if (!access.ok) {
+      sendError(res, 403, "Bạn không có quyền xem hóa đơn đơn hàng này.");
+      return;
+    }
+
+    sendJson(res, 200, {
+      ok: true,
+      data: normalizeOrderInvoice(doc),
+    });
+    return;
+  }
+
+  if (identifier && pathParts[3] === "payment" && pathParts[4] === "qr" && ["GET", "POST"].includes(req.method)) {
+    const doc = await orders.findOne({
+      $or: [
+        { orderCode: identifier },
+        ...(ObjectId.isValid(identifier) ? [{ _id: new ObjectId(identifier) }] : []),
+      ],
+    });
+
+    if (!doc) {
+      sendError(res, 404, "Order not found.");
+      return;
+    }
+
+    if (doc.userId && owner?.role !== "admin" && owner?.userId !== doc.userId) {
+      sendError(res, 403, "Bạn không có quyền xem thanh toán đơn hàng này.");
+      return;
+    }
+
+    const payment = doc.payment?.method === "bank_qr"
+      ? doc.payment
+      : buildOrderPayment({ method: "bank_qr", orderCode: doc.orderCode, totals: doc.totals || {} });
+
+    if (doc.payment?.method !== "bank_qr") {
+      await orders.updateOne(
+        { _id: doc._id },
+        { $set: { payment, updatedAt: new Date() } }
+      );
+    }
+
+    sendJson(res, 200, {
+      ok: true,
+      data: {
+        orderCode: doc.orderCode,
+        payment,
+      },
+    });
+    return;
+  }
+
+  if (identifier && pathParts[3] === "payment" && pathParts[4] === "confirm" && req.method === "POST") {
+    const body = await parseJsonBody(req);
+    if (!isBankPaymentConfirmationAuthorized(req, body)) {
+      sendError(res, 401, "Bạn không có quyền xác nhận thanh toán đơn hàng này.");
+      return;
+    }
+
+    const actor = isAdminAuthorized(req) ? "admin" : "bank-webhook";
+    const result = await markOrderBankPaymentPaid({ orders, identifier, body, actor });
+    if (result.error) {
+      sendError(res, result.statusCode || 404, result.error);
+      return;
+    }
+
+    sendJson(res, 200, {
+      ok: true,
+      message: "Đã xác nhận thanh toán QR ngân hàng.",
+      data: normalizeOrder(result.order),
+    });
     return;
   }
 
@@ -2468,6 +3948,797 @@ async function handleOrdersRequest(req, res, pathParts) {
     }
 
     sendJson(res, 200, { ok: true, data: normalizeOrder(doc) });
+    return;
+  }
+
+  sendError(res, 405, "Method not allowed.");
+}
+
+function normalizeAddressPayload(input = {}, owner = {}) {
+  const fullName = cleanLimitedText(input.fullName || input.name || owner.username || owner.email, 120);
+  const phone = sanitizePhone(input.phone);
+  const province = cleanLimitedText(input.province || input.city, 120);
+  const district = cleanLimitedText(input.district, 120);
+  const ward = cleanLimitedText(input.ward, 120);
+  const addressLine = cleanLimitedText(input.addressLine || input.address || input.street, 260);
+  const fullAddress = cleanLimitedText(
+    input.fullAddress || [addressLine, ward, district, province].filter(Boolean).join(", "),
+    700
+  );
+
+  return {
+    fullName,
+    phone,
+    province,
+    district,
+    ward,
+    addressLine,
+    fullAddress,
+    isDefault: Boolean(input.isDefault),
+  };
+}
+
+function normalizeAddress(doc = {}) {
+  return {
+    id: String(doc._id || ""),
+    userId: doc.userId || "",
+    fullName: doc.fullName || "",
+    phone: doc.phone || "",
+    province: doc.province || "",
+    district: doc.district || "",
+    ward: doc.ward || "",
+    addressLine: doc.addressLine || "",
+    fullAddress: doc.fullAddress || "",
+    isDefault: Boolean(doc.isDefault),
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
+  };
+}
+
+function normalizeWishlistItem(doc = {}) {
+  return {
+    id: String(doc._id || ""),
+    userId: doc.userId || "",
+    productId: doc.productId || "",
+    productSlug: doc.productSlug || "",
+    productSku: doc.productSku || "",
+    productName: doc.productName || "",
+    productUrl: doc.productUrl || "",
+    productImage: doc.productImage || "",
+    price: doc.price ?? null,
+    snapshot: doc.snapshot || null,
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
+  };
+}
+
+function normalizeNotification(doc = {}) {
+  return {
+    id: String(doc._id || ""),
+    userId: doc.userId || "",
+    type: doc.type || "system",
+    title: doc.title || "",
+    message: doc.message || "",
+    orderCode: doc.orderCode || "",
+    productId: doc.productId || "",
+    metadata: doc.metadata || {},
+    readAt: doc.readAt || null,
+    createdAt: doc.createdAt,
+  };
+}
+
+function buildCustomerOrderQuery(owner = {}) {
+  const clauses = [
+    owner.userId ? { userId: owner.userId } : null,
+    owner.email ? { "customer.email": owner.email } : null,
+    owner.phone ? { "customer.phone": owner.phone } : null,
+    owner.phone ? { "receiver.phone": owner.phone } : null,
+  ].filter(Boolean);
+
+  return clauses.length ? { $or: clauses } : { userId: "__missing_user__" };
+}
+
+function buildWarrantyItemFromOrder(order = {}, item = {}, index = 0) {
+  const warrantyMonths = Number(item.warrantyMonths || item.warranty?.months || 12);
+  const startsAt = order.createdAt || new Date();
+  const warrantyUntil = addMonths(startsAt, warrantyMonths);
+
+  return {
+    id: `${order.orderCode || order._id}-${item.productId || item.slug || index}`,
+    orderCode: order.orderCode || "",
+    productId: item.productId || "",
+    productSlug: item.slug || item.productSlug || "",
+    productName: item.name || item.productName || "Sản phẩm CellphoneS",
+    productImage: item.image || item.thumbnail || item.primaryImage || "",
+    warrantyMonths,
+    warrantyUntil,
+    returnStatus: order.status === "cancelled" ? "cancelled" : "eligible",
+    orderStatus: order.status || "pending",
+    createdAt: order.createdAt,
+  };
+}
+
+function normalizeOrderInvoice(order = {}) {
+  const invoice = order.companyInvoice || {};
+  return {
+    orderCode: order.orderCode || "",
+    orderId: String(order._id || order.id || ""),
+    invoiceRequested: Boolean(invoice.requested),
+    invoiceStatus: invoice.invoiceStatus || invoice.status || (invoice.requested ? "pending" : "not_requested"),
+    companyName: invoice.companyName || "",
+    taxCode: invoice.taxCode || "",
+    companyAddress: invoice.companyAddress || "",
+    invoiceEmail: invoice.invoiceEmail || invoice.email || order.customer?.email || "",
+    customerName: order.customer?.fullName || "",
+    customerPhone: order.customer?.phone || "",
+    total: order.totals?.total || order.totals?.roundedTotal || 0,
+    paymentStatus: order.payment?.status || "unpaid",
+    createdAt: order.createdAt,
+    updatedAt: order.updatedAt,
+  };
+}
+
+async function handleMeExtrasRequest(req, res, pathParts) {
+  const owner = getRequiredCustomer(req, res);
+  if (!owner) return;
+
+  const resource = pathParts[2];
+  const { orders } = await getDb();
+  const query = buildCustomerOrderQuery(owner);
+
+  if (resource === "warranties" && req.method === "GET") {
+    const docs = await orders
+      .find({ ...query, status: { $nin: ["cancelled"] } })
+      .project({ orderCode: 1, status: 1, items: 1, createdAt: 1 })
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(100)
+      .toArray();
+    const warranties = docs.flatMap((order) =>
+      (order.items || []).map((item, index) => buildWarrantyItemFromOrder(order, item, index))
+    );
+    sendJson(res, 200, { ok: true, data: warranties });
+    return;
+  }
+
+  if (resource === "invoices" && req.method === "GET") {
+    const docs = await orders
+      .find(query)
+      .project({ orderCode: 1, companyInvoice: 1, customer: 1, totals: 1, payment: 1, createdAt: 1, updatedAt: 1 })
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(100)
+      .toArray();
+    sendJson(res, 200, { ok: true, data: docs.map(normalizeOrderInvoice) });
+    return;
+  }
+
+  if (resource === "vouchers" && req.method === "GET") {
+    sendJson(res, 200, {
+      ok: true,
+      message: "Mã giảm giá không tự gán vào tài khoản. Khách cần nhập mã ở bước thanh toán.",
+      data: [],
+    });
+    return;
+  }
+
+  sendError(res, 404, "Me route not found.");
+}
+
+async function createUserNotification(notifications, input = {}) {
+  if (!notifications || !input.userId) return;
+
+  try {
+    await notifications.insertOne({
+      userId: String(input.userId),
+      type: cleanLimitedText(input.type || "system", 80),
+      title: cleanLimitedText(input.title || "CellphoneS", 180),
+      message: cleanLimitedText(input.message || "", 1000),
+      orderCode: cleanLimitedText(input.orderCode || "", 80),
+      productId: cleanLimitedText(input.productId || "", 120),
+      metadata: input.metadata && typeof input.metadata === "object" ? input.metadata : {},
+      readAt: null,
+      createdAt: new Date(),
+    });
+  } catch (error) {
+    console.warn(`[notifications] skip insert: ${error.message}`);
+  }
+}
+
+function addMonths(dateValue, months = 12) {
+  const date = dateValue ? new Date(dateValue) : new Date();
+  if (Number.isNaN(date.getTime())) return new Date();
+  const result = new Date(date);
+  result.setMonth(result.getMonth() + Number(months || 12));
+  return result;
+}
+
+function getOrderAccess(owner, order = {}, phone = "") {
+  if (owner?.role === "admin") return { ok: true, mode: "admin" };
+  if (order.userId && owner?.userId === order.userId) return { ok: true, mode: "owner" };
+  const normalizedPhone = sanitizePhone(phone || owner?.phone || "");
+  if (normalizedPhone && [order.customer?.phone, order.receiver?.phone].filter(Boolean).includes(normalizedPhone)) {
+    return { ok: true, mode: "phone" };
+  }
+  return { ok: false, mode: "denied" };
+}
+
+async function findOrderForService(orders, identifier = "") {
+  const clean = cleanLimitedText(identifier, 120);
+  if (!clean) return null;
+  return orders.findOne({
+    $or: [
+      { orderCode: clean },
+      ...(ObjectId.isValid(clean) ? [{ _id: new ObjectId(clean) }] : []),
+    ],
+  });
+}
+
+function getOrderItemWarranty(item = {}, order = {}, warrantyDoc = null) {
+  const warrantyMonths = Number(
+    warrantyDoc?.warrantyMonths ||
+    item.warrantyMonths ||
+    item.productSnapshot?.warrantyMonths ||
+    12
+  );
+  const warrantyUntil = warrantyDoc?.warrantyUntil || addMonths(order.createdAt, warrantyMonths);
+
+  return {
+    orderCode: order.orderCode || "",
+    productId: item.productId || item.mongoId || "",
+    productSlug: item.slug || "",
+    productName: item.name || item.productSnapshot?.name || "",
+    warrantyMonths,
+    warrantyUntil,
+    status: new Date(warrantyUntil) >= new Date() ? "active" : "expired",
+    orderStatus: order.status || "",
+    purchasedAt: order.createdAt || null,
+  };
+}
+
+function normalizeReturnRequest(doc = {}) {
+  return {
+    id: String(doc._id || ""),
+    returnCode: doc.returnCode || "",
+    orderCode: doc.orderCode || "",
+    userId: doc.userId || "",
+    productId: doc.productId || "",
+    productSlug: doc.productSlug || "",
+    productName: doc.productName || "",
+    reason: doc.reason || "",
+    status: doc.status || "pending",
+    statusLabel: doc.statusLabel || "Chờ tiếp nhận",
+    returnStatus: doc.status || "pending",
+    customerPhone: doc.customerPhone || "",
+    images: doc.images || [],
+    note: doc.note || "",
+    adminNote: doc.adminNote || "",
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
+  };
+}
+
+function generateReturnCode() {
+  const now = new Date();
+  return `RT${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+}
+
+async function handleReturnsRequest(req, res, pathParts) {
+  const { orders, returns } = await getDb();
+  const owner = getOptionalOrderOwner(req);
+  const identifier = decodeURIComponent(pathParts[2] || "");
+
+  if (!identifier && req.method === "POST") {
+    const parsed = parseWithSchema(returnRequestSchema, await parseJsonBody(req));
+    if (!parsed.ok) {
+      sendError(res, 400, "Dữ liệu đổi trả không hợp lệ.", parsed.message);
+      return;
+    }
+
+    const input = parsed.data;
+    const order = await findOrderForService(orders, input.orderCode);
+    if (!order) {
+      sendError(res, 404, "Không tìm thấy đơn hàng để tạo yêu cầu đổi trả.");
+      return;
+    }
+
+    const access = getOrderAccess(owner, order, input.customerPhone);
+    if (!access.ok) {
+      sendError(res, 403, "Bạn không có quyền tạo yêu cầu đổi trả cho đơn hàng này.");
+      return;
+    }
+
+    if (["cancelled", "refunded"].includes(order.status)) {
+      sendError(res, 400, "Đơn hàng đã hủy hoặc hoàn tiền, không thể tạo yêu cầu đổi trả mới.");
+      return;
+    }
+
+    const orderItems = Array.isArray(order.items) ? order.items : [];
+    if (!orderItems.length) {
+      sendError(res, 400, "Đơn hàng không có sản phẩm để đổi trả.");
+      return;
+    }
+
+    const lookupKey = String(input.productId || input.productSlug || input.productName || "").trim();
+
+    let selectedItem = null;
+
+    if (lookupKey) {
+      selectedItem = orderItems.find((item) =>
+        [item.productId, item.mongoId, item.slug, item.sku, item.name]
+          .filter(Boolean)
+          .some((value) => String(value).includes(lookupKey))
+      );
+    } else if (orderItems.length === 1) {
+      selectedItem = orderItems[0];
+    }
+
+    if (!selectedItem) {
+      sendError(res, 400, "Không tìm thấy sản phẩm trong đơn hàng để tạo yêu cầu đổi trả.");
+      return;
+    }
+
+    const now = new Date();
+    const doc = {
+      returnCode: generateReturnCode(),
+      orderCode: order.orderCode,
+      orderId: String(order._id || ""),
+      userId: order.userId || owner?.userId || "",
+      productId: selectedItem.productId || selectedItem.mongoId || "",
+      productSlug: selectedItem.slug || selectedItem.productSlug || "",
+      productSku: selectedItem.sku || "",
+      productName: selectedItem.name || selectedItem.productName || "Sản phẩm CellphoneS",
+      productImage: selectedItem.image || selectedItem.thumbnail || selectedItem.primaryImage || "",
+      reason: cleanLimitedText(input.reason, 1000),
+      status: "pending",
+      statusLabel: "Chờ tiếp nhận",
+      customerPhone: sanitizePhone(input.customerPhone || order.customer?.phone || order.receiver?.phone),
+      images: Array.isArray(input.images) ? input.images.slice(0, 6).map((item) => cleanLimitedText(item, 1000)).filter(Boolean) : [],
+      note: cleanLimitedText(input.note, 1000),
+      adminNote: "",
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const result = await returns.insertOne(doc);
+    const inserted = await returns.findOne({ _id: result.insertedId });
+
+    sendJson(res, 201, {
+      ok: true,
+      message: "Đã tạo yêu cầu đổi trả.",
+      data: normalizeReturnRequest(inserted),
+    });
+    return;
+  }
+
+  if (identifier && req.method === "GET") {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const phone = sanitizePhone(url.searchParams.get("phone"));
+    const doc = await returns.findOne({
+      $or: [
+        { returnCode: identifier },
+        ...(ObjectId.isValid(identifier) ? [{ _id: new ObjectId(identifier) }] : []),
+      ],
+    });
+
+    if (!doc) {
+      sendError(res, 404, "Không tìm thấy yêu cầu đổi trả.");
+      return;
+    }
+
+    if (owner?.role !== "admin" && doc.userId && owner?.userId !== doc.userId) {
+      sendError(res, 403, "Bạn không có quyền xem yêu cầu đổi trả này.");
+      return;
+    }
+
+    if (!doc.userId && phone && doc.customerPhone && phone !== doc.customerPhone) {
+      sendError(res, 403, "Số điện thoại không khớp yêu cầu đổi trả.");
+      return;
+    }
+
+    sendJson(res, 200, {
+      ok: true,
+      data: normalizeReturnRequest(doc),
+    });
+    return;
+  }
+
+  sendError(res, 404, "Returns route not found.");
+}
+
+async function handleWarrantyCheck(req, res) {
+  const { orders, warranties } = await getDb();
+  const owner = getOptionalOrderOwner(req);
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const body = req.method === "POST" ? await parseJsonBody(req) : {};
+  const orderCode = cleanLimitedText(body.orderCode || url.searchParams.get("orderCode"), 80);
+  const phone = sanitizePhone(body.phone || body.customerPhone || url.searchParams.get("phone"));
+  const productKey = cleanLimitedText(body.productId || body.productSlug || url.searchParams.get("productId") || url.searchParams.get("slug"), 240);
+
+  const order = await findOrderForService(orders, orderCode);
+  if (!order) {
+    sendError(res, 404, "Không tìm thấy đơn hàng để tra cứu bảo hành.");
+    return;
+  }
+
+  const access = getOrderAccess(owner, order, phone);
+  if (!access.ok) {
+    sendError(res, 403, "Bạn không có quyền tra cứu bảo hành của đơn hàng này.");
+    return;
+  }
+
+  const items = Array.isArray(order.items) ? order.items : [];
+  const filteredItems = productKey
+    ? items.filter((item) => [item.productId, item.mongoId, item.slug, item.sku, item.name].some((value) => String(value || "").includes(productKey)))
+    : items;
+  const warrantyDocs = await warranties.find({ orderCode: order.orderCode }).toArray().catch(() => []);
+  const warrantyByProduct = new Map(warrantyDocs.map((doc) => [doc.productId || doc.productSlug || doc.productName, doc]));
+  const data = filteredItems.map((item) => {
+    const doc = warrantyByProduct.get(item.productId) || warrantyByProduct.get(item.slug) || warrantyByProduct.get(item.name);
+    return getOrderItemWarranty(item, order, doc);
+  });
+
+  sendJson(res, 200, {
+    ok: true,
+    data: {
+      orderCode: order.orderCode,
+      customer: {
+        fullName: order.customer?.fullName || "",
+        phone: order.customer?.phone || "",
+      },
+      warranties: data,
+    },
+  });
+}
+
+
+function buildMemberRank(totalSpent = 0) {
+  if (totalSpent >= 20000000) return "S-VIP";
+  if (totalSpent >= 3000000) return "S-MEM";
+  return "S-NEW";
+}
+
+function isCompletedOrderEligibleForStats(order = {}) {
+  const paymentStatus = String(order.payment?.status || order.paymentStatus || "").trim().toLowerCase();
+  const paymentMethod = String(order.payment?.method || order.paymentMethod || "").trim().toLowerCase();
+
+  if (["failed", "refunded", "cancelled"].includes(paymentStatus)) return false;
+
+  if (["bank_qr", "bank-qr", "vietqr", "qr", "bank_transfer", "bank-transfer"].includes(paymentMethod)) {
+    return ["paid", "completed", "success", "succeeded"].includes(paymentStatus);
+  }
+
+  return true;
+}
+
+async function handleSmemberProfile(req, res) {
+  const owner = getRequiredCustomer(req, res);
+  if (!owner) return;
+
+  const { orders } = await getDb();
+
+  const docs = await orders
+    .find({
+      userId: owner.userId,
+      status: "completed",
+    })
+    .project({
+      orderCode: 1,
+      totals: 1,
+      status: 1,
+      payment: 1,
+      paymentStatus: 1,
+      paymentMethod: 1,
+      createdAt: 1,
+    })
+    .sort({ createdAt: -1 })
+    .toArray();
+
+  const eligibleDocs = docs.filter(isCompletedOrderEligibleForStats);
+
+  const totalSpent = eligibleDocs.reduce(
+    (sum, order) => sum + cleanCartPrice(order.totals?.total || order.totals?.roundedTotal),
+    0
+  );
+
+  const totalOrders = eligibleDocs.length;
+  const points = Math.floor(totalSpent / 100000);
+  const memberRank = buildMemberRank(totalSpent);
+  const nextRankSpent =
+    memberRank === "S-NEW"
+      ? 3000000
+      : memberRank === "S-MEM"
+        ? 20000000
+        : null;
+
+  sendJson(res, 200, {
+    ok: true,
+    data: {
+      userId: owner.userId,
+      email: owner.email,
+      phone: owner.phone,
+      totalSpent,
+      totalOrders,
+      points,
+      memberRank,
+      nextRankSpent,
+      remainingToNextRank: nextRankSpent ? Math.max(0, nextRankSpent - totalSpent) : 0,
+      recentOrders: eligibleDocs.slice(0, 5).map((order) => ({
+        orderCode: order.orderCode,
+        status: order.status,
+        total: order.totals?.total || order.totals?.roundedTotal || 0,
+        createdAt: order.createdAt,
+      })),
+    },
+  });
+}
+
+async function handleAddressesRequest(req, res, pathParts) {
+  const owner = getRequiredCustomer(req, res);
+  if (!owner) return;
+
+  const { addresses } = await getDb();
+  const addressId = decodeURIComponent(pathParts[2] || "");
+  const action = pathParts[3];
+
+  if (!addressId && req.method === "GET") {
+    const docs = await addresses
+      .find({ userId: owner.userId })
+      .sort({ isDefault: -1, updatedAt: -1, createdAt: -1 })
+      .toArray();
+    sendJson(res, 200, { ok: true, data: docs.map(normalizeAddress) });
+    return;
+  }
+
+  if (!addressId && req.method === "POST") {
+    const parsed = parseWithSchema(addressSchema, await parseJsonBody(req));
+    if (!parsed.ok) {
+      sendError(res, 400, "Địa chỉ nhận hàng không hợp lệ.", parsed.message);
+      return;
+    }
+
+    const now = new Date();
+    const doc = {
+      userId: owner.userId,
+      ...normalizeAddressPayload(parsed.data, owner),
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    if (doc.isDefault) {
+      await addresses.updateMany({ userId: owner.userId }, { $set: { isDefault: false, updatedAt: now } });
+    }
+
+    const result = await addresses.insertOne(doc);
+    const inserted = await addresses.findOne({ _id: result.insertedId });
+    sendJson(res, 201, { ok: true, data: normalizeAddress(inserted) });
+    return;
+  }
+
+  if (!ObjectId.isValid(addressId)) {
+    sendError(res, 400, "Address id không hợp lệ.");
+    return;
+  }
+
+  const query = { _id: new ObjectId(addressId), userId: owner.userId };
+
+  if (action === "default" && ["POST", "PATCH"].includes(req.method)) {
+    const now = new Date();
+    const existing = await addresses.findOne(query);
+    if (!existing) {
+      sendError(res, 404, "Không tìm thấy địa chỉ.");
+      return;
+    }
+
+    await addresses.updateMany({ userId: owner.userId }, { $set: { isDefault: false, updatedAt: now } });
+    const result = await addresses.findOneAndUpdate(
+      query,
+      { $set: { isDefault: true, updatedAt: now } },
+      { returnDocument: "after" }
+    );
+    sendJson(res, 200, { ok: true, data: normalizeAddress(result?.value || result) });
+    return;
+  }
+
+  if (["PATCH", "PUT"].includes(req.method)) {
+    const parsed = parseWithSchema(addressUpdateSchema, await parseJsonBody(req));
+    if (!parsed.ok) {
+      sendError(res, 400, "Địa chỉ nhận hàng không hợp lệ.", parsed.message);
+      return;
+    }
+
+    const now = new Date();
+    const update = normalizeAddressPayload(parsed.data);
+    if (!Object.prototype.hasOwnProperty.call(parsed.data, "isDefault")) delete update.isDefault;
+    for (const [key, value] of Object.entries(update)) {
+      if (value === "" || value === undefined) delete update[key];
+    }
+    update.updatedAt = now;
+
+    if (update.isDefault) {
+      await addresses.updateMany({ userId: owner.userId }, { $set: { isDefault: false, updatedAt: now } });
+    }
+
+    const result = await addresses.findOneAndUpdate(query, { $set: update }, { returnDocument: "after" });
+    const updated = result?.value || result;
+    if (!updated) {
+      sendError(res, 404, "Không tìm thấy địa chỉ.");
+      return;
+    }
+    sendJson(res, 200, { ok: true, data: normalizeAddress(updated) });
+    return;
+  }
+
+  if (req.method === "DELETE") {
+    const result = await addresses.findOneAndDelete(query);
+    const deleted = result?.value || result;
+    if (!deleted) {
+      sendError(res, 404, "Không tìm thấy địa chỉ.");
+      return;
+    }
+    sendJson(res, 200, { ok: true, deleted: normalizeAddress(deleted) });
+    return;
+  }
+
+  sendError(res, 405, "Method not allowed.");
+}
+
+async function resolveWishlistProduct({ productDetails, products, item }) {
+  const identifiers = uniqueStrings([
+    item.productId,
+    item.slug,
+    item.sku,
+    item.url,
+  ]);
+
+  for (const identifier of identifiers) {
+    const fromDetails = await findProductByIdentifier(productDetails, identifier);
+    if (fromDetails) return fromDetails;
+    const fromProducts = await findProductByIdentifier(products, identifier);
+    if (fromProducts) return fromProducts;
+  }
+
+  return null;
+}
+
+async function handleWishlistRequest(req, res, pathParts) {
+  const owner = getRequiredCustomer(req, res);
+  if (!owner) return;
+
+  const { wishlists, productDetails, products } = await getDb();
+  const identifier = decodeURIComponent(pathParts[2] || "");
+
+  if (!identifier && req.method === "GET") {
+    const docs = await wishlists
+      .find({ userId: owner.userId })
+      .sort({ createdAt: -1, _id: -1 })
+      .toArray();
+    sendJson(res, 200, { ok: true, data: docs.map(normalizeWishlistItem) });
+    return;
+  }
+
+  if (!identifier && req.method === "POST") {
+    const parsed = parseWithSchema(wishlistItemSchema, await parseJsonBody(req));
+    if (!parsed.ok) {
+      sendError(res, 400, "Sản phẩm yêu thích không hợp lệ.", parsed.message);
+      return;
+    }
+
+    const product = await resolveWishlistProduct({ productDetails, products, item: parsed.data });
+    if (!product) {
+      sendError(res, 404, "Không tìm thấy sản phẩm để thêm vào yêu thích.");
+      return;
+    }
+
+    const normalizedProduct = normalizeProduct(product);
+    const productId = String(product._id || normalizedProduct.id || parsed.data.productId || normalizedProduct.slug);
+    const now = new Date();
+    const doc = {
+      userId: owner.userId,
+      productId,
+      productSlug: normalizedProduct.slug || parsed.data.slug || "",
+      productSku: normalizedProduct.sku || parsed.data.sku || "",
+      productName: normalizedProduct.name || "",
+      productUrl: normalizedProduct.url || parsed.data.url || "",
+      productImage: normalizedProduct.image || normalizedProduct.primaryImage || "",
+      price: normalizedProduct.price ?? null,
+      snapshot: normalizedProduct,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const { createdAt, ...wishlistUpdate } = doc;
+    await wishlists.updateOne(
+      { userId: owner.userId, productId },
+      {
+        $setOnInsert: { createdAt },
+        $set: wishlistUpdate,
+      },
+      { upsert: true }
+    );
+    const saved = await wishlists.findOne({ userId: owner.userId, productId });
+    sendJson(res, 200, { ok: true, data: normalizeWishlistItem(saved) });
+    return;
+  }
+
+  if (identifier && req.method === "DELETE") {
+    const query = {
+      userId: owner.userId,
+      $or: [
+        { productId: identifier },
+        { productSlug: stripHtmlExtension(identifier) },
+        { productSku: identifier },
+        ...(ObjectId.isValid(identifier) ? [{ _id: new ObjectId(identifier) }] : []),
+      ],
+    };
+    const result = await wishlists.findOneAndDelete(query);
+    const deleted = result?.value || result;
+    if (!deleted) {
+      sendError(res, 404, "Sản phẩm chưa có trong danh sách yêu thích.");
+      return;
+    }
+    sendJson(res, 200, { ok: true, deleted: normalizeWishlistItem(deleted) });
+    return;
+  }
+
+  sendError(res, 405, "Method not allowed.");
+}
+
+async function handleNotificationsRequest(req, res, pathParts) {
+  const owner = getRequiredCustomer(req, res);
+  if (!owner) return;
+
+  const { notifications } = await getDb();
+  const identifier = decodeURIComponent(pathParts[2] || "");
+  const action = pathParts[3];
+
+  if (!identifier && req.method === "GET") {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const limit = toPositiveInt(url.searchParams.get("limit"), 30, MAX_LIMIT);
+    const query = { userId: owner.userId };
+    if (url.searchParams.get("unread") === "true") query.readAt = null;
+    const docs = await notifications.find(query).sort({ createdAt: -1, _id: -1 }).limit(limit).toArray();
+    sendJson(res, 200, { ok: true, data: docs.map(normalizeNotification) });
+    return;
+  }
+
+  if (identifier === "read-all" && ["POST", "PATCH"].includes(req.method)) {
+    await notifications.updateMany(
+      { userId: owner.userId, readAt: null },
+      { $set: { readAt: new Date() } }
+    );
+    sendJson(res, 200, { ok: true, updated: true });
+    return;
+  }
+
+  if (!ObjectId.isValid(identifier)) {
+    sendError(res, 400, "Notification id không hợp lệ.");
+    return;
+  }
+
+  const query = { _id: new ObjectId(identifier), userId: owner.userId };
+
+  if (action === "read" && ["POST", "PATCH"].includes(req.method)) {
+    const result = await notifications.findOneAndUpdate(
+      query,
+      { $set: { readAt: new Date() } },
+      { returnDocument: "after" }
+    );
+    const updated = result?.value || result;
+    if (!updated) {
+      sendError(res, 404, "Không tìm thấy thông báo.");
+      return;
+    }
+    sendJson(res, 200, { ok: true, data: normalizeNotification(updated) });
+    return;
+  }
+
+  if (req.method === "DELETE") {
+    const result = await notifications.findOneAndDelete(query);
+    const deleted = result?.value || result;
+    if (!deleted) {
+      sendError(res, 404, "Không tìm thấy thông báo.");
+      return;
+    }
+    sendJson(res, 200, { ok: true, deleted: normalizeNotification(deleted) });
     return;
   }
 
@@ -2524,12 +4795,12 @@ function normalizeReview(doc = {}, { admin = false } = {}) {
     updatedAt: doc.updatedAt,
     ...(admin
       ? {
-          email: doc.email || "",
-          phone: doc.phone || "",
-          userId: doc.userId || "",
-          userRole: doc.userRole || "",
-          ip: doc.ip || "",
-        }
+        email: doc.email || "",
+        phone: doc.phone || "",
+        userId: doc.userId || "",
+        userRole: doc.userRole || "",
+        ip: doc.ip || "",
+      }
       : {}),
   };
 }
@@ -2577,12 +4848,12 @@ function normalizeQuestion(doc = {}, { admin = false } = {}) {
     updatedAt: doc.updatedAt,
     ...(admin
       ? {
-          email: doc.email || "",
-          phone: doc.phone || "",
-          userId: doc.userId || "",
-          userRole: doc.userRole || "",
-          ip: doc.ip || "",
-        }
+        email: doc.email || "",
+        phone: doc.phone || "",
+        userId: doc.userId || "",
+        userRole: doc.userRole || "",
+        ip: doc.ip || "",
+      }
       : {}),
   };
 }
@@ -2632,11 +4903,34 @@ async function handleCreateProductReview(req, res, identifier) {
   }
 
   const body = await parseJsonBody(req);
+  const parsed = parseWithSchema(reviewCreateSchema, {
+    ...body,
+    content: body.content || body.comment || body.review,
+  });
+  if (!parsed.ok) {
+    sendError(res, 400, "Đánh giá không hợp lệ.", parsed.message);
+    return;
+  }
+
+  if (
+    !rateLimitOrSend({
+      req,
+      res,
+      sendError,
+      scope: "reviews:create",
+      identifier: requester?.sub || requester?.email || "",
+      max: Number(process.env.RATE_LIMIT_REVIEW_MAX || 20),
+      message: "Bạn gửi đánh giá quá nhanh. Vui lòng thử lại sau ít phút.",
+    })
+  ) {
+    return;
+  }
+
   const authorName = cleanLimitedText(
     body.authorName || body.fullName || requester?.fullName || requester?.email || "Khách hàng CellphoneS",
     120
   );
-  const content = cleanLimitedText(body.content || body.comment || body.review, 2000);
+  const content = cleanLimitedText(parsed.data.content || body.comment || body.review, 2000);
 
   if (!content || content.length < 5) {
     sendError(res, 400, "Vui lòng nhập nội dung đánh giá tối thiểu 5 ký tự.");
@@ -2646,12 +4940,12 @@ async function handleCreateProductReview(req, res, identifier) {
   const now = new Date();
   const doc = {
     ...buildInteractionProductIdentity(product, identifier),
-    rating: sanitizeRating(body.rating),
+    rating: sanitizeRating(parsed.data.rating),
     authorName,
     email: normalizeEmail(body.email || requester?.email),
     phone: sanitizePhone(body.phone || requester?.phone),
     content,
-    status: body.status === "pending" ? "pending" : "approved",
+    status: "pending",
     userId: requester?.sub || requester?.id || "",
     userRole: requester?.role || "",
     ip: req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "",
@@ -2664,9 +4958,7 @@ async function handleCreateProductReview(req, res, identifier) {
 
   sendJson(res, 201, {
     ok: true,
-    message: doc.status === "approved"
-      ? "Đã ghi nhận đánh giá của bạn."
-      : "Đánh giá đã được gửi và đang chờ duyệt.",
+    message: "Đánh giá đã được gửi và đang chờ duyệt.",
     data: normalizeReview(inserted),
   });
 }
@@ -2685,7 +4977,7 @@ async function handleListProductQuestions(req, res, identifier) {
   const docs = await productQuestions
     .find({
       ...buildInteractionProductQuery(product, identifier),
-      status: { $ne: "hidden" },
+      status: { $in: ["answered", "approved"] },
     })
     .sort({ createdAt: -1, _id: -1 })
     .limit(limit)
@@ -2714,7 +5006,30 @@ async function handleCreateProductQuestion(req, res, identifier) {
   }
 
   const body = await parseJsonBody(req);
-  const question = cleanLimitedText(body.question || body.content, 1200);
+  const parsed = parseWithSchema(questionCreateSchema, {
+    ...body,
+    question: body.question || body.content,
+  });
+  if (!parsed.ok) {
+    sendError(res, 400, "Câu hỏi không hợp lệ.", parsed.message);
+    return;
+  }
+
+  if (
+    !rateLimitOrSend({
+      req,
+      res,
+      sendError,
+      scope: "questions:create",
+      identifier: requester?.sub || requester?.email || "",
+      max: Number(process.env.RATE_LIMIT_QUESTION_MAX || 20),
+      message: "Bạn gửi câu hỏi quá nhanh. Vui lòng thử lại sau ít phút.",
+    })
+  ) {
+    return;
+  }
+
+  const question = cleanLimitedText(parsed.data.question, 1200);
   const authorName = cleanLimitedText(
     body.authorName || body.fullName || requester?.fullName || requester?.email || "Khách hàng CellphoneS",
     120
@@ -2751,13 +5066,413 @@ async function handleCreateProductQuestion(req, res, identifier) {
   });
 }
 
+async function ensureCouponIndexes(coupons) {
+  if (couponIndexesReady) return;
+
+  await Promise.all([
+    coupons.createIndex({ code: 1 }, { unique: true, name: "unique_coupon_code" }),
+    coupons.createIndex({ status: 1, expiresAt: 1 }, { name: "coupons_status_expiry" }),
+  ]);
+
+  couponIndexesReady = true;
+}
+
+async function handleCouponApply(req, res) {
+  const { coupons } = await getDb();
+  await ensureCouponIndexes(coupons);
+
+  const body = await parseJsonBody(req);
+  const code = cleanLimitedText(body.code || body.couponCode, 80).toUpperCase();
+  const subtotal = cleanCartPrice(body.subtotal || body.totals?.subtotal || body.total);
+  const shippingFee = cleanCartPrice(body.shippingFee || body.totals?.shippingFee);
+
+  if (!code) {
+    sendError(res, 400, "Vui lòng nhập mã giảm giá.");
+    return;
+  }
+
+  const coupon = await coupons.findOne({ code, status: "active" });
+  if (!coupon) {
+    sendError(res, 404, "Mã giảm giá không tồn tại hoặc đã ngừng áp dụng.");
+    return;
+  }
+
+  const discount = computeCouponDiscount(coupon, { subtotal, shippingFee });
+  if (discount <= 0) {
+    sendError(res, 400, "Đơn hàng chưa đủ điều kiện áp dụng mã giảm giá.");
+    return;
+  }
+
+  sendJson(res, 200, {
+    ok: true,
+    data: {
+      code: coupon.code,
+      type: coupon.type,
+      value: coupon.value,
+      discount,
+      finalTotal: Math.max(0, subtotal + shippingFee - discount),
+    },
+  });
+}
+
+async function handleCouponValidate(req, res) {
+  const { coupons, productDetails, products } = await getDb();
+  const body = await parseJsonBody(req);
+  const code = cleanLimitedText(body.code || body.couponCode || body.coupon?.code, 80).toUpperCase();
+
+  if (!code) {
+    sendError(res, 400, "Vui lòng nhập mã giảm giá.");
+    return;
+  }
+
+  let subtotal = cleanCartPrice(body.subtotal || body.totals?.subtotal || body.total);
+  let shippingFee = cleanCartPrice(body.shippingFee || body.totals?.shippingFee);
+
+  if (Array.isArray(body.items) && body.items.length) {
+    try {
+      const preview = await buildCheckoutPreview({
+        productDetails,
+        products,
+        coupons,
+        body: { ...body, couponCode: code },
+      });
+      if (preview.couponError) {
+        sendError(res, 400, preview.couponError);
+        return;
+      }
+      sendJson(res, 200, {
+        ok: true,
+        message: "Mã giảm giá hợp lệ.",
+        data: {
+          coupon: preview.coupon,
+          subtotal: preview.totals.subtotal,
+          discount: preview.totals.discounts?.coupon || 0,
+          shippingFee: preview.totals.shippingFee,
+          total: preview.totals.total,
+          totals: preview.totals,
+        },
+      });
+      return;
+    } catch (error) {
+      sendError(res, error.statusCode || 400, error.message || "Không thể kiểm tra mã giảm giá.");
+      return;
+    }
+  }
+
+  const coupon = await findActiveCoupon(coupons, code);
+  const baseTotals = { subtotal, shippingFee };
+  const reason = getCouponInvalidReason(coupon, baseTotals);
+  if (reason) {
+    sendError(res, 400, reason);
+    return;
+  }
+
+  const discount = computeCouponDiscount(coupon, baseTotals);
+  if (discount <= 0) {
+    sendError(res, 400, "Đơn hàng chưa đủ điều kiện áp dụng mã giảm giá.");
+    return;
+  }
+
+  sendJson(res, 200, {
+    ok: true,
+    message: "Mã giảm giá hợp lệ.",
+    data: {
+      coupon: normalizeCouponForPublic(coupon, discount),
+      subtotal,
+      discount,
+      shippingFee,
+      total: Math.max(0, subtotal + shippingFee - discount),
+    },
+  });
+}
+
+async function handleCouponsAvailable(req, res) {
+  const { coupons } = await getDb();
+  await ensureCouponIndexes(coupons);
+  const now = new Date();
+  const docs = await coupons
+    .find({
+      status: "active",
+      $and: [
+        { $or: [{ startsAt: { $exists: false } }, { startsAt: null }, { startsAt: { $lte: now } }] },
+        { $or: [{ expiresAt: { $exists: false } }, { expiresAt: null }, { expiresAt: { $gte: now } }] },
+      ],
+    })
+    .sort({ expiresAt: 1, createdAt: -1 })
+    .limit(50)
+    .toArray();
+
+  sendJson(res, 200, {
+    ok: true,
+    data: docs.map((coupon) => normalizeCouponForPublic(coupon, 0)),
+  });
+}
+
+async function handleCheckoutPreview(req, res) {
+  const { coupons, productDetails, products } = await getDb();
+  const body = await parseJsonBody(req);
+
+  try {
+    const preview = await buildCheckoutPreview({ productDetails, products, coupons, body });
+    sendJson(res, 200, {
+      ok: true,
+      message: "Đã tính lại giỏ hàng từ dữ liệu MongoDB.",
+      data: {
+        items: preview.items,
+        coupon: preview.coupon,
+        couponError: preview.couponError,
+        shippingChoice: preview.shippingChoice,
+        subtotal: preview.totals.subtotal,
+        discount: preview.totals.discounts?.coupon || 0,
+        shippingFee: preview.totals.shippingFee,
+        total: preview.totals.total,
+        totals: preview.totals,
+      },
+    });
+  } catch (error) {
+    sendError(res, error.statusCode || 400, error.message || "Không thể tính thử đơn hàng.");
+  }
+}
+
+async function ensureUserEventIndexes(userEvents) {
+  if (userEventIndexesReady) return;
+
+  await Promise.all([
+    userEvents.createIndex({ type: 1, createdAt: -1 }, { name: "events_type_created_at" }),
+    userEvents.createIndex({ userId: 1, createdAt: -1 }, { name: "events_user_created_at" }),
+    userEvents.createIndex({ productId: 1, createdAt: -1 }, { name: "events_product_created_at" }),
+    userEvents.createIndex({ slug: 1, createdAt: -1 }, { name: "events_slug_created_at" }),
+  ]);
+
+  userEventIndexesReady = true;
+}
+
+async function handleCreateUserEvent(req, res, options = {}) {
+  const { userEvents, productDetails, products } = await getDb();
+  await ensureUserEventIndexes(userEvents);
+  const requester = getRequestUser(req);
+  const body = await parseJsonBody(req);
+  const type = cleanLimitedText(options.type || body.type || body.eventType, 80);
+
+  if (!["view_product", "search", "add_to_cart", "order_created"].includes(type)) {
+    sendError(res, 400, "Event type không hợp lệ.");
+    return;
+  }
+
+  let product = null;
+  if (type === "view_product") {
+    const identifier = cleanLimitedText(body.productId || body.id || body.slug || getSlugFromUrl(body.url || ""), 240);
+    if (identifier) {
+      product = (await findProductByIdentifier(productDetails, identifier)) ||
+        (await findProductByIdentifier(products, identifier));
+    }
+  }
+  const normalizedProduct = product ? normalizeProduct(product) : null;
+
+  const doc = {
+    type,
+    userId: requester?.sub || requester?.id || "",
+    productId: cleanLimitedText(normalizedProduct?.id || body.productId || body.id, 180),
+    slug: stripHtmlExtension(normalizedProduct?.slug || body.slug || getSlugFromUrl(body.url || "")),
+    keyword: cleanLimitedText(body.keyword || body.query, 240),
+    category: cleanLimitedText(normalizedProduct?.category || body.category, 180),
+    brand: cleanLimitedText(normalizedProduct?.brand || body.brand, 120),
+    productName: cleanLimitedText(normalizedProduct?.name || body.productName || body.name, 300),
+    productImage: cleanLimitedText(normalizedProduct?.image || body.productImage || body.image, 700),
+    meta: typeof body.meta === "object" && body.meta ? body.meta : {},
+    createdAt: new Date(),
+  };
+
+  await userEvents.insertOne(doc);
+  sendJson(res, 201, { ok: true, data: { saved: true, event: doc } });
+}
+
+async function handleRecentlyViewedProducts(req, res) {
+  const owner = getRequiredCustomer(req, res);
+  if (!owner) return;
+
+  const { userEvents, productDetails, products } = await getDb();
+  await ensureUserEventIndexes(userEvents);
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const limit = toPositiveInt(url.searchParams.get("limit"), 12, MAX_LIMIT);
+  const events = await userEvents
+    .find({ userId: owner.userId, type: "view_product" })
+    .sort({ createdAt: -1 })
+    .limit(Math.max(limit * 4, 40))
+    .toArray();
+
+  const seen = new Set();
+  const data = [];
+  for (const event of events) {
+    const identifier = event.slug || event.productId;
+    if (!identifier || seen.has(identifier)) continue;
+    seen.add(identifier);
+    const product =
+      (await findProductByIdentifier(productDetails, identifier)) ||
+      (await findProductByIdentifier(products, identifier));
+    data.push(product ? normalizeProduct(product) : {
+      id: event.productId || event.slug,
+      slug: event.slug || "",
+      name: event.productName || "Sản phẩm đã xem",
+      image: event.productImage || "",
+      brand: event.brand || "",
+      category: event.category || "",
+    });
+    if (data.length >= limit) break;
+  }
+
+  sendJson(res, 200, { ok: true, data });
+}
+
+async function fetchRecommendationProducts({ productDetails, query = {}, limit = 12, sort = {} }) {
+  const docs = await productDetails
+    .find(query, {
+      projection: {
+        name: 1,
+        slug: 1,
+        sku: 1,
+        brand: 1,
+        currentPrice: 1,
+        price: 1,
+        originalPrice: 1,
+        primaryImage: 1,
+        images: { $slice: 1 },
+        categories: 1,
+        category: 1,
+        availability: 1,
+        updatedAt: 1,
+        scrapedAt: 1,
+      },
+    })
+    .sort(Object.keys(sort).length ? sort : { webFreshnessScore: -1, updatedAt: -1, scrapedAt: -1, _id: -1 })
+    .limit(limit)
+    .toArray();
+
+  return docs.map(normalizeProduct);
+}
+
+async function handleRecommendationsRequest(req, res, pathParts) {
+  const { productDetails, userEvents } = await getDb();
+  await ensureUserEventIndexes(userEvents);
+  const action = pathParts[2] || "trending";
+  const identifier = decodeURIComponent(pathParts[3] || "");
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const limit = toPositiveInt(url.searchParams.get("limit"), 12, MAX_LIMIT);
+
+  if (action === "related" && identifier) {
+    const base = await findProductByIdentifier(productDetails, identifier);
+    if (!base) {
+      sendError(res, 404, "Product not found.");
+      return;
+    }
+
+    const price = firstPositiveNumber(base.currentPrice, base.price);
+    const relatedOr = [
+      ...(base.brand ? [{ brand: base.brand }] : []),
+      ...(Array.isArray(base.categories) && base.categories.length
+        ? [{ categories: { $in: base.categories.slice(0, 3) } }]
+        : []),
+      ...(price ? [{ currentPrice: { $gte: price * 0.75, $lte: price * 1.35 } }] : []),
+    ];
+    const query = {
+      _id: { $ne: base._id },
+      ...(relatedOr.length ? { $or: relatedOr } : {}),
+    };
+
+    const data = await fetchRecommendationProducts({ productDetails, query, limit });
+    sendJson(res, 200, { ok: true, baseProduct: normalizeProduct(base), data });
+    return;
+  }
+
+  if (action === "for-you") {
+    const requester = getRequestUser(req);
+    const recentEvents = requester?.sub
+      ? await userEvents.find({ userId: requester.sub }).sort({ createdAt: -1 }).limit(10).toArray()
+      : [];
+    const brands = uniqueStrings(recentEvents.map((event) => event.brand)).filter(Boolean);
+    const categories = uniqueStrings(recentEvents.map((event) => event.category)).filter(Boolean);
+    const query = brands.length || categories.length
+      ? { $or: [{ brand: { $in: brands } }, { categories: { $in: categories } }] }
+      : {};
+    const data = await fetchRecommendationProducts({ productDetails, query, limit });
+    sendJson(res, 200, { ok: true, data });
+    return;
+  }
+
+  const data = await fetchRecommendationProducts({ productDetails, limit });
+  sendJson(res, 200, { ok: true, data });
+}
+
+async function handleChatbotMessage(req, res) {
+  const { productDetails, userEvents } = await getDb();
+  const requester = getRequestUser(req);
+  const body = await parseJsonBody(req);
+  const message = cleanLimitedText(body.message || body.text || body.query, 500);
+
+  if (!message) {
+    sendError(res, 400, "Vui lòng nhập tin nhắn.");
+    return;
+  }
+
+  const regex = new RegExp(escapeRegex(message), "i");
+  const data = await fetchRecommendationProducts({
+    productDetails,
+    query: {
+      $or: [
+        { name: regex },
+        { brand: regex },
+        { category: regex },
+        { categories: regex },
+        { sku: regex },
+      ],
+    },
+    limit: 8,
+  });
+
+  await userEvents.insertOne({
+    type: "search",
+    userId: requester?.sub || "",
+    keyword: message,
+    source: "chatbot",
+    createdAt: new Date(),
+  });
+
+  sendJson(res, 200, {
+    ok: true,
+    data: {
+      answer: data.length
+        ? `Mình tìm thấy ${data.length} sản phẩm phù hợp với "${message}".`
+        : `Mình chưa tìm thấy sản phẩm thật sự khớp với "${message}". Bạn thử mô tả ngắn hơn hoặc nhập tên hãng nhé.`,
+      products: data,
+    },
+  });
+}
+
+async function writeApiAdminAuditLog(adminAuditLogs, req, action, targetType, targetId, changes = {}) {
+  if (!adminAuditLogs) return;
+
+  const actor = getRequestUser(req);
+  await adminAuditLogs.insertOne({
+    actorId: actor?.sub || "",
+    actorRole: actor?.role || "admin-api-key",
+    actorEmail: actor?.email || "",
+    action,
+    targetType,
+    targetId: String(targetId || ""),
+    before: changes.before || null,
+    after: changes.after || null,
+    meta: changes.meta || {},
+    createdAt: new Date(),
+  });
+}
+
 async function handleCreateProduct(req, res) {
   if (!isWriteAuthorized(req)) {
     sendError(res, 401, "Unauthorized.");
     return;
   }
 
-  const { productDetails } = await getDb();
+  const { productDetails, adminAuditLogs } = await getDb();
   const body = await parseJsonBody(req);
   const product = sanitizeProductInput(body, { isCreate: true });
   const now = new Date();
@@ -2766,6 +5481,9 @@ async function handleCreateProduct(req, res) {
 
   const result = await productDetails.insertOne(product);
   const inserted = await productDetails.findOne({ _id: result.insertedId });
+  await writeApiAdminAuditLog(adminAuditLogs, req, "create", "product", inserted?._id, {
+    after: inserted,
+  });
 
   sendJson(res, 201, {
     ok: true,
@@ -2780,7 +5498,7 @@ async function handleUpdateProduct(req, res, identifier) {
     return;
   }
 
-  const { productDetails } = await getDb();
+  const { productDetails, adminAuditLogs } = await getDb();
   const body = await parseJsonBody(req);
   const update = sanitizeProductInput(body);
   update.updatedAt = new Date();
@@ -2802,6 +5520,11 @@ async function handleUpdateProduct(req, res, identifier) {
     return;
   }
 
+  await writeApiAdminAuditLog(adminAuditLogs, req, "update", "product", existing._id, {
+    before: existing,
+    after: result,
+  });
+
   sendJson(res, 200, {
     ok: true,
     data: normalizeProduct(result),
@@ -2815,7 +5538,7 @@ async function handleDeleteProduct(_req, res, identifier) {
     return;
   }
 
-  const { productDetails } = await getDb();
+  const { productDetails, adminAuditLogs } = await getDb();
   const existing = await findProductByIdentifier(productDetails, identifier);
 
   if (!existing) {
@@ -2829,6 +5552,10 @@ async function handleDeleteProduct(_req, res, identifier) {
     sendError(res, 404, "Product not found.");
     return;
   }
+
+  await writeApiAdminAuditLog(adminAuditLogs, _req, "delete", "product", existing._id, {
+    before: result,
+  });
 
   sendJson(res, 200, {
     ok: true,
@@ -2896,13 +5623,98 @@ async function routeRequest(req, res) {
     return;
   }
 
+  if (pathParts[1] === "checkout" && pathParts[2] === "preview" && req.method === "POST") {
+    await handleCheckoutPreview(req, res);
+    return;
+  }
+
+  if (pathParts[1] === "payments" && pathParts[2] === "bank-transfer-webhook" && req.method === "POST") {
+    await handleBankPaymentWebhook(req, res);
+    return;
+  }
+
   if (pathParts[1] === "orders") {
     await handleOrdersRequest(req, res, pathParts);
     return;
   }
 
+  if (pathParts[1] === "addresses") {
+    await handleAddressesRequest(req, res, pathParts);
+    return;
+  }
+
+  if (pathParts[1] === "wishlist") {
+    await handleWishlistRequest(req, res, pathParts);
+    return;
+  }
+
+  if (pathParts[1] === "notifications") {
+    await handleNotificationsRequest(req, res, pathParts);
+    return;
+  }
+
+  if (pathParts[1] === "me") {
+    await handleMeExtrasRequest(req, res, pathParts);
+    return;
+  }
+
+  if (pathParts[1] === "smember" && pathParts[2] === "profile" && req.method === "GET") {
+    await handleSmemberProfile(req, res);
+    return;
+  }
+
+  if (pathParts[1] === "coupons" && pathParts[2] === "apply" && req.method === "POST") {
+    await handleCouponApply(req, res);
+    return;
+  }
+
+  if (pathParts[1] === "coupons" && pathParts[2] === "validate" && req.method === "POST") {
+    await handleCouponValidate(req, res);
+    return;
+  }
+
+  if (pathParts[1] === "coupons" && pathParts[2] === "available" && req.method === "GET") {
+    await handleCouponsAvailable(req, res);
+    return;
+  }
+
+  if (pathParts[1] === "warranty" && pathParts[2] === "check" && ["GET", "POST"].includes(req.method)) {
+    await handleWarrantyCheck(req, res);
+    return;
+  }
+
+  if (pathParts[1] === "returns") {
+    await handleReturnsRequest(req, res, pathParts);
+    return;
+  }
+
+  if (pathParts[1] === "user-events" && pathParts[2] === "view-product" && req.method === "POST") {
+    await handleCreateUserEvent(req, res, { type: "view_product" });
+    return;
+  }
+
+  if (pathParts[1] === "events" && req.method === "POST") {
+    await handleCreateUserEvent(req, res);
+    return;
+  }
+
+  if (pathParts[1] === "recommendations" && req.method === "GET") {
+    await handleRecommendationsRequest(req, res, pathParts);
+    return;
+  }
+
+  if (pathParts[1] === "chatbot" && pathParts[2] === "message" && req.method === "POST") {
+    await handleChatbotMessage(req, res);
+    return;
+  }
+
   if (pathParts[1] !== "products") {
     sendError(res, 404, "Route not found.");
+    return;
+  }
+
+  if (pathParts[2] === "recently-viewed" && req.method === "GET") {
+    await handleRecentlyViewedProducts(req, res);
     return;
   }
 

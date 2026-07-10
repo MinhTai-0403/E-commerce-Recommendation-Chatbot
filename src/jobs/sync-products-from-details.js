@@ -1,5 +1,6 @@
 const { ObjectId } = require("mongodb");
 const { createMongoClient, getMongoConfig } = require("../config/mongodb");
+const { buildRealWorldRecency } = require("../cellphones/realworld-product-recency");
 
 function parseArgs(argv = []) {
   const args = {
@@ -92,46 +93,81 @@ function buildProductSummaryFromDetail(detail = {}) {
     ...(detail.images || []),
   ]);
 
-  return {
+  const currentPrice = Number(detail.currentPrice || detail.salePrice || detail.price || 0) || 0;
+  const originalPrice = Number(detail.originalPrice || detail.regularPrice || currentPrice || 0) || 0;
+  const statusLabel = detail.statusLabel || (currentPrice > 0 ? "Còn hàng" : "Liên hệ");
+  const availability = buildAvailability({ ...detail, currentPrice, statusLabel });
+  const category = detail.category || detail.categoryName || "";
+  const categoryList = buildCategories({ ...detail, category });
+  const primaryImage = detail.primaryImage || detail.thumbnail || detail.image || images[0] || "";
+  const now = new Date();
+  const summary = {
     source: detail.source || "cellphones",
     url: detail.url || detail.sourceUrl || sourceUrls[0] || "",
+    productUrl: detail.url || detail.sourceUrl || sourceUrls[0] || "",
     sourceUrls,
+    id: slug,
     slug,
     sku: detail.sku || slug,
     name: detail.name || detail.productName,
+    productName: detail.productName || detail.name,
+    title: detail.title || detail.name || detail.productName,
     brand: detail.brand,
+    brandName: detail.brandName || detail.brand,
     brandKey: detail.brandKey,
-    price: detail.currentPrice,
-    currentPrice: detail.currentPrice,
-    originalPrice: detail.originalPrice || detail.currentPrice,
+    price: currentPrice,
+    currentPrice,
+    salePrice: currentPrice,
+    originalPrice,
+    regularPrice: originalPrice,
     priceCurrency: "VND",
-    availability: buildAvailability(detail),
-    category: detail.category,
-    categories: buildCategories(detail),
+    availability,
+    stockStatus: availability.status,
+    statusLabel,
+    category,
+    categoryName: categoryList[0] || category,
+    categories: categoryList,
     breadcrumbs: buildBreadcrumbs(detail),
     categoryTrail: detail.categoryTrail || [],
-    primaryImage: detail.primaryImage || detail.thumbnail || detail.image || images[0] || "",
-    thumbnail: detail.thumbnail || detail.primaryImage || detail.image || images[0] || "",
-    image: detail.image || detail.thumbnail || detail.primaryImage || images[0] || "",
+    primaryImage,
+    thumbnail: detail.thumbnail || primaryImage,
+    image: detail.image || primaryImage,
     images: images.slice(0, 8),
     description: detail.meta?.description || detail.description || "",
     rating: detail.rating,
     ratingCount: detail.ratingCount,
     discount: detail.discount,
     installment: detail.installment,
-    statusLabel: detail.statusLabel,
     city: detail.city,
     detailAvailable: true,
     detailBacked: true,
     detailSlug: slug,
     detailUrl: detail.url || detail.sourceUrl || "",
-    detailStorage: "local-gzip",
+    detailStorage: detail.storage?.type || "local-gzip",
     storageStatus: detail.storageStatus,
     sourceCapturedAt: detail.sourceCapturedAt,
     scrapedAt: detail.scrapedAt,
+    sitemapRank: detail.sitemapRank ?? detail.sitemap?.rank ?? null,
+    sitemapProductRank: detail.sitemapProductRank ?? detail.sitemap?.productRank ?? null,
+    sitemapSortRank: detail.sitemapSortRank ?? detail.sitemap?.sortRank ?? null,
+    sitemapLastmod: detail.sitemapLastmod || detail.sitemap?.lastmod || null,
+    webFreshnessScore: detail.webFreshnessScore || 0,
+    webFreshnessReason: detail.webFreshnessReason || [],
+    realWorldYear: detail.realWorldYear || null,
+    effectiveRealWorldYear: detail.effectiveRealWorldYear || null,
+    latestDateMs: detail.latestDateMs || null,
     detailSyncedAt: new Date(),
-    updatedAt: new Date(),
+    updatedAt: now,
   };
+
+  const recency = buildRealWorldRecency(summary);
+  summary.webFreshnessScore = recency.webFreshnessScore;
+  summary.webFreshnessReason = recency.webFreshnessReason;
+  summary.realWorldYear = recency.realWorldYear;
+  summary.effectiveRealWorldYear = recency.effectiveYear;
+  summary.latestDateMs = recency.latestDateMs;
+
+  return summary;
 }
 
 function productDetailFieldUnset() {
@@ -156,7 +192,7 @@ function buildUsableDetailQuery(args) {
     slug: { $exists: true, $ne: "" },
     name: { $exists: true, $ne: "" },
     currentPrice: { $gt: 0 },
-    "storage.type": "local-gzip",
+    "storage.type": { $in: ["local-gzip", "inline-gzip"] },
     "storage.jsonBytes": { $gte: args.minJsonBytes },
     $or: [
       { thumbnail: { $exists: true, $ne: "" } },
@@ -294,7 +330,10 @@ async function main() {
       category: 1,
       categoryTrail: 1,
       currentPrice: 1,
+      salePrice: 1,
+      price: 1,
       originalPrice: 1,
+      regularPrice: 1,
       discount: 1,
       rating: 1,
       ratingCount: 1,
@@ -312,10 +351,26 @@ async function main() {
       scrapedAt: 1,
       updatedAt: 1,
       storage: 1,
+      sitemapRank: 1,
+      sitemapProductRank: 1,
+      sitemapSortRank: 1,
+      sitemapLastmod: 1,
+      sitemap: 1,
+      webFreshnessScore: 1,
+      webFreshnessReason: 1,
+      realWorldYear: 1,
+      effectiveRealWorldYear: 1,
+      latestDateMs: 1,
     };
     const cursor = productDetails
       .find(query, { projection })
-      .sort({ updatedAt: -1, scrapedAt: -1 })
+      .sort({
+        webFreshnessScore: -1,
+        realWorldYear: -1,
+        effectiveRealWorldYear: -1,
+        updatedAt: -1,
+        scrapedAt: -1,
+      })
       .batchSize(250);
     const totals = {
       scanned: 0,

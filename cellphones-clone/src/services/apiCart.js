@@ -246,14 +246,14 @@ export const removeLocalCartItem = (itemId) => {
 
 async function cartRequest(path, { method = 'GET', body, signal } = {}) {
   const token = getAuthToken();
-  if (!token) throw new Error('Missing auth token.');
 
   const response = await fetch(buildApiUrl(path), {
     method,
+    credentials: 'include',
     headers: {
       Accept: 'application/json',
       ...(body ? { 'Content-Type': 'application/json' } : {}),
-      Authorization: `Bearer ${token}`,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
     signal,

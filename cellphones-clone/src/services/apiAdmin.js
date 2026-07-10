@@ -23,6 +23,7 @@ function createAdminHeaders(extraHeaders = {}) {
 async function adminRequest(path, options = {}) {
   const response = await fetch(buildApiUrl(path, options.params || {}), {
     method: options.method || 'GET',
+    credentials: 'include',
     headers: createAdminHeaders(options.body ? { 'Content-Type': 'application/json' } : {}),
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
@@ -158,6 +159,167 @@ export async function updateAdminQuestion(questionId, body) {
 
 export async function deleteAdminQuestion(questionId) {
   const payload = await adminRequest(`/api/admin/questions/${encodeURIComponent(questionId)}`, {
+    method: 'DELETE',
+  });
+  return payload.deleted;
+}
+
+export async function fetchAdminCoupons(params = {}) {
+  const payload = await adminRequest('/api/admin/coupons', {
+    params: {
+      limit: 50,
+      ...params,
+    },
+  });
+  return payload;
+}
+
+export async function createAdminCoupon(body) {
+  const payload = await adminRequest('/api/admin/coupons', {
+    method: 'POST',
+    body,
+  });
+  return payload.data;
+}
+
+export async function updateAdminCoupon(couponId, body) {
+  const payload = await adminRequest(`/api/admin/coupons/${encodeURIComponent(couponId)}`, {
+    method: 'PATCH',
+    body,
+  });
+  return payload.data;
+}
+
+export async function deleteAdminCoupon(couponId) {
+  const payload = await adminRequest(`/api/admin/coupons/${encodeURIComponent(couponId)}`, {
+    method: 'DELETE',
+  });
+  return payload.deleted;
+}
+
+export async function fetchAdminAuditLogs(params = {}) {
+  const payload = await adminRequest('/api/admin/audit-logs', {
+    params: {
+      limit: 50,
+      ...params,
+    },
+  });
+  return payload;
+}
+
+export async function fetchAdminInventory(params = {}) {
+  const payload = await adminRequest('/api/admin/inventory', {
+    params: {
+      limit: 50,
+      ...params,
+    },
+  });
+  return payload;
+}
+
+export async function createAdminInventory(body) {
+  const payload = await adminRequest('/api/admin/inventory', {
+    method: 'POST',
+    body,
+  });
+  return payload.data;
+}
+
+export async function updateAdminInventory(identifier, body) {
+  const payload = await adminRequest(`/api/admin/inventory/${encodeURIComponent(identifier)}`, {
+    method: 'PATCH',
+    body,
+  });
+  return payload.data;
+}
+
+export async function deleteAdminInventory(identifier) {
+  const payload = await adminRequest(`/api/admin/inventory/${encodeURIComponent(identifier)}`, {
+    method: 'DELETE',
+  });
+  return payload.deleted;
+}
+
+export async function fetchAdminPayments(params = {}) {
+  const payload = await adminRequest('/api/admin/payments', {
+    params: {
+      limit: 50,
+      ...params,
+    },
+  });
+  return payload;
+}
+
+export async function updateAdminPayment(identifier, body) {
+  const payload = await adminRequest(`/api/admin/payments/${encodeURIComponent(identifier)}`, {
+    method: 'PATCH',
+    body,
+  });
+  return payload.data;
+}
+
+export async function fetchAdminShipments(params = {}) {
+  const payload = await adminRequest('/api/admin/shipments', {
+    params: {
+      limit: 50,
+      ...params,
+    },
+  });
+  return payload;
+}
+
+export async function createAdminShipment(body) {
+  const payload = await adminRequest('/api/admin/shipments', {
+    method: 'POST',
+    body,
+  });
+  return payload.data;
+}
+
+export async function updateAdminShipment(identifier, body) {
+  const payload = await adminRequest(`/api/admin/shipments/${encodeURIComponent(identifier)}`, {
+    method: 'PATCH',
+    body,
+  });
+  return payload.data;
+}
+
+export async function deleteAdminShipment(identifier) {
+  const payload = await adminRequest(`/api/admin/shipments/${encodeURIComponent(identifier)}`, {
+    method: 'DELETE',
+  });
+  return payload.deleted;
+}
+
+export async function fetchAdminRevenue(params = {}) {
+  const payload = await adminRequest('/api/admin/revenue', { params });
+  return payload;
+}
+
+export function buildAdminExportUrl(target = 'orders', params = {}) {
+  return buildApiUrl(`/api/admin/export/${encodeURIComponent(target)}.csv`, params);
+}
+
+export async function fetchAdminReturns(params = {}) {
+  const payload = await adminRequest('/api/admin/returns', {
+    params: {
+      limit: 50,
+      ...params,
+    },
+  });
+  return payload;
+}
+
+export async function updateAdminReturn(returnId, body) {
+  const payload = await adminRequest(`/api/admin/returns/${encodeURIComponent(returnId)}`, {
+    method: 'PATCH',
+    body,
+  });
+  return payload.data;
+}
+
+export async function deleteAdminReturn(returnId) {
+  const payload = await adminRequest(`/api/admin/returns/${encodeURIComponent(returnId)}`, {
     method: 'DELETE',
   });
   return payload.deleted;

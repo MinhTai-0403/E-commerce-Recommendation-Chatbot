@@ -181,7 +181,7 @@ async function main() {
     const productDetails = db.collection(productDetailsCollection);
     const sourceQuery = {
       source: "cellphones",
-      "storage.type": "local-gzip",
+      "storage.type": { $in: ["local-gzip", "inline-gzip"] },
       "storage.jsonBytes": { $gte: args.minSourceJsonBytes },
       "counts.variants": { $gt: 0 },
     };

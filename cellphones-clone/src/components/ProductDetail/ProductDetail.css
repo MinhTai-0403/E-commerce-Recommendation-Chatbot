@@ -96,6 +96,10 @@
   color: #d70018;
 }
 
+.pdp-favorite-btn.active {
+  color: #d70018;
+}
+
 .pdp-top-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(270px, 320px);

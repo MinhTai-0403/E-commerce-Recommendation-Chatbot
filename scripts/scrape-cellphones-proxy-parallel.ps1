@@ -5,7 +5,10 @@ param(
   [int]$Concurrency = 6,
   [int]$DelayMs = 150,
   [int]$CooldownSeconds = 120,
-  [int]$MaxAttemptsPerSitemap = 8
+  [int]$MaxAttemptsPerSitemap = 8,
+  [int]$RequestTimeoutMs = 9000,
+  [int]$RequestRetries = 1,
+  [switch]$IncludeOutOfStock
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,7 +31,7 @@ for ($rangeStart = $StartSitemap; $rangeStart -le $EndSitemap; $rangeStart += $B
   $outLog = Join-Path $logsDir "$name.out.log"
   $errLog = Join-Path $logsDir "$name.err.log"
   $cmdLog = Join-Path $logsDir "$name.cmd.txt"
-  $arguments = (@(
+  $argumentParts = @(
     "-NoProfile",
     "-ExecutionPolicy", "Bypass",
     "-File", (Quote-Argument (Join-Path $PSScriptRoot "scrape-cellphones-adaptive.ps1")),
@@ -37,8 +40,16 @@ for ($rangeStart = $StartSitemap; $rangeStart -le $EndSitemap; $rangeStart += $B
     "-InitialConcurrency", $Concurrency,
     "-InitialDelayMs", $DelayMs,
     "-CooldownSeconds", $CooldownSeconds,
-    "-MaxAttemptsPerSitemap", $MaxAttemptsPerSitemap
-  ) -join " ")
+    "-MaxAttemptsPerSitemap", $MaxAttemptsPerSitemap,
+    "-RequestTimeoutMs", $RequestTimeoutMs,
+    "-RequestRetries", $RequestRetries
+  )
+
+  if ($IncludeOutOfStock) {
+    $argumentParts += "-IncludeOutOfStock"
+  }
+
+  $arguments = ($argumentParts -join " ")
   "powershell.exe $arguments" | Set-Content -Path $cmdLog
 
   $process = Start-Process `

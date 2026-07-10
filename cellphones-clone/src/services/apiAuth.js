@@ -10,14 +10,17 @@ function getErrorMessage(payload, fallback) {
   return fallback;
 }
 
-async function postAuthJson(path, body) {
+async function authJson(path, { method = 'POST', body, includeToken = false } = {}) {
+  const token = includeToken ? getAuthToken() : '';
   const response = await fetch(buildApiUrl(path), {
-    method: 'POST',
+    method,
+    credentials: 'include',
     headers: {
       Accept: 'application/json',
-      'Content-Type': 'application/json',
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-    body: JSON.stringify(body),
+    body: body ? JSON.stringify(body) : undefined,
   });
 
   const payload = await response.json().catch(() => ({}));
@@ -27,6 +30,10 @@ async function postAuthJson(path, body) {
   }
 
   return payload;
+}
+
+async function postAuthJson(path, body) {
+  return authJson(path, { method: 'POST', body });
 }
 
 export function saveAuthSession(payload = {}) {
@@ -80,19 +87,56 @@ export async function loginSmember({ identifier, phone, email, password }) {
 
 export async function fetchCurrentSmember() {
   const token = getAuthToken();
-  if (!token) return null;
 
   const response = await fetch(buildApiUrl('/api/auth/me'), {
+    credentials: 'include',
     headers: {
       Accept: 'application/json',
-      Authorization: `Bearer ${token}`,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
   });
 
   const payload = await response.json().catch(() => ({}));
+  if (response.status === 401) return null;
+
   if (!response.ok || payload.ok === false) {
     throw new Error(getErrorMessage(payload, 'Phiên đăng nhập không hợp lệ.'));
   }
 
   return payload.data?.user || null;
+}
+
+export async function logoutSmember() {
+  try {
+    await postAuthJson('/api/auth/logout', {});
+  } finally {
+    clearAuthSession();
+  }
+}
+
+export async function updateCurrentSmember(profilePayload) {
+  const payload = await authJson('/api/auth/me', {
+    method: 'PATCH',
+    body: profilePayload,
+    includeToken: true,
+  });
+  saveAuthSession(payload);
+  return payload.data?.user || null;
+}
+
+export async function changeSmemberPassword({ currentPassword, newPassword }) {
+  const payload = await authJson('/api/auth/change-password', {
+    method: 'PATCH',
+    body: { currentPassword, newPassword },
+    includeToken: true,
+  });
+  return payload.data;
+}
+
+export async function requestForgotPasswordOtp(identifier) {
+  return postAuthJson('/api/auth/forgot-password/request-otp', { identifier });
+}
+
+export async function resetForgotPassword({ email, otp, newPassword }) {
+  return postAuthJson('/api/auth/forgot-password/reset', { email, otp, newPassword });
 }

@@ -61,8 +61,8 @@ except ImportError:
 # ----------------------------
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(BASE_DIR, ".."))
-load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
-load_dotenv(os.path.join(BASE_DIR, ".env"), override=True)
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"), encoding="utf-8-sig")
+load_dotenv(os.path.join(BASE_DIR, ".env"), override=True, encoding="utf-8-sig")
 
 DEFAULT_FRONTEND_DIST = os.path.abspath(
     os.path.join(BASE_DIR, "..", "cellphones-clone", "dist")
@@ -331,7 +331,12 @@ def login_required(view_function):
 # =========================
 # GEMINI CONFIG - SDK CŨ
 # =========================
-GEMINI_API_KEY = os.getenv("AIzaSyCSiMIcBXJw9TdsDFCYflH7XTQKAtQt1mc", "").strip()
+GEMINI_API_KEY = (
+    os.getenv("GEMINI_API_KEY")
+    or os.getenv("GOOGLE_API_KEY")
+    or os.getenv("key")
+    or ""
+).strip()
 client = None
 MODEL_MAIN = None
 MODEL_TRANSLATION = None

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import './ProductDetail.css';
 import { formatPrice } from '../../data/mockData';
 import { getProductId, getProductPath } from '../../data/productCatalog';
+import { buildCategoryPath, getRouteForLabel } from '../../utils/linkRoutes';
 import {
   createProductQuestion,
   createProductReview,
@@ -9,6 +10,11 @@ import {
   fetchProductReviews,
 } from '../../services/apiInteractions';
 import { getStoredUser } from '../../services/apiAuth';
+import {
+  addCustomerWishlistItem,
+  fetchCustomerWishlist,
+  removeCustomerWishlistItem,
+} from '../../services/apiCustomer';
 import { CART_ADD_EVENT } from '../../hooks/useCart';
 
 function Price({ value, className }) {
@@ -22,8 +28,26 @@ const normalizeOptionKey = (value = '') => (
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
-    .replace(/Ä‘/g, 'd')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
 );
+
+const getRelatedProductsPath = (product = {}) => {
+  const brand = product.brandName || product.brand || '';
+  const trailCategory = [...(product.categoryTrail || [])]
+    .reverse()
+    .find((item) => {
+      const name = item?.name || item?.label || '';
+      return name && name !== brand && item?.id !== 'home';
+    })?.name;
+  const category = product.category || trailCategory || 'Sản phẩm';
+
+  return buildCategoryPath(category, {
+    brand,
+    keyword: category,
+    title: category,
+  });
+};
 
 const normalizeImageUrl = (value = '') => (
   String(value || '').trim().split('?')[0]
@@ -95,6 +119,16 @@ function RatingStars({ rating = 0 }) {
   );
 }
 
+function sanitizeProductHtml(html = '') {
+  return String(html || '')
+    .replace(/<\s*(script|style|iframe|object|embed|link|meta|base)[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, '')
+    .replace(/<\s*(script|style|iframe|object|embed|link|meta|base)[^>]*\/?>/gi, '')
+    .replace(/\sstyle\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/\s(href|src)\s*=\s*(['"])\s*(javascript:|data:text\/html)[^'"]*\2/gi, ' $1="#"')
+    .replace(/\s(href|src)\s*=\s*(javascript:|data:text\/html)[^\s>]*/gi, ' $1="#"');
+}
+
 function SpecValue({ value }) {
   if (Array.isArray(value)) {
     return (
@@ -105,7 +139,7 @@ function SpecValue({ value }) {
   }
 
   if (value && typeof value === 'object' && value.html) {
-    return <span className="pdp-spec-html" dangerouslySetInnerHTML={{ __html: value.html }} />;
+    return <span className="pdp-spec-html" dangerouslySetInnerHTML={{ __html: sanitizeProductHtml(value.html) }} />;
   }
 
   return <span>{value}</span>;
@@ -194,7 +228,7 @@ function OfferListCard({ title, items = [], className = '' }) {
           <div className="pdp-offer-item" key={item.id || item.title}>
             <span className="pdp-offer-icon">{index + 1}</span>
             <div>
-              {item.href ? <a href={item.href}><strong>{item.title}</strong></a> : <strong>{item.title}</strong>}
+              {item.href ? <a href={item.href === '#' ? getRouteForLabel(item.title) : item.href}><strong>{item.title}</strong></a> : <strong>{item.title}</strong>}
               {item.description && <p>{item.description}</p>}
             </div>
           </div>
@@ -247,7 +281,7 @@ function SourceArticle({ html }) {
   return (
     <div
       className="pdp-source-article"
-      dangerouslySetInnerHTML={{ __html: html }}
+      dangerouslySetInnerHTML={{ __html: sanitizeProductHtml(html) }}
     />
   );
 }
@@ -260,7 +294,7 @@ function NewsListCard({ news = [] }) {
       <h2>Tin tức về sản phẩm</h2>
       <div className="pdp-news-list">
         {news.map((item) => (
-          <a href={item.href || '#'} key={item.id} className="pdp-news-item">
+          <a href={item.href && item.href !== '#' ? item.href : getRouteForLabel(item.title, 'news')} key={item.id} className="pdp-news-item">
             <span>{item.title}</span>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <polyline points="9 18 15 12 9 6" />
@@ -396,7 +430,7 @@ function ReviewSummaryCard({
   );
 }
 
-export default function ProductDetail({ product, currentUser, onGoLogin, onAddToCart }) {
+export default function ProductDetail({ product, currentUser, onGoLogin, onAddToCart, onGoCart }) {
   const mediaItems = product.media?.length
     ? product.media
     : [{ id: 'main', type: 'image', src: product.image || product.thumbnail, alt: product.name, label: 'Ảnh chính' }];
@@ -429,6 +463,8 @@ export default function ProductDetail({ product, currentUser, onGoLogin, onAddTo
   const [questionMessage, setQuestionMessage] = useState('');
   const [questionError, setQuestionError] = useState('');
   const [cartMessage, setCartMessage] = useState('');
+  const [isFavorite, setIsFavorite] = useState(false);
+  const [favoriteLoading, setFavoriteLoading] = useState(false);
   const [reviewForm, setReviewForm] = useState({
     rating: 5,
     authorName: accountDisplayName,
@@ -474,6 +510,48 @@ export default function ProductDetail({ product, currentUser, onGoLogin, onAddTo
       if (questions) setQuestionsPayload(questions);
     });
   };
+
+  useEffect(() => {
+    if (!isInteractionLoggedIn || !productIdentifier) {
+      setIsFavorite(false);
+      return undefined;
+    }
+
+    let mounted = true;
+
+    fetchCustomerWishlist()
+      .then((items) => {
+        if (!mounted) return;
+
+        const normalizedIdentifier = String(productIdentifier || "").replace(/\.html$/i, "");
+
+        const existed = items.some((item) => {
+          const candidates = [
+            item.id,
+            item.productId,
+            item.productSlug,
+            item.productSku,
+            item.snapshot?.id,
+            item.snapshot?.mongoId,
+            item.snapshot?.slug,
+            item.snapshot?.sku,
+          ].filter(Boolean);
+
+          return candidates.some((value) =>
+            String(value).replace(/\.html$/i, "") === normalizedIdentifier
+          );
+        });
+
+        setIsFavorite(existed);
+      })
+      .catch(() => {
+        if (mounted) setIsFavorite(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [isInteractionLoggedIn, productIdentifier]);
 
   useEffect(() => {
     if (!productIdentifier) return undefined;
@@ -560,15 +638,15 @@ export default function ProductDetail({ product, currentUser, onGoLogin, onAddTo
       selectedOptions: {
         ...(selectedVariant
           ? {
-              variantId: getOptionId(selectedVariant, 'variant'),
-              variantName: selectedVariant.name,
-            }
+            variantId: getOptionId(selectedVariant, 'variant'),
+            variantName: selectedVariant.name,
+          }
           : {}),
         ...(selectedColor
           ? {
-              colorId: getOptionId(selectedColor, 'color'),
-              colorName: selectedColor.name,
-            }
+            colorId: getOptionId(selectedColor, 'color'),
+            colorName: selectedColor.name,
+          }
           : {}),
       },
     };
@@ -587,6 +665,57 @@ export default function ProductDetail({ product, currentUser, onGoLogin, onAddTo
     }
 
     window.setTimeout(() => setCartMessage(''), 2400);
+  };
+
+  const handleToggleFavorite = async () => {
+    if (!isInteractionLoggedIn) {
+      setCartMessage('Bạn cần đăng nhập Smember để lưu sản phẩm yêu thích.');
+      if (typeof onGoLogin === 'function') {
+        onGoLogin();
+      } else {
+        window.location.href = '/smember/login';
+      }
+      return;
+    }
+
+    if (favoriteLoading) return;
+
+    setFavoriteLoading(true);
+    setCartMessage('');
+
+    try {
+      const identifier = product.slug || product.sku || product.mongoId || product.id || productId;
+
+      if (isFavorite) {
+        await removeCustomerWishlistItem(identifier);
+        setIsFavorite(false);
+        setCartMessage('Đã bỏ khỏi danh sách yêu thích.');
+      } else {
+        await addCustomerWishlistItem({
+          productId: product.mongoId || product.id || productId,
+          slug: product.slug,
+          sku: product.sku,
+          url: product.url || window.location.pathname,
+        });
+        setIsFavorite(true);
+        setCartMessage('Đã lưu vào sản phẩm yêu thích.');
+      }
+    } catch (error) {
+      setCartMessage(error.message || 'Không thể cập nhật sản phẩm yêu thích.');
+    } finally {
+      setFavoriteLoading(false);
+      window.setTimeout(() => setCartMessage(''), 2400);
+    }
+  };
+
+
+  const handleBuyNow = async () => {
+    await handleAddToCart();
+    if (typeof onGoCart === 'function') {
+      onGoCart();
+    } else {
+      window.location.href = '/cart';
+    }
   };
 
   const splitContact = (contact = '') => {
@@ -723,167 +852,172 @@ export default function ProductDetail({ product, currentUser, onGoLogin, onAddTo
               <a href="#pdp-article">So sánh</a>
             </div>
           </div>
-          <button type="button" className="pdp-favorite-btn">
+          <button
+            type="button"
+            className={`pdp-favorite-btn ${isFavorite ? 'active' : ''}`}
+            onClick={handleToggleFavorite}
+            disabled={favoriteLoading}
+          >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 1 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78Z" />
             </svg>
-            Yêu thích
+            {favoriteLoading ? 'Đang lưu...' : isFavorite ? 'Đã yêu thích' : 'Yêu thích'}
           </button>
         </section>
 
         <div className="pdp-top-layout">
           <div className="pdp-main-column">
             <div className="pdp-primary-row">
-          <section className="pdp-gallery-card">
-            <div className="pdp-main-media">
-              {activeMedia?.type === 'video' ? (
-                <div className="pdp-video-preview">
-                  <img src={activeMedia.thumbnail} alt={activeMedia.alt || product.name} />
-                  <span className="pdp-play-button" aria-hidden="true">
-                    <svg width="34" height="34" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M8 5v14l11-7z" />
-                    </svg>
-                  </span>
+              <section className="pdp-gallery-card">
+                <div className="pdp-main-media">
+                  {activeMedia?.type === 'video' ? (
+                    <div className="pdp-video-preview">
+                      <img src={activeMedia.thumbnail} alt={activeMedia.alt || product.name} />
+                      <span className="pdp-play-button" aria-hidden="true">
+                        <svg width="34" height="34" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M8 5v14l11-7z" />
+                        </svg>
+                      </span>
+                    </div>
+                  ) : (
+                    <img src={activeMedia?.src || product.thumbnail} alt={activeMedia?.alt || product.name} />
+                  )}
                 </div>
-              ) : (
-                <img src={activeMedia?.src || product.thumbnail} alt={activeMedia?.alt || product.name} />
-              )}
-            </div>
 
-            <div className="pdp-thumb-row" aria-label="Ảnh sản phẩm">
-              {mediaItems.map((item) => (
-                <button
-                  className={`pdp-thumb ${item.id === activeMedia?.id ? 'active' : ''}`}
-                  key={item.id}
-                  type="button"
-                  onClick={() => selectMediaItem(item)}
-                  aria-pressed={item.id === activeMedia?.id}
-                >
-                  <img src={item.thumbnail || item.src} alt={item.label || item.alt || product.name} />
-                  <span>{item.label}</span>
-                </button>
-              ))}
-            </div>
-
-            <div className="pdp-highlight-box">
-              <h2>Tính năng nổi bật</h2>
-              <ul>
-                {product.highlights?.map((highlight) => <li key={highlight}>{highlight}</li>)}
-              </ul>
-            </div>
-
-            <OfferListCard
-              title="Đặc quyền khi mua sản phẩm tại CellphoneS"
-              items={product.privileges}
-              className="pdp-privilege-card"
-            />
-          </section>
-
-          <section className="pdp-buy-card">
-            <div className="pdp-location-line">
-              Xem giá tại <strong>{product.city || 'Hồ Chí Minh'}</strong>
-            </div>
-
-            <div className="pdp-price-row">
-              <Price value={product.currentPrice} className="pdp-current-price" />
-              {product.originalPrice > product.currentPrice && (
-                <Price value={product.originalPrice} className="pdp-original-price" />
-              )}
-            </div>
-            {saving > 0 && <p className="pdp-saving">Tiết kiệm {formatPrice(saving)} so với giá niêm yết</p>}
-
-            {product.priceBenefits?.length > 0 && (
-              <div className="pdp-member-benefits">
-                {product.priceBenefits.map((item) => (
-                  <div className="pdp-member-benefit" key={item.id}>
-                    <span>{item.label}</span>
-                    <strong>{item.value}</strong>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {product.stockNote && (
-              <div className="pdp-stock-note">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M20 6 9 17l-5-5" />
-                </svg>
-                <span>{product.stockNote}</span>
-              </div>
-            )}
-
-            {product.shortNotice && (
-              <div className="pdp-short-notice">{product.shortNotice}</div>
-            )}
-
-            {product.variants?.length > 0 && (
-              <div className="pdp-option-group">
-                <h2>Phiên bản</h2>
-                <div className="pdp-option-grid">
-                  {product.variants.map((variant) => (
-                    <a
-                      className={`pdp-option ${variant.active ? 'active' : ''}`}
-                      href={getVariantHref(variant, product)}
-                      key={variant.id}
+                <div className="pdp-thumb-row" aria-label="Ảnh sản phẩm">
+                  {mediaItems.map((item) => (
+                    <button
+                      className={`pdp-thumb ${item.id === activeMedia?.id ? 'active' : ''}`}
+                      key={item.id}
+                      type="button"
+                      onClick={() => selectMediaItem(item)}
+                      aria-pressed={item.id === activeMedia?.id}
                     >
-                      <span>{variant.name}</span>
-                      <Price value={variant.price} />
-                    </a>
+                      <img src={item.thumbnail || item.src} alt={item.label || item.alt || product.name} />
+                      <span>{item.label}</span>
+                    </button>
                   ))}
                 </div>
-              </div>
-            )}
 
-            {product.colors?.length > 0 && (
-              <div className="pdp-option-group">
-                <h2>Màu sắc</h2>
-                <div className="pdp-color-grid">
-                  {product.colors.map((color) => {
-                    const colorId = getOptionId(color, 'color');
-                    const isActiveColor = selectedColor && getOptionId(selectedColor, 'color') === colorId;
-
-                    return (
-                    <button
-                      className={`pdp-color-option ${isActiveColor ? 'active' : ''}`}
-                      key={colorId}
-                      type="button"
-                      onClick={() => selectColor(color)}
-                      aria-pressed={isActiveColor}
-                    >
-                      <img src={color.image} alt={color.name} />
-                      <span>{color.name}</span>
-                      <Price value={color.price} />
-                    </button>
-                    );
-                  })}
+                <div className="pdp-highlight-box">
+                  <h2>Tính năng nổi bật</h2>
+                  <ul>
+                    {product.highlights?.map((highlight) => <li key={highlight}>{highlight}</li>)}
+                  </ul>
                 </div>
-              </div>
-            )}
 
-            <div className="pdp-promo-card">
-              <h2>Khuyến mãi</h2>
-              {product.promotions?.map((promotion, index) => (
-                <div className="pdp-promo-item" key={promotion.id}>
-                  <span>{index + 1}</span>
-                  <p>
-                    <strong>{promotion.title}</strong>
-                    {promotion.description && <>: {promotion.description}</>}
-                  </p>
+                <OfferListCard
+                  title="Đặc quyền khi mua sản phẩm tại CellphoneS"
+                  items={product.privileges}
+                  className="pdp-privilege-card"
+                />
+              </section>
+
+              <section className="pdp-buy-card">
+                <div className="pdp-location-line">
+                  Xem giá tại <strong>{product.city || 'Hồ Chí Minh'}</strong>
                 </div>
-              ))}
-            </div>
 
-            <div className="pdp-action-stack">
-              <button type="button" className="pdp-primary-action">
-                {product.statusLabel === 'Đặt trước' ? 'ĐẶT TRƯỚC NGAY' : 'MUA NGAY'}
-                <span>Thanh toán online hoặc nhận tại cửa hàng</span>
-              </button>
-              <button type="button" className="pdp-secondary-action" onClick={handleAddToCart}>
-                Thêm vào giỏ hàng
-              </button>
-              {cartMessage && <div className="pdp-cart-message">{cartMessage}</div>}
-            </div>
-          </section>
+                <div className="pdp-price-row">
+                  <Price value={product.currentPrice} className="pdp-current-price" />
+                  {product.originalPrice > product.currentPrice && (
+                    <Price value={product.originalPrice} className="pdp-original-price" />
+                  )}
+                </div>
+                {saving > 0 && <p className="pdp-saving">Tiết kiệm {formatPrice(saving)} so với giá niêm yết</p>}
+
+                {product.priceBenefits?.length > 0 && (
+                  <div className="pdp-member-benefits">
+                    {product.priceBenefits.map((item) => (
+                      <div className="pdp-member-benefit" key={item.id}>
+                        <span>{item.label}</span>
+                        <strong>{item.value}</strong>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {product.stockNote && (
+                  <div className="pdp-stock-note">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M20 6 9 17l-5-5" />
+                    </svg>
+                    <span>{product.stockNote}</span>
+                  </div>
+                )}
+
+                {product.shortNotice && (
+                  <div className="pdp-short-notice">{product.shortNotice}</div>
+                )}
+
+                {product.variants?.length > 0 && (
+                  <div className="pdp-option-group">
+                    <h2>Phiên bản</h2>
+                    <div className="pdp-option-grid">
+                      {product.variants.map((variant) => (
+                        <a
+                          className={`pdp-option ${variant.active ? 'active' : ''}`}
+                          href={getVariantHref(variant, product)}
+                          key={variant.id}
+                        >
+                          <span>{variant.name}</span>
+                          <Price value={variant.price} />
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {product.colors?.length > 0 && (
+                  <div className="pdp-option-group">
+                    <h2>Màu sắc</h2>
+                    <div className="pdp-color-grid">
+                      {product.colors.map((color) => {
+                        const colorId = getOptionId(color, 'color');
+                        const isActiveColor = selectedColor && getOptionId(selectedColor, 'color') === colorId;
+
+                        return (
+                          <button
+                            className={`pdp-color-option ${isActiveColor ? 'active' : ''}`}
+                            key={colorId}
+                            type="button"
+                            onClick={() => selectColor(color)}
+                            aria-pressed={isActiveColor}
+                          >
+                            <img src={color.image} alt={color.name} />
+                            <span>{color.name}</span>
+                            <Price value={color.price} />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <div className="pdp-promo-card">
+                  <h2>Khuyến mãi</h2>
+                  {product.promotions?.map((promotion, index) => (
+                    <div className="pdp-promo-item" key={promotion.id}>
+                      <span>{index + 1}</span>
+                      <p>
+                        <strong>{promotion.title}</strong>
+                        {promotion.description && <>: {promotion.description}</>}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="pdp-action-stack">
+                  <button type="button" className="pdp-primary-action" onClick={handleBuyNow}>
+                    {product.statusLabel === 'Đặt trước' ? 'ĐẶT TRƯỚC NGAY' : 'MUA NGAY'}
+                    <span>Thanh toán online hoặc nhận tại cửa hàng</span>
+                  </button>
+                  <button type="button" className="pdp-secondary-action" onClick={handleAddToCart}>
+                    Thêm vào giỏ hàng
+                  </button>
+                  {cartMessage && <div className="pdp-cart-message">{cartMessage}</div>}
+                </div>
+              </section>
             </div>
           </div>
 
@@ -919,7 +1053,7 @@ export default function ProductDetail({ product, currentUser, onGoLogin, onAddTo
           <section className="pdp-related-card" aria-labelledby="pdp-related-heading">
             <div className="pdp-related-heading">
               <h2 id="pdp-related-heading">Sản phẩm tương tự</h2>
-              <a href="#similar-products">Xem tất cả</a>
+              <a href={getRelatedProductsPath(product)}>Xem tất cả</a>
             </div>
             <div className="pdp-related-grid">
               {product.relatedProducts.map((item) => (
@@ -949,7 +1083,7 @@ export default function ProductDetail({ product, currentUser, onGoLogin, onAddTo
             <section className="pdp-spec-card" id="pdp-specifications">
               <div className="pdp-card-heading">
                 <h2>Thông số kỹ thuật</h2>
-                <a href="#pdp-spec-full">Xem tất cả</a>
+                <a href="#pdp-specifications">Xem tất cả</a>
               </div>
               {product.specifications?.map((group) => (
                 <div className="pdp-spec-group" key={group.id}>

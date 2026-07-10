@@ -1,5 +1,26 @@
 import './AccessoryCategories.css';
 import { accessoryCategories } from '../../data/mockData';
+import { buildCategoryPath } from '../../utils/linkRoutes';
+
+const getAccessoryCategoryPath = (category) => {
+  const name = category?.name || '';
+  const directCategoryById = {
+    network: 'Thiết bị mạng',
+    camera: 'Camera',
+    gimbal: 'Camera',
+    flycam: 'Camera',
+    cameras: 'Máy ảnh',
+    sim: 'Sim 4G',
+    'gaming-gear': 'Gaming Gear',
+  };
+  const apiCategory = directCategoryById[category?.id] || 'Phụ kiện';
+
+  return buildCategoryPath(apiCategory, {
+    keyword: name,
+    title: name,
+    q: name,
+  });
+};
 
 export default function AccessoryCategories() {
   return (
@@ -8,7 +29,7 @@ export default function AccessoryCategories() {
         <div className="accessory-categories-header">
           <h2 id="accessory-categories-title">Sắm thêm phụ kiện chất lượng</h2>
           <span className="accessory-categories-divider" aria-hidden="true" />
-          <a className="accessory-categories-view-all" href="#">
+          <a className="accessory-categories-view-all" href={buildCategoryPath('Phụ kiện')}>
             Xem tất cả
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" aria-hidden="true">
               <polyline points="9 18 15 12 9 6" />
@@ -19,7 +40,7 @@ export default function AccessoryCategories() {
         <div className="accessory-categories-shell">
           <div className="accessory-categories-grid">
             {accessoryCategories.map((category) => (
-              <a className="accessory-category-item" href="#" key={category.id}>
+              <a className="accessory-category-item" href={getAccessoryCategoryPath(category)} key={category.id}>
                 <img src={category.image} alt={category.name} width="72" height="72" loading="lazy" />
                 <span>{category.name}</span>
               </a>
