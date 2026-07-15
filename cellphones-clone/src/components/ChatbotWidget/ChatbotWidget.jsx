@@ -145,12 +145,6 @@ function ChatbotWidget({ userName = '' }) {
   }, []);
 
   useEffect(() => {
-    setMessages((current) => current.map((item) => (
-      item.id === 'welcome' ? createWelcomeMessage(activeUserName) : item
-    )));
-  }, [activeUserName]);
-
-  useEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
 
@@ -167,13 +161,34 @@ function ChatbotWidget({ userName = '' }) {
     }
   };
 
-  const addBotMessage = (html) => {
+  const addBotMessage = (html, metadata = {}) => {
+    const suggestionKeys = new Set();
+    const suggestions = (
+      Array.isArray(metadata.suggestions) ? metadata.suggestions : []
+    ).map((item) => {
+      if (item && typeof item === 'object') {
+        const label = String(item.label || item.message || '').trim();
+        const value = String(item.message || item.value || label).trim();
+        return { label, value };
+      }
+
+      const value = String(item || '').trim();
+      return { label: value, value };
+    }).filter((item) => {
+      const key = `${item.label}\u0000${item.value}`;
+      if (!item.label || !item.value || suggestionKeys.has(key)) return false;
+      suggestionKeys.add(key);
+      return true;
+    }).slice(0, 10);
+
     setMessages((current) => [
       ...current,
       {
         id: createMessageId(),
         role: 'bot',
         html,
+        responseType: String(metadata.responseType || ''),
+        suggestions,
       },
     ]);
   };
@@ -343,7 +358,13 @@ function ChatbotWidget({ userName = '' }) {
         );
       }
 
-      addBotMessage(data.reply || 'Mình chưa nhận được nội dung phản hồi.');
+      addBotMessage(
+        data.reply || 'Mình chưa nhận được nội dung phản hồi.',
+        {
+          responseType: data.response_type,
+          suggestions: data.suggestions,
+        },
+      );
     } catch (error) {
       const errorMessage = error instanceof Error
         ? error.message
@@ -370,6 +391,10 @@ function ChatbotWidget({ userName = '' }) {
     setStoredUserName(readStoredUserName());
     setIsOpen((current) => !current);
   };
+
+  const visibleMessages = messages.map((item) => (
+    item.id === 'welcome' ? createWelcomeMessage(activeUserName) : item
+  ));
 
   return (
     <div className="chatbot-widget">
@@ -426,7 +451,7 @@ function ChatbotWidget({ userName = '' }) {
           </header>
 
           <div className="chatbot-messages">
-            {messages.map((item) => (
+            {visibleMessages.map((item) => (
               <div
                 key={item.id}
                 className={`chatbot-message-row ${item.role}`}
@@ -447,7 +472,27 @@ function ChatbotWidget({ userName = '' }) {
                   )}
 
                   {item.role === 'bot' ? (
-                    <div dangerouslySetInnerHTML={{ __html: item.html }} />
+                    <>
+                      <div dangerouslySetInnerHTML={{ __html: item.html }} />
+
+                      {item.suggestions?.length > 0 && (
+                        <div
+                          className="chatbot-inline-suggestions"
+                          aria-label="Tiêu chí gợi ý"
+                        >
+                          {item.suggestions.map((suggestion) => (
+                            <button
+                              type="button"
+                              key={`${suggestion.label}-${suggestion.value}`}
+                              onClick={() => sendMessage(suggestion.value)}
+                              disabled={loading}
+                            >
+                              {suggestion.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </>
                   ) : (
                     <p>{item.text}</p>
                   )}

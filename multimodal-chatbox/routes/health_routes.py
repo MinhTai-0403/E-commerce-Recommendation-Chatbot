@@ -20,7 +20,7 @@ def health():
 
     return jsonify({
         "status": "ok",
-        "product_source": "local_index_files",
+        "product_source": "local_faiss_and_sqlite_catalog",
         "mongodb_used_for_products": False,
         "mongodb_auth": core.users_collection is not None,
         "mongodb_error": core.mongo_error or None,
@@ -39,6 +39,12 @@ def health():
         ),
         "metadata_products": len(core.products),
         "metadata_path": core.PRODUCTS_METADATA_PATH,
+        "detailed_catalog_products": (
+            core.catalog_search_store.product_count
+            if core.catalog_search_store is not None
+            else len(core.products)
+        ),
+        "detailed_catalog_path": core.PRODUCTS_CATALOG_SEARCH_PATH,
         "metadata_modified_at": metadata_mtime,
         "catalog_loaded_at": (
             core.catalog_loaded_at.isoformat()

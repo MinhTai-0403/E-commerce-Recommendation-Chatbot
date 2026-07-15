@@ -55,7 +55,12 @@ def chat():
     matched_products, parsed_query, retrieval_info = core.search_products_text_embedding(
         user_message,
         current_products,
-        limit=20,
+        limit=40,
+    )
+    specific_model_query = core.is_specific_model_query(
+        user_message=user_message,
+        parsed_query=parsed_query,
+        matched_products=matched_products,
     )
 
     print("CHẾ ĐỘ TÌM KIẾM VĂN BẢN:", retrieval_info.get("mode"))
@@ -72,14 +77,22 @@ def chat():
         parsed_query=parsed_query,
         matched_products=matched_products,
     ):
+        suggestions = core.get_clarification_suggestion_actions(
+            user_message,
+            parsed_query=parsed_query,
+            matched_products=matched_products,
+        )
         return jsonify({
             "reply": core.build_clarifying_suggestion_box(
                 user_message,
                 user_name=user_name,
                 parsed_query=parsed_query,
                 matched_products=matched_products,
+                include_chips=False,
             ),
+            "response_type": "clarification",
             "products": [],
+            "suggestions": suggestions,
             "needs_clarification": True,
         })
 
@@ -101,17 +114,28 @@ def chat():
                 seen_final_ids.add(product_id)
     matched_products = final_checked_products
     print("SỐ KẾT QUẢ SAU VALIDATOR:", len(matched_products))
+    advisory_query = core.is_product_advisory_query(
+        user_message,
+        parsed_query=parsed_query,
+        matched_products=matched_products,
+        specific_model=specific_model_query,
+    )
 
     if not matched_products:
         faq_reply = core.get_faq_response(user_message.lower())
         if faq_reply and not core.looks_like_product_request(user_message):
-            return jsonify({"reply": faq_reply})
+            return jsonify({
+                "reply": faq_reply,
+                "response_type": "faq",
+            })
 
-        raw_alternative_products = core.find_alternative_products(
-            user_message,
-            current_products,
-            limit=8,
-        )
+        raw_alternative_products = []
+        if not specific_model_query:
+            raw_alternative_products = core.find_alternative_products(
+                user_message,
+                current_products,
+                limit=8,
+            )
         alternative_products = []
         seen_alternative_ids = set()
         for product in raw_alternative_products:
@@ -142,18 +166,112 @@ def chat():
         )
 
         if alternative_products:
+            if advisory_query:
+                alternative_advice = core.prepare_product_advice(
+                    alternative_products,
+                    user_message,
+                    price_constraints=price_constraints,
+                    limit=3,
+                )
+                if alternative_advice:
+                    advised_products = [
+                        item["product"]
+                        for item in alternative_advice
+                    ]
+                    serialized_advice = core.serialize_product_advice(
+                        alternative_advice
+                    )
+                    return jsonify({
+                        "reply": core.generate_product_cards(
+                            advised_products,
+                            response_text_vi=not_found_intro,
+                            product_advice=alternative_advice,
+                        ),
+                        "response_type": "product_advisor",
+                        "products": [
+                            {
+                                "id": item["product_id"],
+                                "name": item["name"],
+                                "price": item["price"],
+                            }
+                            for item in serialized_advice
+                        ],
+                        "advice": serialized_advice,
+                    })
+
             return jsonify({
                 "reply": core.generate_product_cards(
                     alternative_products,
                     response_text_vi=not_found_intro,
-                )
+                ),
+                "response_type": "product_alternatives",
             })
 
         return jsonify({
-            "reply": core._safe_text(not_found_intro).replace("\n", "<br>")
+            "reply": core._safe_text(not_found_intro).replace("\n", "<br>"),
+            "response_type": "not_found",
+            "products": [],
         })
 
-    query_display_name = core.get_product_query_display_name(user_message, parsed_query)
+    if advisory_query:
+        advice_items = core.prepare_product_advice(
+            matched_products,
+            user_message,
+            price_constraints=price_constraints,
+            limit=5,
+            allow_variants=specific_model_query,
+        )
+        if not advice_items:
+            return jsonify({
+                "reply": core.generate_advice_unavailable_reply(
+                    user_message,
+                    user_name=user_name,
+                ),
+                "response_type": "advice_unavailable",
+                "products": [],
+                "advice": [],
+            })
+
+        advised_products = [item["product"] for item in advice_items]
+        serialized_advice = core.serialize_product_advice(advice_items)
+        query_display_name = core.get_product_query_display_name(
+            user_message,
+            parsed_query,
+            matched_products=advised_products,
+        )
+        intro = (
+            "Mình đã đối chiếu yêu cầu với thông số chi tiết và chọn "
+            f"các sản phẩm phù hợp với {query_display_name}:"
+        )
+        if user_name:
+            intro = (
+                f"{user_name}, mình đã đối chiếu yêu cầu với thông số chi tiết "
+                f"và chọn các sản phẩm phù hợp với {query_display_name}:"
+            )
+
+        return jsonify({
+            "reply": core.generate_product_cards(
+                advised_products,
+                response_text_vi=intro,
+                product_advice=advice_items,
+            ),
+            "response_type": "product_advisor",
+            "products": [
+                {
+                    "id": item["product_id"],
+                    "name": item["name"],
+                    "price": item["price"],
+                }
+                for item in serialized_advice
+            ],
+            "advice": serialized_advice,
+        })
+
+    query_display_name = core.get_product_query_display_name(
+        user_message,
+        parsed_query,
+        matched_products=matched_products,
+    )
     intro = f"🛒 Mình tìm thấy một số sản phẩm phù hợp với {query_display_name}:"
     if user_name:
         intro = (
@@ -165,7 +283,8 @@ def chat():
         "reply": core.generate_product_cards(
             matched_products[:5],
             response_text_vi=intro,
-        )
+        ),
+        "response_type": "product_search",
     })
 
 
