@@ -20,6 +20,8 @@ except ImportError:
         return False
 
 import hashlib
+import difflib
+import gzip
 import json
 import os
 import re
@@ -32,6 +34,10 @@ import uuid
 import faiss
 import jwt
 import numpy as np
+
+from catalog_store import CatalogSearchStore
+from product_details import html_to_text, runtime_product_document
+import product_advisor
 
 # Gemini SDK mới (cài bằng: pip install -U google-genai)
 try:
@@ -319,7 +325,8 @@ def login_required(view_function):
 # =========================
 # GEMINI CONFIG - GOOGLE GENAI SDK
 # =========================
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_API_KEY = os.getenv("API_KEY", "").strip()
+
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite").strip()
 client = None
 MODEL_MAIN = None
@@ -393,6 +400,11 @@ os.makedirs(FAISS_DIR, exist_ok=True)
 
 # products.json chứa metadata đầy đủ theo đúng thứ tự từng vector FAISS.
 PRODUCTS_METADATA_PATH = os.path.join(FAISS_DIR, "products.json")
+PRODUCTS_CATALOG_PATH = os.path.join(FAISS_DIR, "catalog.jsonl.gz")
+PRODUCTS_CATALOG_SEARCH_PATH = os.path.join(
+    FAISS_DIR,
+    "catalog_search.sqlite3",
+)
 # Giữ đường dẫn product_ids.json để tương thích, nhưng runtime không cần dùng file này.
 FAISS_PRODUCT_IDS_PATH = os.path.join(FAISS_DIR, "product_ids.json")
 FAISS_INDEX_PATH = os.path.join(FAISS_DIR, "faiss_index.index")
@@ -411,6 +423,7 @@ faiss_product_order_ids = []
 faiss_position_by_product_id = {}
 yolo_model = None
 catalog_loaded_at = None
+catalog_search_store = None
 
 # Tìm kiếm văn bản đa phương thức: text embedding truy vấn trực tiếp
 # FAISS index được build từ ảnh sản phẩm MongoDB.
@@ -452,6 +465,21 @@ CHATBOT_PRODUCT_PROJECTION = {
     "originalPrice": 1,
     "specs": 1,
     "specifications": 1,
+    "highlights": 1,
+    "articleText": 1,
+    "articleSections": 1,
+    "meta": 1,
+    "shortNotice": 1,
+    "statusLabel": 1,
+    "stockNote": 1,
+    "categoryTrail": 1,
+    "reviewSummary": 1,
+    "faqs": 1,
+    "promotions": 1,
+    "privileges": 1,
+    "policies": 1,
+    "paymentOffers": 1,
+    "priceBenefits": 1,
     "colors": 1,
     "variants": 1,
     "image_path": 1,
@@ -484,6 +512,8 @@ def _flatten_search_values(value):
         return flattened
 
     text_value = str(value).strip()
+    if re.search(r"<[a-zA-Z][^>]*>", text_value):
+        text_value = html_to_text(text_value)
     return [text_value] if text_value else []
 
 
@@ -544,38 +574,74 @@ def _normalize_specs(specs, specifications):
         value_parts = _flatten_search_values(value)
         value_text = " ".join(value_parts).strip()
         if key_text and value_text:
-            normalized_specs[key_text] = value_text
+            existing = normalized_specs.get(key_text)
+            if not existing:
+                normalized_specs[key_text] = value_text
+            elif value_text not in existing:
+                normalized_specs[key_text] = f"{existing} | {value_text}"
 
-    def consume(source):
+    def consume(source, group_name=""):
         if isinstance(source, dict):
+            nested_group = str(
+                source.get("groupName")
+                or source.get("group")
+                or group_name
+                or ""
+            ).strip()
+
+            rows = source.get("rows")
+            if isinstance(rows, list):
+                consume(rows, nested_group)
+                return
+
+            label = (
+                source.get("label")
+                or source.get("name")
+                or source.get("key")
+            )
+            value = next(
+                (
+                    source.get(value_key)
+                    for value_key in ("value", "content", "text", "values")
+                    if source.get(value_key) is not None
+                ),
+                None,
+            )
+            if label and value is not None:
+                label_text = str(label).strip()
+                spec_key = (
+                    f"{nested_group} - {label_text}"
+                    if nested_group
+                    else label_text
+                )
+                add_spec(spec_key, value)
+                return
+
             for key, value in source.items():
-                add_spec(key, value)
+                if key in {
+                    "id", "groupName", "group", "label", "name", "key",
+                    "labelUrl", "url",
+                }:
+                    continue
+                if isinstance(value, (dict, list, tuple)):
+                    consume(value, nested_group or str(key))
+                else:
+                    spec_key = (
+                        f"{nested_group} - {key}"
+                        if nested_group
+                        else key
+                    )
+                    add_spec(spec_key, value)
             return
 
         if not isinstance(source, list):
             return
 
         for item in source:
-            if isinstance(item, dict):
-                key = (
-                    item.get("name")
-                    or item.get("label")
-                    or item.get("key")
-                    or item.get("title")
-                )
-                value = (
-                    item.get("value")
-                    or item.get("content")
-                    or item.get("text")
-                    or item.get("values")
-                )
-                if key and value is not None:
-                    add_spec(key, value)
-                else:
-                    for nested_key, nested_value in item.items():
-                        add_spec(nested_key, nested_value)
+            if isinstance(item, (dict, list, tuple)):
+                consume(item, group_name)
             elif item is not None:
-                add_spec("Thông số", item)
+                add_spec(group_name or "Thông số", item)
 
     consume(specs)
     consume(specifications)
@@ -607,12 +673,29 @@ def _build_product_search_fields(product):
         ),
         "labels": _normalize_search_text(labels),
         "identifiers": _normalize_search_text(identifiers),
-        "specs": _normalize_search_text(
-            [product.get("specs"), product.get("specifications")]
-        ),
+        "specs": _normalize_search_text(product.get("specs")),
         "description": _normalize_search_text(product.get("description")),
+        "details": _normalize_search_text(
+            [
+                product.get("highlights"),
+                product.get("articleText"),
+                product.get("articleSections"),
+                product.get("shortNotice"),
+                product.get("stockNote"),
+                product.get("statusLabel"),
+                product.get("reviewSummary"),
+                product.get("meta"),
+                product.get("faqs"),
+            ]
+        ),
         "extras": _normalize_search_text(
-            [product.get("colors"), product.get("variants"), product.get("keywords")]
+            [
+                product.get("colors"),
+                product.get("variants"),
+                product.get("keywords"),
+                product.get("promotions"),
+                product.get("priceBenefits"),
+            ]
         ),
     }
     fields["all"] = " ".join(
@@ -672,8 +755,20 @@ def normalize_product_document(document):
         or _display_text(product.get("manufacturer"))
     )
 
+    category_trail_names = []
+    category_trail = product.get("categoryTrail")
+    if isinstance(category_trail, list):
+        category_trail_names = [
+            _display_text(item)
+            for item in category_trail
+            if _display_text(item)
+        ]
+
     categories = _unique_strings(
-        _flatten_search_values(product.get("categories"))
+        [
+            *category_trail_names,
+            *_flatten_search_values(product.get("categories")),
+        ]
     )
     direct_category = (
         _display_text(product.get("category"))
@@ -693,7 +788,17 @@ def normalize_product_document(document):
         )
     )
 
-    product["description"] = _display_text(product.get("description"))
+    meta = product.get("meta") if isinstance(product.get("meta"), dict) else {}
+    product["description"] = (
+        _display_text(product.get("description"))
+        or _display_text(meta.get("description"))
+        or _display_text(product.get("shortNotice"))
+    )
+    product["highlights"] = _unique_strings(
+        _flatten_search_values(product.get("highlights"))
+    )
+    product["statusLabel"] = _display_text(product.get("statusLabel"))
+    product["stockNote"] = _display_text(product.get("stockNote"))
     product["price"] = _mongo_price_to_number(
         product.get("price", product.get("currentPrice", 0))
     )
@@ -724,19 +829,66 @@ def _mongo_price_to_number(value):
     return int(digits) if digits else 0
 
 
+def _read_product_json(path):
+    if str(path).casefold().endswith(".jsonl.gz"):
+        def iter_json_lines():
+            with gzip.open(path, "rt", encoding="utf-8") as file:
+                for line_number, line in enumerate(file, start=1):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    document = json.loads(line)
+                    if not isinstance(document, dict):
+                        raise ValueError(
+                            f"Dòng {line_number} trong catalog không phải object JSON."
+                        )
+                    yield runtime_product_document(document)
+
+        return iter_json_lines()
+
+    opener = gzip.open if str(path).casefold().endswith(".gz") else open
+    with opener(path, "rt", encoding="utf-8") as file:
+        data = json.load(file)
+    if not isinstance(data, list):
+        raise ValueError(f"Catalog phải là một danh sách sản phẩm: {path}")
+    return data
+
+
+def _normalize_product_list(raw_products, source_name):
+    normalized_products = []
+    seen_ids = set()
+
+    for position, document in enumerate(raw_products):
+        if not isinstance(document, dict):
+            raise ValueError(
+                f"Metadata tại vị trí {position} trong {source_name} không phải object JSON."
+            )
+
+        product = normalize_product_document(document)
+        product_id = str(product.get("id") or "").strip()
+        if not product_id:
+            raise ValueError(
+                f"Sản phẩm tại vị trí {position} trong {source_name} không có ID hợp lệ."
+            )
+        if product_id in seen_ids:
+            raise ValueError(f"ID sản phẩm bị trùng trong {source_name}: {product_id}")
+
+        seen_ids.add(product_id)
+        normalized_products.append(product)
+
+    return normalized_products
+
+
 def load_products_from_index_metadata():
     """
-    Đọc catalog sản phẩm trực tiếp từ index/products.json.
+    Load the FAISS-aligned metadata and the complete MongoDB catalog.
 
-    Thứ tự phần tử trong products.json phải trùng tuyệt đối với:
-    - embeddings.npy
-    - faiss_index.index
-
-    Hàm này không truy vấn collection sản phẩm MongoDB.
+    products.json remains strictly aligned with FAISS. catalog.jsonl.gz may
+    contain products without a usable image and is used for text retrieval.
     """
     global products, product_ids, product_by_id
     global faiss_product_order_ids, faiss_position_by_product_id
-    global catalog_loaded_at
+    global catalog_loaded_at, catalog_search_store
 
     if not os.path.isfile(PRODUCTS_METADATA_PATH):
         raise FileNotFoundError(
@@ -744,54 +896,67 @@ def load_products_from_index_metadata():
             "Hãy chạy build_index.py trước."
         )
 
-    with open(PRODUCTS_METADATA_PATH, "r", encoding="utf-8") as file:
-        raw_products = json.load(file)
+    raw_faiss_products = _read_product_json(PRODUCTS_METADATA_PATH)
+    normalized_faiss_products = _normalize_product_list(
+        raw_faiss_products,
+        "products.json",
+    )
 
-    if not isinstance(raw_products, list):
-        raise ValueError("index/products.json phải là một danh sách sản phẩm.")
+    if catalog_search_store is not None:
+        catalog_search_store.close()
+        catalog_search_store = None
 
-    normalized_products = []
-    seen_ids = set()
+    catalog_total = len(normalized_faiss_products)
+    if os.path.isfile(PRODUCTS_CATALOG_SEARCH_PATH):
+        catalog_search_store = CatalogSearchStore(PRODUCTS_CATALOG_SEARCH_PATH)
+        normalized_catalog = list(normalized_faiss_products)
+        catalog_source = PRODUCTS_CATALOG_SEARCH_PATH
+        catalog_total = catalog_search_store.product_count
+    elif os.path.isfile(PRODUCTS_CATALOG_PATH):
+        raw_catalog = _read_product_json(PRODUCTS_CATALOG_PATH)
+        normalized_catalog = _normalize_product_list(
+            raw_catalog,
+            "catalog.jsonl.gz",
+        )
+        catalog_source = PRODUCTS_CATALOG_PATH
+        catalog_total = len(normalized_catalog)
+    else:
+        normalized_catalog = list(normalized_faiss_products)
+        catalog_source = PRODUCTS_METADATA_PATH
+        print(
+            "Chưa có catalog.jsonl.gz; đang dùng tạm metadata FAISS. "
+            "Chạy build_index.py --metadata-only để lấy detailBlob."
+        )
 
-    for position, document in enumerate(raw_products):
-        if not isinstance(document, dict):
-            raise ValueError(
-                f"Metadata tại vị trí {position} không phải object JSON."
-            )
-
-        product = normalize_product_document(document)
-        product_id = str(product.get("id") or "").strip()
-
-        if not product_id:
-            raise ValueError(
-                f"Sản phẩm metadata tại vị trí {position} không có ID hợp lệ."
-            )
-        if product_id in seen_ids:
-            raise ValueError(
-                f"ID sản phẩm bị trùng trong products.json: {product_id}"
-            )
-
-        seen_ids.add(product_id)
-        normalized_products.append(product)
-
-    products = normalized_products
-    product_ids = [str(product["id"]) for product in products]
     product_by_id = {
         str(product["id"]): product
-        for product in products
+        for product in normalized_catalog
     }
-    faiss_product_order_ids = list(product_ids)
+
+    # Keep every FAISS row resolvable even if a catalog sync was interrupted.
+    for product in normalized_faiss_products:
+        product_by_id.setdefault(str(product["id"]), product)
+
+    products = list(product_by_id.values())
+    product_ids = [str(product["id"]) for product in products]
+    faiss_product_order_ids = [
+        str(product["id"])
+        for product in normalized_faiss_products
+    ]
     faiss_position_by_product_id = {
         product_id: position
-        for position, product_id in enumerate(product_ids)
+        for position, product_id in enumerate(faiss_product_order_ids)
     }
     catalog_loaded_at = datetime.now(timezone.utc)
 
     print(
-        f"Đã tải {len(products)} sản phẩm từ metadata cục bộ: "
-        f"{PRODUCTS_METADATA_PATH}"
+        f"Đã mở catalog {catalog_total} sản phẩm từ: {catalog_source}"
     )
-    return products
+    print(
+        f"Metadata nạp trong RAM/ánh xạ FAISS: "
+        f"{len(normalized_faiss_products)} sản phẩm."
+    )
+    return normalized_faiss_products
 
 
 def load_local_search_assets():
@@ -839,20 +1004,20 @@ def load_local_search_assets():
     return local_products
 
 
-try:
-    load_local_search_assets()
-except FileNotFoundError as exc:
-    print(f"Chưa có đủ file tìm kiếm cục bộ: {exc}")
-    print("Hãy chạy build_index.py để tạo products.json, embeddings.npy và FAISS index.")
-    products = []
-    product_ids = []
-    product_by_id = {}
-    faiss_product_order_ids = []
-    faiss_position_by_product_id = {}
-    faiss_index = None
-    product_embeddings = None
-except Exception as exc:
-    print(f"Lỗi khi tải bộ tìm kiếm cục bộ: {exc}")
+SKIP_STARTUP_ASSETS = os.getenv(
+    "CORE_SKIP_STARTUP_ASSETS", "false"
+).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _clear_local_search_assets():
+    global products, product_ids, product_by_id
+    global faiss_product_order_ids, faiss_position_by_product_id
+    global faiss_index, product_embeddings, catalog_search_store
+
+    if catalog_search_store is not None:
+        catalog_search_store.close()
+        catalog_search_store = None
+
     products = []
     product_ids = []
     product_by_id = {}
@@ -861,14 +1026,35 @@ except Exception as exc:
     faiss_index = None
     product_embeddings = None
 
-try:
-    if os.path.exists(MODEL_PATH):
-        yolo_model = YOLO(MODEL_PATH)
-        print(f"Đã tải mô hình YOLO từ: {MODEL_PATH}")
-    else:
-        print(f"Không tìm thấy file model YOLO tại: {MODEL_PATH}")
-except Exception as exc:
-    print(f"Lỗi tải YOLO model: {exc}")
+
+def initialize_startup_assets():
+    global yolo_model
+
+    try:
+        load_local_search_assets()
+    except FileNotFoundError as exc:
+        print(f"Chưa có đủ file tìm kiếm cục bộ: {exc}")
+        print("Hãy chạy build_index.py để tạo products.json, embeddings.npy và FAISS index.")
+        _clear_local_search_assets()
+    except Exception as exc:
+        print(f"Lỗi khi tải bộ tìm kiếm cục bộ: {exc}")
+        _clear_local_search_assets()
+
+    try:
+        if os.path.exists(MODEL_PATH):
+            yolo_model = YOLO(MODEL_PATH)
+            print(f"Đã tải mô hình YOLO từ: {MODEL_PATH}")
+        else:
+            print(f"Không tìm thấy file model YOLO tại: {MODEL_PATH}")
+    except Exception as exc:
+        print(f"Lỗi tải YOLO model: {exc}")
+
+
+if SKIP_STARTUP_ASSETS:
+    _clear_local_search_assets()
+    print("Đã bỏ qua nạp catalog/FAISS/YOLO theo CORE_SKIP_STARTUP_ASSETS.")
+else:
+    initialize_startup_assets()
 
 
 # ----------------------------
@@ -918,7 +1104,12 @@ def _price_to_number(value):
     return int(digits) if digits else 0
 
 
-def generate_product_cards(product_list, response_text_vi=None, target_lang="vi"):
+def generate_product_cards(
+    product_list,
+    response_text_vi=None,
+    target_lang="vi",
+    product_advice=None,
+):
     if response_text_vi is None:
         response_text_vi = (
             "Không tìm thấy sản phẩm phù hợp."
@@ -937,13 +1128,28 @@ def generate_product_cards(product_list, response_text_vi=None, target_lang="vi"
     if not product_list:
         return html
 
+    advice_by_id = {
+        str(item.get("product_id") or (item.get("product") or {}).get("id") or ""): item
+        for item in list(product_advice or [])
+        if item.get("product_id") or (item.get("product") or {}).get("id")
+    }
+
     html += "<div class='product-list' style='display:flex;flex-wrap:wrap;gap:15px;'>"
 
     for product in product_list:
+        product_id = str(
+            product.get("id")
+            or product.get("_id")
+            or product.get("sku")
+            or product.get("slug")
+            or ""
+        )
+        advice_item = advice_by_id.get(product_id)
         name = str(product.get("name") or product.get("title") or "Không có tên")
         price = _price_to_number(product.get("price", 0))
         brand = str(product.get("brand") or "")
         category = str(product.get("category") or "")
+        status_label = str(product.get("statusLabel") or product.get("stockNote") or "")
         image_path = str(
             product.get("image_path")
             or product.get("image")
@@ -981,8 +1187,20 @@ def generate_product_cards(product_list, response_text_vi=None, target_lang="vi"
         ).lower()
 
         suggestions = []
+        for highlight in _unique_strings(
+            _flatten_search_values(product.get("highlights"))
+        )[:4]:
+            highlight_text = html_to_text(highlight)
+            if len(highlight_text) > 160:
+                highlight_text = f"{highlight_text[:157].rstrip()}..."
+            if highlight_text:
+                suggestions.append(highlight_text)
 
-        if "laptop" in product_text:
+        if advice_item:
+            suggestions = []
+        elif suggestions:
+            pass
+        elif "laptop" in product_text:
             suggestions = [
                 "Phù hợp học tập / văn phòng / gaming",
                 "Nên xem RAM, CPU, SSD",
@@ -1016,10 +1234,65 @@ def generate_product_cards(product_list, response_text_vi=None, target_lang="vi"
                 + "</ul>"
             )
 
+        advice_html = ""
+        if advice_item:
+            reasons = list(advice_item.get("reasons") or [])[:3]
+            key_specs = list(advice_item.get("key_specs") or [])[:4]
+            cautions = list(advice_item.get("cautions") or [])[:2]
+
+            reasons_html = ""
+            if reasons:
+                reasons_html = (
+                    "<div class='product-advice-reasons'>"
+                    "<div class='product-advice-title'>Vì sao phù hợp</div>"
+                    "<ul>"
+                    + "".join(f"<li>{_safe_text(reason)}</li>" for reason in reasons)
+                    + "</ul></div>"
+                )
+
+            specs_html = ""
+            if key_specs:
+                specs_html = (
+                    "<div class='product-advice-specs'>"
+                    "<div class='product-advice-title'>Thông số chính</div>"
+                    + "".join(
+                        "<div class='product-advice-spec-row'>"
+                        f"<span>{_safe_text(spec.get('label'))}</span>"
+                        f"<strong>{_safe_text(spec.get('value'))}</strong>"
+                        "</div>"
+                        for spec in key_specs
+                    )
+                    + "</div>"
+                )
+
+            caution_html = ""
+            if cautions:
+                caution_html = (
+                    "<div class='product-advice-caution'>"
+                    "<b>Lưu ý:</b> "
+                    + " ".join(_safe_text(caution) for caution in cautions)
+                    + "</div>"
+                )
+
+            advice_html = (
+                "<div class='product-advice'>"
+                "<div class='product-advice-badge'>Tư vấn theo nhu cầu</div>"
+                f"{reasons_html}{specs_html}{caution_html}"
+                "</div>"
+            )
+
         safe_name = _safe_text(name)
         safe_brand = _safe_text(brand)
         safe_category = _safe_text(category)
         safe_image_url = _safe_text(image_url)
+        safe_status = _safe_text(status_label)
+        price_text = f"{price:,}đ" if price > 0 else (status_label or "Liên hệ")
+        safe_price_text = _safe_text(price_text)
+        status_html = (
+            f"<p style='font-size:13px;margin:4px 0;color:#555;'>{safe_status}</p>"
+            if status_label and status_label != price_text
+            else ""
+        )
 
         html += f"""
         <div class='product-card'
@@ -1037,14 +1310,18 @@ def generate_product_cards(product_list, response_text_vi=None, target_lang="vi"
             </h4>
 
             <p style="color:red;font-weight:bold;font-size:17px;margin:5px 0;">
-                {price:,}đ
+                {safe_price_text}
             </p>
 
             <p style="font-size:14px;margin:5px 0;">
                 <b>{safe_brand}</b> - {safe_category}
             </p>
 
+            {status_html}
+
             {suggestion_html}
+
+            {advice_html}
         </div>
         """
 
@@ -1071,11 +1348,13 @@ SEARCH_FIELD_WEIGHTS = {
     "identifiers": 12,
     "specs": 6,
     "extras": 5,
+    "details": 5,
     "description": 3,
 }
 
 SEARCH_STOPWORDS = {
     "tim", "kiem", "giup", "cho", "toi", "minh", "muon", "mua", "can",
+    "goi", "y", "tu", "van", "chon", "nen", "tot",
     "xem", "san", "pham", "cac", "mot", "vai", "loai", "hang", "thuong",
     "hieu", "theo", "co", "nao", "phu", "hop", "voi", "cua", "ban", "nhe",
     "a", "la", "ve", "trong", "tren", "duoi", "shop", "cua", "hang",
@@ -1171,6 +1450,11 @@ NON_PHONE_QUERY_TERMS = (
     "cable",
     "power bank",
     "pin du phong",
+    "extra battery",
+    "battery kit",
+    "replacement battery",
+    "pin thay the",
+    "bo pin",
     "tai nghe",
     "earphone",
     "headphone",
@@ -1208,6 +1492,11 @@ NON_PHONE_PRODUCT_TERMS = (
     "cable",
     "power bank",
     "pin du phong",
+    "extra battery",
+    "battery kit",
+    "replacement battery",
+    "pin thay the",
+    "bo pin",
     "tai nghe",
     "earphone",
     "headphone",
@@ -1231,6 +1520,14 @@ def _contains_search_term(text, term):
     if not text or not term:
         return False
 
+    if " " in term:
+        # Dùng ranh giới từ để tránh "ban la" khớp nhầm "ban lam viec".
+        # Riêng dòng Galaxy S/A/M/Z thường viết liền model như "galaxy s26".
+        prefix_terms = {"galaxy s", "galaxy a", "galaxy m", "galaxy z"}
+        if term in prefix_terms and re.search(rf"(?<![a-z0-9]){re.escape(term)}", text):
+            return True
+        return re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", text) is not None
+
     # Với từ rất ngắn như "op", "5g", "m2", dùng ranh giới từ để
     # tránh khớp nhầm "op" trong "oppo".
     if " " not in term and len(term) <= 3:
@@ -1251,6 +1548,14 @@ def _remove_query_phrase(text, phrase):
 def _normalize_user_query(user_message):
     query = _normalize_search_text(user_message)
 
+    # Chuẩn hóa cách nói đời thường trước khi tách concept để cả keyword và
+    # CLIP text query cùng hiểu một tiêu chí duy nhất.
+    query = re.sub(
+        r"\b(?:pin\s+trau|pin\s+khoe|pin\s+tot|thoi\s+luong\s+pin\s+tot)\b",
+        "pin lau",
+        query,
+    )
+
     # Viết tắt phổ biến.
     query = re.sub(
         r"\bip\s*(\d{1,2})(?:\s*(pro|max|plus|mini))?\b",
@@ -1262,6 +1567,29 @@ def _normalize_user_query(user_message):
     query = re.sub(r"\bss\b", "samsung", query)
     query = re.sub(r"\bair\s*pod(s)?\b", "airpods", query)
     return re.sub(r"\s+", " ", query).strip()
+
+
+def _strip_price_terms_for_retrieval(text):
+    price_unit = r"(?:trieu|tr|m|nghin|k|vnd|d)"
+    number = r"\d+(?:[\.,]\d+)?"
+    text = re.sub(
+        rf"\b(?:tu\s+)?{number}\s*{price_unit}?\s*"
+        rf"(?:den|toi|-)\s*{number}\s*{price_unit}?\b",
+        " ",
+        text,
+    )
+    text = re.sub(
+        rf"\b(?:duoi|tren|nho hon|lon hon|khong qua|toi da|toi thieu|"
+        rf"khoang|tam|ngan sach|gia)\s*{number}\s*{price_unit}?\b",
+        " ",
+        text,
+    )
+    text = re.sub(
+        rf"\b{number}\s*(?:trieu|tr|nghin|vnd)\b",
+        " ",
+        text,
+    )
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _parse_search_query(user_message):
@@ -1278,6 +1606,7 @@ def _parse_search_query(user_message):
             })
             remaining_query = _remove_query_phrase(remaining_query, trigger)
 
+    remaining_query = _strip_price_terms_for_retrieval(remaining_query)
     raw_tokens = re.findall(r"[a-z0-9]+", remaining_query)
     tokens = []
     for token in raw_tokens:
@@ -1295,6 +1624,200 @@ def _parse_search_query(user_message):
         "concepts": concepts,
         "tokens": tokens,
     }
+
+
+MODEL_VARIANT_TERMS = {
+    "pro", "max", "plus", "ultra", "mini", "air", "lite", "se", "fe",
+    "fold", "flip",
+}
+
+MODEL_VALUE_UNITS = (
+    "trieu", "tr", "nghin", "k", "m", "vnd", "d",
+    "gb", "tb", "inch", "in", "hz", "w", "mah", "wh",
+    "mm", "cm", "m2", "mp", "g", "thiet bi", "cong", "camera",
+    "loa", "sim", "mau", "che do", "cap do", "loi", "nhan",
+    "trong mot", "trong 1",
+)
+
+
+def _known_brand_phrases():
+    """Trả về cả tên hãng chuẩn và các tên dòng rộng của hãng."""
+    phrases = []
+    brand_groups = globals().get("KNOWN_BRAND_ALIASES", {})
+    for canonical, aliases in brand_groups.items():
+        phrases.append(canonical)
+        phrases.extend(aliases)
+    return _unique_strings(
+        _normalize_search_text(phrase)
+        for phrase in phrases
+        if _normalize_search_text(phrase)
+    )
+
+
+def _matched_brand_phrases(normalized_query):
+    return [
+        phrase
+        for phrase in _known_brand_phrases()
+        if _contains_search_term(normalized_query, phrase)
+    ]
+
+
+def _query_model_tokens(parsed_query):
+    """Lấy token model như 15, S24, M2; bỏ số giá và số thông số."""
+    normalized = parsed_query.get("normalized_query", "")
+    model_tokens = []
+
+    for token in re.findall(r"[a-z]*\d+[a-z0-9]*|\d+[a-z]+|\d+", normalized):
+        if re.fullmatch(r"\d+", token):
+            if int(token) >= 100000:
+                continue
+            unit_pattern = "|".join(re.escape(unit) for unit in MODEL_VALUE_UNITS)
+            if re.search(
+                rf"\b{re.escape(token)}\s*(?:{unit_pattern})\b",
+                normalized,
+            ):
+                continue
+        elif re.fullmatch(
+            r"\d+(?:trieu|tr|nghin|vnd|gb|tb|inch|in|hz|w|mah|wh|mm|cm|m2|mp|k|m|g|d)",
+            token,
+        ):
+            continue
+        elif token in {"4g", "5g"}:
+            continue
+
+        if token not in model_tokens:
+            model_tokens.append(token)
+
+    return model_tokens
+
+
+def _identity_query_terms(parsed_query):
+    model_tokens = set(_query_model_tokens(parsed_query))
+    matched_brand_tokens = {
+        token
+        for phrase in _matched_brand_phrases(parsed_query.get("normalized_query", ""))
+        for token in re.findall(r"[a-z0-9]+", phrase)
+    }
+    variant_tokens = {
+        token
+        for token in parsed_query.get("tokens", [])
+        if token in MODEL_VARIANT_TERMS
+    }
+
+    if model_tokens:
+        ordered = []
+        for token in parsed_query.get("tokens", []):
+            if token in model_tokens or token in matched_brand_tokens or token in variant_tokens:
+                if token not in ordered:
+                    ordered.append(token)
+        return ordered or list(model_tokens)
+
+    return [
+        token
+        for token in parsed_query.get("tokens", [])
+        if token not in SEARCH_STOPWORDS
+    ]
+
+
+def _product_identity_match_score(product, parsed_query):
+    """Điểm khớp tên/model độc lập với độ tương đồng ảnh CLIP."""
+    normalized_query = parsed_query.get("normalized_query", "")
+    if not normalized_query:
+        return 0.0
+
+    identifier_values = [
+        product.get("productKey"), product.get("id"), product.get("_id"),
+        product.get("productId"), product.get("product_id"), product.get("sku"),
+        product.get("slug"), product.get("url"),
+    ]
+    name_values = [
+        product.get("name"), product.get("title"), product.get("product_name"),
+    ]
+    normalized_identifiers = []
+    for value in identifier_values:
+        normalized_value = _normalize_search_text(value)
+        if not normalized_value:
+            continue
+        if normalized_query == normalized_value:
+            return 4.0
+        normalized_identifiers.append(normalized_value)
+
+    normalized_names = []
+    for value in name_values:
+        normalized_value = _normalize_search_text(value)
+        if not normalized_value:
+            continue
+        if normalized_query == normalized_value:
+            return 3.5
+        normalized_names.append(normalized_value)
+
+    identity_terms = _identity_query_terms(parsed_query)
+    model_tokens = _query_model_tokens(parsed_query)
+    has_variant_term = any(term in MODEL_VARIANT_TERMS for term in identity_terms)
+    identity_text = " ".join([*normalized_names, *normalized_identifiers])
+
+    if model_tokens:
+        if all(_contains_search_term(identity_text, term) for term in identity_terms):
+            return 2.5
+        return 0.0
+
+    identity_phrase = " ".join(identity_terms).strip()
+    if len(identity_terms) >= 2 and identity_phrase:
+        if any(_contains_search_term(text, identity_phrase) for text in normalized_names):
+            return 2.25 if has_variant_term else 2.0
+
+    return 0.0
+
+
+def _query_has_explicit_model_signal(parsed_query):
+    if _query_model_tokens(parsed_query):
+        return True
+
+    tokens = parsed_query.get("tokens", [])
+    has_variant_term = any(token in MODEL_VARIANT_TERMS for token in tokens)
+    if not has_variant_term:
+        return False
+
+    normalized = parsed_query.get("normalized_query", "")
+    has_brand = bool(_matched_brand_phrases(normalized))
+    has_product_group = bool(
+        detect_clarify_guide_key(normalized, parsed_query, None)
+    )
+    return has_brand or has_product_group
+
+
+def is_specific_model_query(user_message=None, parsed_query=None, matched_products=None):
+    parsed_query = parsed_query or _parse_search_query(user_message)
+    if _query_has_explicit_model_signal(parsed_query):
+        return True
+
+    return any(
+        _product_identity_match_score(product, parsed_query) >= 2.0
+        for product in list(matched_products or [])[:30]
+    )
+
+
+def _prioritize_specific_model_ranked(ranked_items, parsed_query, product_index):
+    """Giữ đúng các biến thể model và ưu tiên biến thể có giá."""
+    decorated = []
+    for original_position, item in enumerate(ranked_items):
+        product = item[product_index]
+        identity_score = _product_identity_match_score(product, parsed_query)
+        decorated.append((identity_score, original_position, item))
+
+    has_strong_identity = any(score >= 2.0 for score, _, _ in decorated)
+    if not _query_has_explicit_model_signal(parsed_query) and not has_strong_identity:
+        return ranked_items
+
+    exact_items = [entry for entry in decorated if entry[0] > 0]
+    exact_items.sort(
+        key=lambda entry: (
+            -entry[0],
+            0 if _price_to_number(entry[2][product_index].get("price", 0)) > 0 else 1,
+            entry[1],
+        )
+    )
+    return [item for _, _, item in exact_items]
 
 
 def _has_any_search_term(text, terms):
@@ -1477,6 +2000,9 @@ def _score_product_for_query(product, parsed_query, allow_partial=False):
     if product.get("name") and product.get("name") != "Không có tên":
         score += 0.5
 
+    # Tên/model/SKU cụ thể phải thắng độ khớp category hoặc metadata chung.
+    score += _product_identity_match_score(product, parsed_query) * 100.0
+
     return score
 
 
@@ -1543,6 +2069,12 @@ def search_products(user_message, product_list=None, limit=20):
             parsed_query,
             product_index=1,
         )
+
+    scored_products = _prioritize_specific_model_ranked(
+        scored_products,
+        parsed_query,
+        product_index=1,
+    )
 
     if limit is None:
         selected = [product for _, product in scored_products]
@@ -2091,7 +2623,53 @@ Quy tắc bắt buộc:
 
 
 
-def get_product_query_display_name(user_message, parsed_query=None):
+def _looks_like_plain_normalized_text(text):
+    text = str(text or "").strip()
+    if not text:
+        return True
+    return not any(ord(character) > 127 for character in text) and text.casefold() == text
+
+
+def _best_result_category_display_name(display_text, parsed_query, matched_products=None):
+    matched_products = list(matched_products or [])
+    if not matched_products:
+        return ""
+
+    categories, _ = _extract_top_result_context(matched_products, max_items=6)
+    if not categories:
+        return ""
+
+    normalized_query = parsed_query.get("normalized_query", "")
+    meaningful = parsed_query.get("meaningful_phrase", "")
+    normalized_display = _normalize_search_text(display_text)
+    query_text = " ".join(
+        part for part in [normalized_query, meaningful, normalized_display]
+        if part
+    )
+
+    best_category = ""
+    best_score = 0.0
+    for category in categories:
+        normalized_category = _normalize_search_text(category)
+        if not normalized_category:
+            continue
+
+        score = max(
+            difflib.SequenceMatcher(None, normalized_query, normalized_category).ratio(),
+            difflib.SequenceMatcher(None, meaningful, normalized_category).ratio(),
+            difflib.SequenceMatcher(None, normalized_display, normalized_category).ratio(),
+        )
+
+        if score > best_score:
+            best_category = str(category).strip()
+            best_score = score
+
+    if best_category and best_score >= 0.82:
+        return best_category
+    return ""
+
+
+def get_product_query_display_name(user_message, parsed_query=None, matched_products=None):
     """Lấy tên nhu cầu ngắn để hiển thị, có dấu và không copy nguyên câu người dùng."""
     parsed_query = parsed_query or _parse_search_query(user_message)
     normalized = parsed_query.get("normalized_query", "")
@@ -2099,7 +2677,7 @@ def get_product_query_display_name(user_message, parsed_query=None):
     removable_phrases = sorted(SEARCH_STOPWORDS, key=len, reverse=True)
     cleaned = f" {normalized} "
     for phrase in removable_phrases:
-        if not phrase or len(phrase) <= 1:
+        if not phrase or (len(phrase) <= 1 and phrase != "y"):
             continue
         cleaned = re.sub(
             rf"(?<![a-z0-9]){re.escape(phrase)}(?![a-z0-9])",
@@ -2135,7 +2713,10 @@ def get_product_query_display_name(user_message, parsed_query=None):
         ("camera an ninh", "camera an ninh"),
         ("camera wifi", "camera WiFi"),
         ("tai nghe", "tai nghe"),
+        ("loa bluetooth", "loa Bluetooth"),
+        ("loa thanh", "loa thanh"),
         ("dong ho thong minh", "đồng hồ thông minh"),
+        ("dong ho", "đồng hồ"),
         ("op lung", "ốp lưng"),
         ("cap sac", "cáp sạc"),
         ("cu sac", "củ sạc"),
@@ -2161,6 +2742,26 @@ def get_product_query_display_name(user_message, parsed_query=None):
         ("noi chien", "nồi chiên"),
         ("noi com dien", "nồi cơm điện"),
         ("noi com", "nồi cơm"),
+        ("balo", "balo"),
+        ("tui xach", "túi xách"),
+        ("ban phim", "bàn phím"),
+        ("chuot", "chuột"),
+        ("the nho", "thẻ nhớ"),
+        ("thiet bi mang", "thiết bị mạng"),
+        ("may chieu", "máy chiếu"),
+        ("tv box", "TV Box"),
+        ("ban ui", "bàn ủi"),
+        ("ban la", "bàn là"),
+        ("may xay sinh to", "máy xay sinh tố"),
+        ("bep dien", "bếp điện"),
+        ("can suc khoe", "cân sức khỏe"),
+        ("may do huyet ap", "máy đo huyết áp"),
+        ("khong day", "không dây"),
+        ("co day", "có dây"),
+        ("chong on", "chống ồn"),
+        ("choi game", "chơi game"),
+        ("pin lau", "pin lâu"),
+        ("gia re", "giá rẻ"),
         ("man hinh", "màn hình"),
         ("may in", "máy in"),
         ("tivi", "tivi"),
@@ -2190,7 +2791,17 @@ def get_product_query_display_name(user_message, parsed_query=None):
         "ssd": "SSD",
     }
     output_words = [replacements.get(word.casefold(), word) for word in display.split()]
-    return " ".join(output_words[:8]).strip() or str(user_message).strip()
+    display = " ".join(output_words[:8]).strip() or str(user_message).strip()
+
+    category_display = _best_result_category_display_name(
+        display,
+        parsed_query,
+        matched_products=matched_products,
+    )
+    if category_display:
+        return category_display
+
+    return display
 
 
 def parse_price_constraints(user_message):
@@ -2316,7 +2927,7 @@ NEW_PRODUCT_REQUEST_TERMS = (
 )
 
 USED_PRODUCT_REQUEST_TERMS = (
-    "hang cu", "may cu", "cu dep", "cu tray xuoc", "da kich hoat", "thu cu", "doi moi", "thu cu doi moi",
+    "hang cu", "may cu", "cu", "cu dep", "cu tray xuoc", "da kich hoat", "thu cu", "doi moi", "thu cu doi moi",
 )
 
 # Các đặc điểm mà embedding ảnh thường kéo sai, nên phải kiểm tra bằng metadata/tên/thông số.
@@ -2387,7 +2998,8 @@ def _product_full_requirement_text(product):
         part for part in [
             fields.get("name", ""), fields.get("brand", ""), fields.get("category", ""),
             fields.get("labels", ""), fields.get("specs", ""), fields.get("extras", ""),
-            fields.get("description", ""), fields.get("identifiers", ""),
+            fields.get("description", ""), fields.get("details", ""),
+            fields.get("identifiers", ""),
         ] if part
     )
 
@@ -2534,7 +3146,16 @@ def product_satisfies_user_requirements(product, user_message, parsed_query=None
     elif not _query_requests_used_condition(parsed_query):
         normalized = parsed_query.get("normalized_query", "")
         # Chỉ áp dụng khi câu có tiêu chí cụ thể hoặc model, không áp dụng câu quá rộng vì đã hỏi lại trước đó.
-        if _has_detail_signal(user_message, parsed_query) or re.search(r"\d", normalized):
+        residual_criteria = _query_residual_criteria_tokens(
+            user_message,
+            parsed_query,
+            guide_key=guide_key,
+        )
+        if (
+            _has_detail_signal(user_message, parsed_query)
+            or residual_criteria
+            or re.search(r"\d", normalized)
+        ):
             if _product_looks_used(product):
                 return False
 
@@ -2597,10 +3218,13 @@ CLARIFY_DETAIL_TERMS = (
     # thông số/đặc điểm
     "ram", "ssd", "gb", "tb", "inch", "hz", "mah", "w", "5g", "wifi", "bluetooth",
     "khong day", "co day", "chong on", "pin lau", "cam tay", "robot", "mini", "pro", "max", "plus",
-    # hãng phổ biến, không giới hạn catalog; chỉ dùng làm tín hiệu rằng câu đã rõ hơn
-    "apple", "samsung", "xiaomi", "oppo", "realme", "vivo", "asus", "acer", "hp", "dell", "lenovo",
-    "msi", "lg", "sony", "anker", "logitech", "jbl", "havit", "baseus", "philips", "panasonic",
 )
+
+CLARIFY_WEAK_WORDS = {
+    "tu", "van", "giup", "chon", "mua", "hang", "tot", "nen", "can", "goi", "y"
+}
+
+_BROAD_IDENTITY_PHRASES_CACHE = None
 
 
 def _has_detail_signal(user_message, parsed_query=None):
@@ -2614,6 +3238,52 @@ def _has_detail_signal(user_message, parsed_query=None):
     return any(_contains_search_term(normalized, term) for term in CLARIFY_DETAIL_TERMS)
 
 
+def _query_residual_criteria_tokens(user_message, parsed_query=None, guide_key=""):
+    """Phần còn lại sau khi bỏ từ đệm, tên nhóm và hãng/dòng rộng."""
+    parsed_query = parsed_query or _parse_search_query(user_message)
+    normalized = parsed_query.get("normalized_query", "")
+    ignored_tokens = set(CLARIFY_WEAK_WORDS)
+
+    guide = PRODUCT_CLARIFY_GUIDES.get(guide_key) or {}
+    for trigger in guide.get("triggers", []):
+        normalized_trigger = _normalize_search_text(trigger)
+        if normalized_trigger and _contains_search_term(normalized, normalized_trigger):
+            ignored_tokens.update(re.findall(r"[a-z0-9]+", normalized_trigger))
+
+    for brand_phrase in _matched_brand_phrases(normalized):
+        ignored_tokens.update(re.findall(r"[a-z0-9]+", brand_phrase))
+
+    return [
+        token
+        for token in parsed_query.get("tokens", [])
+        if token not in SEARCH_STOPWORDS and token not in ignored_tokens
+    ]
+
+
+def _query_matches_exact_product_identity(user_message, parsed_query=None, matched_products=None):
+    global _BROAD_IDENTITY_PHRASES_CACHE
+
+    parsed_query = parsed_query or _parse_search_query(user_message)
+    normalized = parsed_query.get("normalized_query", "")
+
+    if _BROAD_IDENTITY_PHRASES_CACHE is None:
+        broad_phrases = set(_known_brand_phrases())
+        for guide in PRODUCT_CLARIFY_GUIDES.values():
+            broad_phrases.update(
+                _normalize_search_text(trigger)
+                for trigger in guide.get("triggers", [])
+            )
+        _BROAD_IDENTITY_PHRASES_CACHE = broad_phrases
+
+    if normalized in _BROAD_IDENTITY_PHRASES_CACHE:
+        return False
+
+    return any(
+        _product_identity_match_score(product, parsed_query) >= 3.5
+        for product in list(matched_products or [])[:30]
+    )
+
+
 def _is_intent_only_query(user_message, parsed_query=None):
     """Câu chỉ nói ý định mua/tư vấn nhưng chưa có tên sản phẩm cụ thể."""
     parsed_query = parsed_query or _parse_search_query(user_message)
@@ -2624,18 +3294,16 @@ def _is_intent_only_query(user_message, parsed_query=None):
     if normalized in CLARIFY_INTENT_ONLY_PATTERNS:
         return True
 
+    concepts = parsed_query.get("concepts") or []
     tokens = [
         token for token in parsed_query.get("tokens", [])
         if token not in SEARCH_STOPWORDS
     ]
-    if not parsed_query.get("concepts") and not tokens:
+    if not concepts and not tokens:
         return True
 
     # Ví dụ: "tư vấn giúp", "mua hàng", "cần mua" nhưng không có danh mục/model.
-    weak_words = {
-        "tu", "van", "giup", "chon", "mua", "hang", "tot", "nen", "can", "goi", "y"
-    }
-    if tokens and all(token in weak_words for token in tokens):
+    if not concepts and tokens and all(token in CLARIFY_WEAK_WORDS for token in tokens):
         return True
 
     return False
@@ -2689,6 +3357,27 @@ PRODUCT_CLARIFY_GUIDES = {
         "chips": ["Tai nghe", "Loa", "Soundbar", "Không dây", "Có dây", "Chống ồn", "Bass mạnh", "Pin lâu"],
         "example": "tai nghe không dây chống ồn dưới 2 triệu",
     },
+    "headphones": {
+        "title": "Tai nghe",
+        "triggers": ["tai nghe", "headphone", "earphone", "earbuds", "airpods", "headset"],
+        "questions": ["Bạn muốn tai nghe có dây hay không dây?", "Dùng để nghe nhạc, học online, làm việc hay chơi game?", "Có cần chống ồn, mic tốt, bass mạnh hoặc pin lâu không?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["Không dây", "Có dây", "Chống ồn", "Gaming", "Bass mạnh", "Pin lâu", "AirPods", "Sony"],
+        "example": "tai nghe không dây chống ồn dưới 2 triệu",
+    },
+    "speaker": {
+        "title": "Loa",
+        "triggers": ["loa bluetooth", "loa", "speaker", "portable speaker"],
+        "questions": ["Bạn cần loa bluetooth, loa vi tính hay loa karaoke?", "Dùng trong phòng, ngoài trời hay mang đi du lịch?", "Ưu tiên bass mạnh, chống nước, pin lâu hay công suất lớn?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["Bluetooth", "Karaoke", "Ngoài trời", "Bass mạnh", "Chống nước", "Pin lâu", "JBL", "Harman Kardon"],
+        "example": "loa bluetooth chống nước dưới 2 triệu",
+    },
+    "soundbar": {
+        "title": "Soundbar",
+        "triggers": ["soundbar", "loa thanh", "loa soundbar"],
+        "questions": ["Bạn dùng soundbar cho tivi bao nhiêu inch hoặc phòng rộng khoảng bao nhiêu?", "Có cần subwoofer, Dolby Atmos hay kết nối Bluetooth/HDMI ARC không?", "Ưu tiên nghe nhạc, xem phim hay karaoke?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["Subwoofer", "Dolby Atmos", "Bluetooth", "HDMI ARC", "Xem phim", "Karaoke", "Samsung", "LG"],
+        "example": "soundbar có subwoofer dưới 5 triệu",
+    },
     "microphone": {
         "title": "Mic thu âm",
         "triggers": ["mic thu am", "micro thu am", "microphone", "micro", "mic", "micro karaoke", "mic karaoke"],
@@ -2711,6 +3400,20 @@ PRODUCT_CLARIFY_GUIDES = {
         "example": "camera WiFi trong nhà xoay 360 dưới 1 triệu",
     },
 
+    "robot_vacuum": {
+        "title": "Robot hút bụi",
+        "triggers": ["robot hut bui", "may hut bui robot", "robot vacuum"],
+        "questions": ["Bạn dùng robot hút bụi cho nhà khoảng bao nhiêu m²?", "Có cần lau nhà, tự giặt giẻ, tự đổ rác hoặc tránh vật cản không?", "Ưu tiên lực hút mạnh, pin lâu, bản đồ thông minh hay độ ồn thấp?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["Có lau nhà", "Tự đổ rác", "Tự giặt giẻ", "Lực hút mạnh", "Bản đồ thông minh", "Nhà nhiều tầng", "Roborock", "Dreame"],
+        "example": "robot hút bụi có lau nhà dưới 8 triệu",
+    },
+    "handheld_vacuum": {
+        "title": "Máy hút bụi cầm tay",
+        "triggers": ["may hut bui cam tay", "hut bui cam tay", "handheld vacuum", "cordless vacuum"],
+        "questions": ["Bạn dùng máy hút bụi cầm tay cho nhà, xe hơi hay sofa/nệm?", "Cần máy không dây, lực hút mạnh hoặc pin lâu không?", "Có cần nhiều đầu hút, lọc HEPA hoặc dễ vệ sinh không?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["Không dây", "Cho xe hơi", "Cho sofa", "Lực hút mạnh", "Pin lâu", "Lọc HEPA", "Nhẹ", "Tineco"],
+        "example": "máy hút bụi cầm tay không dây dưới 3 triệu",
+    },
     "vacuum_cleaner": {
         "title": "Máy hút bụi",
         "triggers": ["may hut bui", "hut bui", "vacuum", "vacuum cleaner", "robot hut bui", "may hut bui robot", "may hut bui cam tay"],
@@ -2907,6 +3610,202 @@ PRODUCT_CLARIFY_GUIDES = {
         "chips": ["iPad", "Samsung Tab", "Ghi chú", "Vẽ", "Chống tì tay", "Sạc nam châm", "Độ trễ thấp", "Giá tốt"],
         "example": "bút cảm ứng cho iPad dùng học tập",
     },
+    "backpack": {
+        "title": "Balo / Túi xách",
+        "triggers": ["balo laptop", "balo", "backpack", "tui xach", "cap laptop"],
+        "questions": ["Bạn cần balo/túi cho laptop bao nhiêu inch hay dùng hằng ngày?", "Có cần chống nước, chống sốc hoặc nhiều ngăn không?", "Ưu tiên gọn nhẹ, thời trang hay dung tích lớn?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["Laptop 14 inch", "Laptop 15.6 inch", "Chống nước", "Chống sốc", "Nhiều ngăn", "Gọn nhẹ", "Du lịch", "Giá tốt"],
+        "example": "balo laptop chống nước dưới 1 triệu",
+    },
+    "laptop_sleeve": {
+        "title": "Túi chống sốc laptop",
+        "triggers": ["tui chong soc", "tui laptop", "bao laptop", "sleeve laptop", "laptop sleeve"],
+        "questions": ["Bạn cần túi chống sốc cho laptop bao nhiêu inch?", "Muốn dạng mỏng, có quai xách hay nhiều ngăn?", "Có cần chống nước hoặc lớp đệm dày không?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["13 inch", "14 inch", "15.6 inch", "Chống nước", "Đệm dày", "Có quai", "Mỏng nhẹ", "Giá tốt"],
+        "example": "túi chống sốc laptop 14 inch chống nước",
+    },
+    "keyboard": {
+        "title": "Bàn phím",
+        "triggers": ["ban phim co", "ban phim bluetooth", "ban phim khong day", "ban phim", "keyboard", "mechanical keyboard"],
+        "questions": ["Bạn cần bàn phím văn phòng, gaming hay cơ?", "Muốn có dây, không dây hay Bluetooth?", "Ưu tiên layout fullsize/TKL, switch nào, có đèn RGB không?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["Bàn phím cơ", "Không dây", "Bluetooth", "Gaming", "Văn phòng", "TKL", "RGB", "Giá tốt"],
+        "example": "bàn phím cơ không dây dưới 2 triệu",
+    },
+    "mouse": {
+        "title": "Chuột",
+        "triggers": ["chuot gaming", "chuot bluetooth", "chuot khong day", "chuot", "mouse", "gaming mouse"],
+        "questions": ["Bạn cần chuột văn phòng hay gaming?", "Muốn có dây, không dây hay Bluetooth?", "Ưu tiên nhẹ, pin lâu, DPI cao hay form cầm thoải mái?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["Không dây", "Bluetooth", "Gaming", "Văn phòng", "DPI cao", "Nhẹ", "Pin lâu", "Logitech"],
+        "example": "chuột không dây pin lâu dưới 1 triệu",
+    },
+    "memory_usb": {
+        "title": "Thẻ nhớ / USB",
+        "triggers": ["the nho", "usb", "usb 3.0", "usb type c", "memory card", "sd card", "microsd"],
+        "questions": ["Bạn cần thẻ nhớ hay USB?", "Dung lượng mong muốn là bao nhiêu GB?", "Cần tốc độ cao để quay 4K, lưu tài liệu hay dùng cho camera/điện thoại?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["USB", "Thẻ nhớ", "64GB", "128GB", "256GB", "Type-C", "Tốc độ cao", "Camera"],
+        "example": "thẻ nhớ 128GB cho camera tốc độ cao",
+    },
+    "gaming_gear": {
+        "title": "Gaming Gear / Playstation",
+        "triggers": ["gaming gear", "playstation", "ps5", "tay cam", "tay cam choi game", "controller"],
+        "questions": ["Bạn cần tay cầm, phụ kiện console hay gear chơi game nào?", "Dùng cho PC, PlayStation, điện thoại hay Nintendo?", "Có cần không dây, rung phản hồi hoặc độ trễ thấp không?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["PS5", "Tay cầm", "Không dây", "PC", "Điện thoại", "Độ trễ thấp", "RGB", "Giá tốt"],
+        "example": "tay cầm chơi game không dây cho PC dưới 1 triệu",
+    },
+    "sim_card": {
+        "title": "Sim 4G / 5G",
+        "triggers": ["sim 4g", "sim 5g", "sim data", "esim", "sim so", "sim"],
+        "questions": ["Bạn cần sim nghe gọi, data hay eSIM?", "Muốn gói dung lượng/thời hạn bao lâu?", "Ưu tiên nhà mạng nào hoặc vùng sử dụng ở đâu?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["Data", "Nghe gọi", "eSIM", "4G", "5G", "Viettel", "Vinaphone", "Mobifone"],
+        "example": "sim data 4G dùng 1 tháng giá rẻ",
+    },
+    "network_device": {
+        "title": "Thiết bị mạng",
+        "triggers": ["thiet bi mang", "bo phat wifi", "router wifi", "wifi mesh", "mesh wifi", "router", "modem", "repeater", "bo kich song wifi"],
+        "questions": ["Bạn cần router, mesh WiFi, modem hay bộ kích sóng?", "Diện tích nhà/phòng khoảng bao nhiêu m²?", "Cần WiFi 6, nhiều băng tần, chịu tải nhiều thiết bị hay xuyên tường tốt không?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["Router", "Mesh WiFi", "WiFi 6", "Kích sóng", "Nhà nhiều tầng", "Nhiều thiết bị", "TP-Link", "Giá tốt"],
+        "example": "router WiFi 6 cho nhà 2 tầng dưới 2 triệu",
+    },
+    "gimbal": {
+        "title": "Gimbal",
+        "triggers": ["gimbal", "tay cam chong rung", "chong rung dien thoai"],
+        "questions": ["Bạn cần gimbal cho điện thoại, máy ảnh hay camera hành trình?", "Ưu tiên chống rung tốt, nhỏ gọn hay pin lâu?", "Có cần tracking, tripod hoặc điều khiển từ xa không?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["Cho điện thoại", "Cho máy ảnh", "Nhỏ gọn", "Pin lâu", "Tracking", "Tripod", "DJI", "Giá tốt"],
+        "example": "gimbal điện thoại nhỏ gọn dưới 2 triệu",
+    },
+    "flycam": {
+        "title": "Flycam",
+        "triggers": ["flycam", "drone", "may bay camera"],
+        "questions": ["Bạn cần flycam để quay du lịch, học bay hay làm nội dung?", "Ưu tiên camera 4K, chống rung, bay lâu hay nhỏ gọn?", "Có cần cảm biến tránh vật cản hoặc combo nhiều pin không?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["4K", "Nhỏ gọn", "Bay lâu", "Tránh vật cản", "Combo nhiều pin", "DJI", "Du lịch", "Giá tốt"],
+        "example": "flycam 4K nhỏ gọn dưới 10 triệu",
+    },
+    "hub_adapter": {
+        "title": "Hub chuyển đổi",
+        "triggers": ["hub chuyen doi", "hub type c", "usb hub", "type c hub", "adapter chuyen doi", "dock chuyen doi"],
+        "questions": ["Bạn cần hub cho laptop, tablet hay điện thoại?", "Cần cổng HDMI, USB-A, LAN, SD card hay sạc PD?", "Muốn hỗ trợ 4K, nhiều cổng hay nhỏ gọn?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["Type-C", "HDMI", "USB-A", "LAN", "SD card", "Sạc PD", "4K", "MacBook"],
+        "example": "hub Type-C có HDMI và sạc PD cho MacBook",
+    },
+    "projector": {
+        "title": "Máy chiếu",
+        "triggers": ["may chieu", "projector", "mini projector"],
+        "questions": ["Bạn dùng máy chiếu cho phòng họp, học tập hay xem phim?", "Cần độ phân giải HD, Full HD hay 4K?", "Có cần Android TV, loa tích hợp, WiFi/Bluetooth hoặc nhỏ gọn không?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["Mini", "Full HD", "4K", "Android TV", "WiFi", "Bluetooth", "Xem phim", "Văn phòng"],
+        "example": "máy chiếu mini Full HD dưới 5 triệu",
+    },
+    "tv_box": {
+        "title": "TV Box",
+        "triggers": ["android tv box", "tivi box", "tv box", "mi box", "google tv box"],
+        "questions": ["Bạn dùng TV Box cho tivi thường hay smart TV cần nâng cấp?", "Cần Android TV/Google TV, 4K, điều khiển giọng nói hay nhiều app?", "Ưu tiên RAM/bộ nhớ bao nhiêu hoặc thương hiệu nào?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["Google TV", "Android TV", "4K", "Điều khiển giọng nói", "Netflix", "YouTube", "Xiaomi", "Giá tốt"],
+        "example": "TV Box 4K Google TV dưới 2 triệu",
+    },
+    "heater": {
+        "title": "Máy sưởi / Quạt sưởi",
+        "triggers": ["may suoi", "quat suoi", "may suoi quat suoi", "heater", "space heater"],
+        "questions": ["Bạn dùng máy sưởi cho phòng khoảng bao nhiêu m²?", "Muốn quạt sưởi, sưởi gốm hay sưởi dầu?", "Có cần chống quá nhiệt, hẹn giờ, ít ồn hoặc tiết kiệm điện không?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["Quạt sưởi", "Sưởi gốm", "Sưởi dầu", "Phòng nhỏ", "Hẹn giờ", "Ít ồn", "An toàn", "Giá tốt"],
+        "example": "quạt sưởi cho phòng nhỏ dưới 1 triệu",
+    },
+    "iron": {
+        "title": "Bàn ủi",
+        "triggers": ["ban ui hoi nuoc", "ban ui", "ban la", "iron", "steam iron"],
+        "questions": ["Bạn cần bàn ủi khô, hơi nước hay bàn ủi đứng?", "Ưu tiên công suất mạnh, chống dính, phun hơi mạnh hay nhỏ gọn?", "Dùng hằng ngày, đi du lịch hay cho gia đình?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["Hơi nước", "Bàn ủi đứng", "Chống dính", "Phun hơi mạnh", "Nhỏ gọn", "Du lịch", "Gia đình", "Giá tốt"],
+        "example": "bàn ủi hơi nước dưới 1 triệu",
+    },
+    "electric_kettle": {
+        "title": "Ấm siêu tốc",
+        "triggers": ["am sieu toc", "binh dun sieu toc", "binh dun", "electric kettle", "kettle"],
+        "questions": ["Bạn cần ấm siêu tốc dung tích bao nhiêu lít?", "Muốn vỏ inox, thủy tinh hay nhựa an toàn?", "Có cần giữ nhiệt, tự ngắt, điều chỉnh nhiệt độ không?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["1.5L", "1.8L", "Inox", "Thủy tinh", "Giữ nhiệt", "Tự ngắt", "Điều chỉnh nhiệt", "Giá tốt"],
+        "example": "ấm siêu tốc inox 1.8 lít dưới 500 nghìn",
+    },
+    "blender": {
+        "title": "Máy xay sinh tố",
+        "triggers": ["may xay sinh to", "may xay da nang", "may xay", "blender"],
+        "questions": ["Bạn cần máy xay sinh tố cá nhân, gia đình hay đa năng?", "Muốn xay đá, xay hạt, cối thủy tinh hay cối nhựa?", "Ưu tiên công suất mạnh, dễ vệ sinh hay nhỏ gọn?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["Cá nhân", "Gia đình", "Đa năng", "Xay đá", "Cối thủy tinh", "Công suất mạnh", "Dễ vệ sinh", "Giá tốt"],
+        "example": "máy xay sinh tố cối thủy tinh dưới 1 triệu",
+    },
+    "juicer": {
+        "title": "Máy ép trái cây",
+        "triggers": ["may ep trai cay", "may ep cham", "may ep", "juicer", "slow juicer"],
+        "questions": ["Bạn muốn máy ép nhanh hay máy ép chậm?", "Dùng cho cá nhân hay gia đình?", "Ưu tiên ép kiệt bã, dễ vệ sinh, ít ồn hay công suất mạnh?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["Ép chậm", "Ép nhanh", "Gia đình", "Ít ồn", "Dễ vệ sinh", "Ép kiệt bã", "Nhỏ gọn", "Giá tốt"],
+        "example": "máy ép chậm dễ vệ sinh dưới 3 triệu",
+    },
+    "nut_milk_maker": {
+        "title": "Máy làm sữa hạt",
+        "triggers": ["may lam sua hat", "sua hat", "nut milk maker"],
+        "questions": ["Bạn cần máy làm sữa hạt dung tích bao nhiêu lít?", "Có cần tự vệ sinh, hẹn giờ, nấu cháo/soup hoặc xay mịn không?", "Dùng cho cá nhân hay gia đình?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["1.2L", "1.75L", "Tự vệ sinh", "Hẹn giờ", "Xay mịn", "Nấu cháo", "Gia đình", "Giá tốt"],
+        "example": "máy làm sữa hạt tự vệ sinh dưới 3 triệu",
+    },
+    "electric_stove": {
+        "title": "Bếp điện",
+        "triggers": ["bep dien tu", "bep hong ngoai", "bep dien", "induction cooker", "electric stove"],
+        "questions": ["Bạn cần bếp từ, bếp hồng ngoại hay bếp điện đơn?", "Dùng cho gia đình, phòng trọ hay nấu lẩu?", "Có cần nhiều mức nhiệt, hẹn giờ, khóa an toàn hoặc kèm nồi không?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["Bếp từ", "Hồng ngoại", "Bếp đơn", "Hẹn giờ", "Khóa an toàn", "Kèm nồi", "Phòng trọ", "Giá tốt"],
+        "example": "bếp điện từ đơn dưới 1 triệu",
+    },
+    "pressure_cooker": {
+        "title": "Nồi áp suất",
+        "triggers": ["noi ap suat", "pressure cooker"],
+        "questions": ["Bạn cần nồi áp suất dung tích bao nhiêu lít?", "Dùng cho gia đình mấy người?", "Có cần nhiều chế độ nấu, chống dính, hẹn giờ hoặc dễ vệ sinh không?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["5L", "6L", "Điện tử", "Nhiều chế độ", "Hẹn giờ", "Chống dính", "Gia đình", "Giá tốt"],
+        "example": "nồi áp suất điện 5 lít dưới 2 triệu",
+    },
+    "slow_cooker": {
+        "title": "Nồi nấu chậm",
+        "triggers": ["noi nau cham", "slow cooker"],
+        "questions": ["Bạn cần nồi nấu chậm dung tích bao nhiêu lít?", "Dùng nấu cháo, hầm xương, chưng yến hay nấu ăn dặm?", "Có cần hẹn giờ, giữ ấm hoặc lòng nồi sứ không?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["Nấu cháo", "Hầm", "Ăn dặm", "Chưng yến", "Hẹn giờ", "Giữ ấm", "Lòng sứ", "Giá tốt"],
+        "example": "nồi nấu chậm nấu cháo cho bé dưới 1 triệu",
+    },
+    "hotpot_cooker": {
+        "title": "Nồi lẩu điện",
+        "triggers": ["noi lau dien", "noi lau", "electric hotpot", "hotpot cooker"],
+        "questions": ["Bạn cần nồi lẩu dung tích bao nhiêu lít?", "Dùng cho mấy người?", "Có cần chống dính, nhiều mức nhiệt, kèm xửng hấp hoặc dễ vệ sinh không?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["2-3 người", "4-6 người", "Chống dính", "Nhiều mức nhiệt", "Kèm xửng hấp", "Dễ vệ sinh", "Giá tốt"],
+        "example": "nồi lẩu điện chống dính dưới 1 triệu",
+    },
+    "health_scale": {
+        "title": "Cân sức khỏe",
+        "triggers": ["can suc khoe", "can dien tu", "smart scale", "body scale"],
+        "questions": ["Bạn cần cân sức khỏe cơ bản hay cân thông minh?", "Có cần đo mỡ, cơ, BMI hoặc kết nối app không?", "Dùng cho cá nhân hay cả gia đình?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["Cân thông minh", "Đo mỡ", "BMI", "Kết nối app", "Gia đình", "Pin lâu", "Xiaomi", "Giá tốt"],
+        "example": "cân sức khỏe thông minh kết nối app dưới 1 triệu",
+    },
+    "water_flosser": {
+        "title": "Máy tăm nước",
+        "triggers": ["may tam nuoc", "tam nuoc", "water flosser"],
+        "questions": ["Bạn cần máy tăm nước cầm tay hay để bàn?", "Ưu tiên pin lâu, nhiều chế độ, bình nước lớn hay chống nước?", "Dùng cho niềng răng, nướu nhạy cảm hay gia đình?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["Cầm tay", "Để bàn", "Niềng răng", "Pin lâu", "Nhiều chế độ", "Bình lớn", "Chống nước", "Giá tốt"],
+        "example": "máy tăm nước cầm tay cho niềng răng dưới 1 triệu",
+    },
+    "nose_trimmer": {
+        "title": "Máy tỉa lông mũi",
+        "triggers": ["may tia long mui", "tia long mui", "nose trimmer"],
+        "questions": ["Bạn cần máy tỉa lông mũi nhỏ gọn hay đa năng?", "Có cần chống nước, pin sạc hoặc đầu thay thế không?", "Dùng cá nhân hay mang đi du lịch?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["Nhỏ gọn", "Đa năng", "Chống nước", "Pin sạc", "Du lịch", "Đầu thay thế", "Giá tốt"],
+        "example": "máy tỉa lông mũi chống nước dưới 500 nghìn",
+    },
+    "hair_removal": {
+        "title": "Máy triệt lông",
+        "triggers": ["may triet long", "triet long", "ipl hair removal", "hair removal"],
+        "questions": ["Bạn cần máy triệt lông cho vùng nào?", "Muốn công nghệ IPL, nhiều mức năng lượng hay đầu triệt riêng?", "Ưu tiên dùng tại nhà, an toàn cho da nhạy cảm hay nhanh gọn?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["IPL", "Da nhạy cảm", "Dùng tại nhà", "Nhiều mức năng lượng", "Toàn thân", "Vùng mặt", "Philips", "Giá tốt"],
+        "example": "máy triệt lông IPL dùng tại nhà dưới 4 triệu",
+    },
+    "blood_pressure_monitor": {
+        "title": "Máy đo huyết áp",
+        "triggers": ["may do huyet ap", "do huyet ap", "blood pressure monitor"],
+        "questions": ["Bạn cần máy đo huyết áp bắp tay hay cổ tay?", "Dùng cho cá nhân hay người lớn tuổi trong gia đình?", "Có cần bộ nhớ nhiều người dùng, cảnh báo nhịp tim hoặc màn hình lớn không?", "Tầm giá khoảng bao nhiêu?"],
+        "chips": ["Bắp tay", "Cổ tay", "Người lớn tuổi", "Màn hình lớn", "Bộ nhớ", "Cảnh báo nhịp tim", "Omron", "Giá tốt"],
+        "example": "máy đo huyết áp bắp tay màn hình lớn dưới 1 triệu",
+    },
     "home_appliance": {
         "title": "Đồ gia dụng",
         "triggers": ["do gia dung", "gia dung", "may hut bui", "hut bui", "may hut am", "hut am", "quat", "noi chien", "noi com", "may loc nuoc", "may loc khong khi", "may pha ca phe"],
@@ -2995,12 +3894,16 @@ PRODUCT_CLARIFY_GUIDES = {
 
 # Một số trigger là nhóm rộng, khi đi cùng trigger cụ thể thì trigger cụ thể phải thắng.
 BROAD_GUIDE_KEYS = {"home_appliance", "electric_appliance", "accessory", "beauty", "promotion", "tech_news"}
+CATEGORY_FALLBACK_BLOCKED_GUIDE_KEYS = BROAD_GUIDE_KEYS | {"tradein", "used"}
 GUIDE_PRIORITY = {
     "phone": 120,
     "tablet": 120,
     "laptop": 120,
     "microphone": 120,
     "audio": 115,
+    "headphones": 130,
+    "speaker": 130,
+    "soundbar": 130,
     "smartwatch": 120,
     "camera": 120,
     "tv": 120,
@@ -3009,6 +3912,8 @@ GUIDE_PRIORITY = {
     "printer": 120,
     # Nhóm sản phẩm con: ưu tiên cao hơn nhóm lớn để "máy hút bụi" không rơi vào "Đồ gia dụng",
     # "tủ lạnh" không rơi vào "Điện máy", "củ sạc" không rơi vào "Phụ kiện".
+    "robot_vacuum": 130,
+    "handheld_vacuum": 130,
     "vacuum_cleaner": 130,
     "dehumidifier": 130,
     "fan": 130,
@@ -3037,6 +3942,34 @@ GUIDE_PRIORITY = {
     "screen_protector": 130,
     "stand_holder": 130,
     "stylus": 130,
+    "backpack": 130,
+    "laptop_sleeve": 130,
+    "keyboard": 130,
+    "mouse": 130,
+    "memory_usb": 130,
+    "gaming_gear": 130,
+    "sim_card": 130,
+    "network_device": 130,
+    "gimbal": 130,
+    "flycam": 130,
+    "hub_adapter": 130,
+    "projector": 130,
+    "tv_box": 130,
+    "heater": 130,
+    "iron": 130,
+    "electric_kettle": 130,
+    "blender": 130,
+    "juicer": 130,
+    "nut_milk_maker": 130,
+    "electric_stove": 130,
+    "pressure_cooker": 130,
+    "slow_cooker": 130,
+    "hotpot_cooker": 130,
+    "health_scale": 130,
+    "water_flosser": 130,
+    "nose_trimmer": 130,
+    "hair_removal": 130,
+    "blood_pressure_monitor": 130,
     "beauty": 75,
     "home_appliance": 70,
     "electric_appliance": 70,
@@ -3048,13 +3981,16 @@ GUIDE_PRIORITY = {
 }
 
 
-def _best_guide_key_from_text(text):
+def _best_guide_key_from_text(text, allow_broad=True):
     """Tìm đúng từng sản phẩm/nhóm nhỏ từ text, không gộp menu lớn."""
     normalized_text = _normalize_search_text(text)
     best_key = ""
     best_score = (-1, -1, -1)
 
     for key, guide in PRODUCT_CLARIFY_GUIDES.items():
+        if not allow_broad and key in CATEGORY_FALLBACK_BLOCKED_GUIDE_KEYS:
+            continue
+
         for trigger in guide.get("triggers", []):
             normalized_trigger = _normalize_search_text(trigger)
             if not normalized_trigger:
@@ -3091,13 +4027,20 @@ def detect_clarify_guide_key(user_message, parsed_query=None, matched_products=N
     if direct_key:
         return direct_key
 
+    smartphone_brand_terms = ("samsung", "xiaomi", "oppo", "realme", "vivo")
+    if any(
+        _contains_search_term(normalized, brand)
+        for brand in smartphone_brand_terms
+    ):
+        return "phone"
+
     # Fallback rất nhẹ: chỉ dùng matched_products khi câu người dùng không có
     # trigger sản phẩm nào, ví dụ "loại này dưới 5 triệu".
     category_text = _normalize_search_text([
         product.get("category")
         for product in list(matched_products or [])[:8]
     ])
-    return _best_guide_key_from_text(category_text)
+    return _best_guide_key_from_text(category_text, allow_broad=False)
 
 
 # Bộ lọc loại sản phẩm chi tiết, tách riêng từng mục menu.
@@ -3106,7 +4049,7 @@ def detect_clarify_guide_key(user_message, parsed_query=None, matched_products=N
 PRODUCT_GROUP_MATCH_TERMS = {
     "phone": {
         "include": ["dien thoai", "smartphone", "mobile phone", "iphone", "samsung galaxy", "galaxy z", "galaxy s", "galaxy a", "galaxy m"],
-        "exclude": ["tablet", "ipad", "may tinh bang", "op lung", "case", "cover", "bao da", "dan man hinh", "cuong luc", "kinh cuong luc", "cap sac", "cu sac", "charger", "cable", "pin du phong", "sac du phong", "phu kien"],
+        "exclude": ["tablet", "ipad", "may tinh bang", "op lung", "case", "cover", "bao da", "dan man hinh", "cuong luc", "kinh cuong luc", "cap sac", "cu sac", "charger", "cable", "pin du phong", "sac du phong", "extra battery", "battery kit", "replacement battery", "pin thay the", "bo pin", "phu kien"],
     },
     "tablet": {
         "include": ["tablet", "may tinh bang", "ipad", "galaxy tab", "tab"],
@@ -3119,6 +4062,18 @@ PRODUCT_GROUP_MATCH_TERMS = {
     "audio": {
         "include": ["am thanh", "tai nghe", "headphone", "earphone", "earbuds", "airpods", "loa", "speaker", "soundbar"],
         "exclude": ["mic thu am", "micro thu am", "microphone", "micro karaoke", "mic karaoke", "op lung", "case", "dan man hinh"],
+    },
+    "headphones": {
+        "include": ["tai nghe", "headphone", "earphone", "earbuds", "airpods", "headset"],
+        "exclude": ["loa", "speaker", "soundbar", "mic thu am", "micro thu am", "microphone"],
+    },
+    "speaker": {
+        "include": ["loa bluetooth", "loa", "speaker", "portable speaker"],
+        "exclude": ["tai nghe", "headphone", "earphone", "soundbar", "loa thanh", "mic thu am", "microphone"],
+    },
+    "soundbar": {
+        "include": ["soundbar", "loa thanh", "loa soundbar"],
+        "exclude": ["tai nghe", "headphone", "earphone", "loa bluetooth", "portable speaker", "mic thu am", "microphone"],
     },
     "microphone": {
         "include": ["mic thu am", "micro thu am", "microphone", "micro", "mic", "micro karaoke", "mic karaoke"],
@@ -3133,6 +4088,14 @@ PRODUCT_GROUP_MATCH_TERMS = {
         "exclude": ["op lung", "case", "the nho", "chan de", "gia do", "cap", "sac"],
     },
 
+    "robot_vacuum": {
+        "include": ["robot hut bui", "may hut bui robot", "robot vacuum"],
+        "exclude": ["may hut bui cam tay", "handheld vacuum", "phu kien", "bo loc thay the"],
+    },
+    "handheld_vacuum": {
+        "include": ["may hut bui cam tay", "hut bui cam tay", "handheld vacuum", "cordless vacuum"],
+        "exclude": ["robot hut bui", "may hut bui robot", "phu kien", "bo loc thay the"],
+    },
     "vacuum_cleaner": {
         "include": ["may hut bui", "hut bui", "vacuum", "vacuum cleaner", "robot hut bui", "may hut bui robot", "may hut bui cam tay"],
         "exclude": ["phu kien", "linh kien", "tui", "bo loc thay the"],
@@ -3175,11 +4138,11 @@ PRODUCT_GROUP_MATCH_TERMS = {
     },
     "washing_machine": {
         "include": ["may giat", "washing machine", "washer"],
-        "exclude": ["bot giat", "phu kien", "tui giat"],
+        "exclude": ["bot giat", "phu kien", "tui giat", "ke xep chong", "ke may giat", "chan de may giat"],
     },
     "dryer": {
         "include": ["may say quan ao", "may say", "dryer", "clothes dryer"],
-        "exclude": ["may say toc", "hair dryer", "phu kien"],
+        "exclude": ["may say toc", "hair dryer", "phu kien", "ke xep chong"],
     },
     "dishwasher": {
         "include": ["may rua chen", "may rua bat", "dishwasher"],
@@ -3244,6 +4207,118 @@ PRODUCT_GROUP_MATCH_TERMS = {
     "stylus": {
         "include": ["but cam ung", "stylus", "pencil", "apple pencil", "s pen"],
         "exclude": ["phu kien chung"],
+    },
+    "backpack": {
+        "include": ["balo", "backpack", "tui xach", "cap laptop"],
+        "exclude": ["op lung", "cap sac", "cu sac", "pin du phong", "tui chong soc"],
+    },
+    "laptop_sleeve": {
+        "include": ["tui chong soc", "tui laptop", "bao laptop", "sleeve laptop", "laptop sleeve"],
+        "exclude": ["balo", "backpack"],
+    },
+    "keyboard": {
+        "include": ["ban phim", "keyboard", "mechanical keyboard"],
+        "exclude": ["chuot", "mouse", "ke tay", "palm rest", "op lung", "cap sac", "cu sac", "tablet", "may tinh bang", "ipad", "matepad", "galaxy tab", "kem ban phim"],
+    },
+    "mouse": {
+        "include": ["chuot", "mouse", "gaming mouse"],
+        "exclude": ["ban phim", "keyboard", "op lung", "cap sac"],
+    },
+    "memory_usb": {
+        "include": ["the nho", "usb", "memory card", "sd card", "microsd"],
+        "exclude": ["cap sac", "hub", "adapter"],
+    },
+    "gaming_gear": {
+        "include": ["gaming gear", "playstation", "ps5", "tay cam", "tay cam choi game", "controller"],
+        "exclude": ["ban phim", "chuot", "keyboard", "mouse"],
+    },
+    "sim_card": {
+        "include": ["sim 4g", "sim 5g", "sim data", "esim", "sim so", "sim"],
+        "exclude": ["khay sim", "dien thoai"],
+    },
+    "network_device": {
+        "include": ["thiet bi mang", "bo phat wifi", "router wifi", "wifi mesh", "mesh wifi", "router", "modem", "repeater", "bo kich song wifi"],
+        "exclude": ["camera wifi", "may in wifi", "tv box"],
+    },
+    "gimbal": {
+        "include": ["gimbal", "tay cam chong rung", "chong rung dien thoai"],
+        "exclude": ["tay cam choi game", "controller"],
+    },
+    "flycam": {
+        "include": ["flycam", "drone", "may bay camera"],
+        "exclude": ["camera hanh trinh", "camera wifi"],
+    },
+    "hub_adapter": {
+        "include": ["hub chuyen doi", "hub type c", "usb hub", "type c hub", "adapter chuyen doi", "dock chuyen doi"],
+        "exclude": ["cu sac", "wall charger", "sac nhanh"],
+    },
+    "projector": {
+        "include": ["may chieu", "projector", "mini projector"],
+        "exclude": ["man hinh", "monitor", "tivi", "tv"],
+    },
+    "tv_box": {
+        "include": ["android tv box", "tivi box", "tv box", "mi box", "google tv box"],
+        "exclude": ["tivi", "smart tv", "smart tivi", "man hinh", "monitor"],
+    },
+    "heater": {
+        "include": ["may suoi", "quat suoi", "may suoi quat suoi", "heater", "space heater"],
+        "exclude": ["quat dien", "quat mini", "fan laptop", "fan cpu"],
+    },
+    "iron": {
+        "include": ["ban ui", "ban la", "iron", "steam iron"],
+        "exclude": ["may tao kieu toc", "curling iron"],
+    },
+    "electric_kettle": {
+        "include": ["am sieu toc", "binh dun sieu toc", "binh dun", "electric kettle", "kettle"],
+        "exclude": ["binh nuoc", "may loc nuoc"],
+    },
+    "blender": {
+        "include": ["may xay sinh to", "may xay da nang", "may xay", "blender"],
+        "exclude": ["may ep", "may lam sua hat"],
+    },
+    "juicer": {
+        "include": ["may ep trai cay", "may ep cham", "may ep", "juicer", "slow juicer"],
+        "exclude": ["may xay", "may lam sua hat"],
+    },
+    "nut_milk_maker": {
+        "include": ["may lam sua hat", "sua hat", "nut milk maker"],
+        "exclude": ["may xay", "may ep"],
+    },
+    "electric_stove": {
+        "include": ["bep dien tu", "bep hong ngoai", "bep dien", "induction cooker", "electric stove"],
+        "exclude": ["noi com", "noi lau"],
+    },
+    "pressure_cooker": {
+        "include": ["noi ap suat", "pressure cooker"],
+        "exclude": ["noi com", "noi lau", "noi chien"],
+    },
+    "slow_cooker": {
+        "include": ["noi nau cham", "slow cooker"],
+        "exclude": ["noi com", "noi ap suat", "noi lau"],
+    },
+    "hotpot_cooker": {
+        "include": ["noi lau dien", "noi lau", "electric hotpot", "hotpot cooker"],
+        "exclude": ["noi com", "noi ap suat", "noi chien"],
+    },
+    "health_scale": {
+        "include": ["can suc khoe", "can dien tu", "smart scale", "body scale"],
+        "exclude": ["can nha bep"],
+    },
+    "water_flosser": {
+        "include": ["may tam nuoc", "tam nuoc", "water flosser"],
+        "exclude": ["binh nuoc", "may loc nuoc"],
+    },
+    "nose_trimmer": {
+        "include": ["may tia long mui", "tia long mui", "nose trimmer"],
+        "exclude": ["tong do", "may cao rau", "may triet long"],
+    },
+    "hair_removal": {
+        "include": ["may triet long", "triet long", "ipl hair removal", "hair removal"],
+        "exclude": ["may tia long mui", "tong do", "may cao rau"],
+    },
+    "blood_pressure_monitor": {
+        "include": ["may do huyet ap", "do huyet ap", "blood pressure monitor"],
+        "exclude": ["dong ho", "smartwatch"],
     },
     "home_appliance": {
         "include": ["do gia dung", "gia dung", "may hut bui", "hut bui", "may hut am", "hut am", "quat", "noi chien", "noi com", "may loc nuoc", "may loc khong khi", "may pha ca phe"],
@@ -3314,6 +4389,9 @@ def product_matches_query_group(product, guide_key):
     if not guide_key or guide_key not in PRODUCT_GROUP_MATCH_TERMS:
         return True
 
+    if guide_key == "phone":
+        return _product_is_phone_device(product)
+
     # Khuyến mãi/tin công nghệ là mục nội dung, không nên dùng để ép lọc sản phẩm.
     if guide_key in {"promotion", "tech_news"}:
         return True
@@ -3344,29 +4422,121 @@ def filter_ranked_items_by_query_group(ranked_items, user_message, parsed_query,
     return filtered
 
 
-def is_broad_product_query(user_message, parsed_query=None, matched_products=None):
-    """Câu chỉ nêu tên sản phẩm/mục lớn nhưng chưa có tiêu chí lọc cụ thể."""
-    parsed_query = parsed_query or _parse_search_query(user_message)
-    if _has_detail_signal(user_message, parsed_query):
-        return False
-
-    guide_key = detect_clarify_guide_key(user_message, parsed_query, matched_products)
-    if not guide_key:
-        return False
-
+def _is_plain_guide_query(parsed_query, guide_key):
+    """Câu chỉ còn đúng tên sản phẩm/category sau khi bỏ từ ý định như 'tư vấn', 'mua'."""
+    guide = PRODUCT_CLARIFY_GUIDES.get(guide_key) or {}
     normalized = parsed_query.get("normalized_query", "")
-    meaningful_tokens = [
-        token for token in parsed_query.get("tokens", [])
-        if token not in SEARCH_STOPWORDS
-    ]
-    concept_count = len(parsed_query.get("concepts", []))
+    meaningful = _normalize_search_text(parsed_query.get("meaningful_phrase", ""))
+    candidates = {normalized, meaningful}
+    candidates.discard("")
+
+    for trigger in guide.get("triggers", []):
+        normalized_trigger = _normalize_search_text(trigger)
+        if normalized_trigger and normalized_trigger in candidates:
+            return True
 
     if re.search(r"\d", normalized):
         return False
-    return (len(meaningful_tokens) + concept_count) <= 3
+
+    return False
 
 
-def build_clarifying_suggestion_box(user_message, user_name="", parsed_query=None, matched_products=None):
+def is_broad_product_query(user_message, parsed_query=None, matched_products=None):
+    """Câu chỉ nêu tên sản phẩm/mục lớn nhưng chưa có tiêu chí lọc cụ thể."""
+    parsed_query = parsed_query or _parse_search_query(user_message)
+
+    guide_key = detect_clarify_guide_key(user_message, parsed_query, matched_products)
+    has_broad_brand = bool(
+        _matched_brand_phrases(parsed_query.get("normalized_query", ""))
+    )
+    if not guide_key and not has_broad_brand:
+        return False
+
+    if guide_key and _is_plain_guide_query(parsed_query, guide_key):
+        return True
+
+    normalized = parsed_query.get("normalized_query", "")
+    if re.search(r"\d", normalized):
+        return False
+
+    if _has_detail_signal(user_message, parsed_query):
+        return False
+
+    residual_tokens = _query_residual_criteria_tokens(
+        user_message,
+        parsed_query,
+        guide_key=guide_key,
+    )
+    # Chỉ hỏi lại khi câu còn đúng tên nhóm/hãng/dòng rộng. Bất kỳ từ mô tả
+    # nào còn lại (pin trâu, có bút, mỏng nhẹ, màu đen...) đều là tiêu chí.
+    return not residual_tokens and (bool(guide_key) or has_broad_brand)
+
+
+def get_clarification_suggestions(
+    user_message,
+    parsed_query=None,
+    matched_products=None,
+):
+    parsed_query = parsed_query or _parse_search_query(user_message)
+    matched_products = list(matched_products or [])
+    guide_key = detect_clarify_guide_key(
+        user_message,
+        parsed_query,
+        matched_products,
+    )
+    guide = PRODUCT_CLARIFY_GUIDES.get(guide_key)
+    if guide:
+        return _unique_strings(guide.get("chips", []))[:10]
+
+    categories, brands = _extract_top_result_context(
+        matched_products,
+        max_items=6,
+    )
+    return _unique_strings([*brands[:4], *categories[:4]])[:8]
+
+
+def get_clarification_suggestion_actions(
+    user_message,
+    parsed_query=None,
+    matched_products=None,
+):
+    labels = get_clarification_suggestions(
+        user_message,
+        parsed_query=parsed_query,
+        matched_products=matched_products,
+    )
+    base_message = str(user_message or "").strip()
+    normalized_base = _normalize_search_text(base_message)
+    identity_phrases = set(_known_brand_phrases())
+    for guide in PRODUCT_CLARIFY_GUIDES.values():
+        identity_phrases.update(
+            _normalize_search_text(trigger)
+            for trigger in guide.get("triggers", [])
+            if _normalize_search_text(trigger)
+        )
+
+    actions = []
+    for label in labels:
+        normalized_label = _normalize_search_text(label)
+        if not normalized_label:
+            continue
+        if _contains_search_term(normalized_base, normalized_label):
+            message = base_message
+        elif normalized_label in identity_phrases:
+            message = str(label)
+        else:
+            message = f"{base_message} {label}".strip()
+        actions.append({"label": str(label), "message": message})
+    return actions
+
+
+def build_clarifying_suggestion_box(
+    user_message,
+    user_name="",
+    parsed_query=None,
+    matched_products=None,
+    include_chips=True,
+):
     """Trả về cùng một HTML khung đẹp cho mọi sản phẩm/mục riêng trong catalog."""
     parsed_query = parsed_query or _parse_search_query(user_message)
     matched_products = list(matched_products or [])
@@ -3376,10 +4546,13 @@ def build_clarifying_suggestion_box(user_message, user_name="", parsed_query=Non
     query_name = get_product_query_display_name(user_message, parsed_query)
     customer_name = _clean_chat_user_name(user_name)
     prefix = f"{_safe_text(customer_name)}, " if customer_name else ""
+    chips = get_clarification_suggestions(
+        user_message,
+        parsed_query=parsed_query,
+        matched_products=matched_products,
+    )
 
     if not guide:
-        categories, brands = _extract_top_result_context(matched_products, max_items=6)
-        chips = _unique_strings([*brands[:4], *categories[:4]])[:8]
         questions = [
             "Bạn muốn tầm giá khoảng bao nhiêu?",
             "Bạn ưu tiên hãng, thông số hay nhu cầu sử dụng nào?",
@@ -3388,7 +4561,6 @@ def build_clarifying_suggestion_box(user_message, user_name="", parsed_query=Non
         title = query_name or "Sản phẩm cần tìm"
         example_text = f"{query_name} dưới 10 triệu dùng bền"
     else:
-        chips = guide.get("chips", [])
         questions = guide.get("questions", [])
         title = guide.get("title") or query_name or "Sản phẩm cần tìm"
         example_text = guide.get("example") or f"{title} dưới 10 triệu"
@@ -3404,7 +4576,7 @@ def build_clarifying_suggestion_box(user_message, user_name="", parsed_query=Non
     html += "".join(f"<li>{_safe_text(question)}</li>" for question in questions[:4])
     html += "</ul>"
 
-    if chips:
+    if include_chips and chips:
         html += "<div style='display:flex;flex-wrap:wrap;gap:7px;margin-top:9px;'>"
         html += "".join(
             "<span style='display:inline-block;border:1px solid #f3a7b2;"
@@ -3432,6 +4604,13 @@ def should_ask_clarifying_question(user_message, parsed_query=None, matched_prod
     parsed_query = parsed_query or _parse_search_query(user_message)
     normalized = parsed_query.get("normalized_query", "")
     matched_products = list(matched_products or [])
+
+    if _query_matches_exact_product_identity(
+        user_message,
+        parsed_query,
+        matched_products,
+    ):
+        return False
 
     if _is_intent_only_query(user_message, parsed_query):
         return True
@@ -3465,6 +4644,78 @@ def should_ask_clarifying_question(user_message, parsed_query=None, matched_prod
             return True
 
     return False
+
+
+def is_product_advisory_query(
+    user_message,
+    parsed_query=None,
+    matched_products=None,
+    specific_model=None,
+):
+    """Tách luồng tư vấn khỏi hỏi thêm tiêu chí và tìm đúng model."""
+    parsed_query = parsed_query or _parse_search_query(user_message)
+    matched_products = list(matched_products or [])
+    if specific_model is None:
+        specific_model = is_specific_model_query(
+            user_message=user_message,
+            parsed_query=parsed_query,
+            matched_products=matched_products,
+        )
+
+    guide_key = detect_clarify_guide_key(
+        user_message,
+        parsed_query,
+        matched_products,
+    )
+    residual_criteria = _query_residual_criteria_tokens(
+        user_message,
+        parsed_query,
+        guide_key=guide_key,
+    )
+    has_criteria = bool(
+        _has_detail_signal(user_message, parsed_query)
+        or residual_criteria
+    )
+    return product_advisor.should_use_advisor(
+        user_message,
+        specific_model=bool(specific_model),
+        has_criteria=has_criteria,
+    )
+
+
+def prepare_product_advice(
+    product_list,
+    user_message,
+    price_constraints=None,
+    limit=5,
+    allow_variants=False,
+):
+    return product_advisor.build_product_advice(
+        list(product_list or []),
+        user_message,
+        price_constraints=price_constraints,
+        limit=limit,
+        allow_variants=allow_variants,
+    )
+
+
+def serialize_product_advice(advice_items):
+    return product_advisor.serialize_product_advice(advice_items)
+
+
+def generate_advice_unavailable_reply(user_message, user_name=""):
+    query_name = get_product_query_display_name(user_message)
+    customer_name = _clean_chat_user_name(user_name)
+    prefix = f"{_safe_text(customer_name)}, " if customer_name else ""
+    return (
+        "<div class='product-advice-unavailable'>"
+        f"<p>{prefix}mình tìm thấy sản phẩm liên quan đến "
+        f"<b>{_safe_text(query_name)}</b>, nhưng các bản ghi này chưa có đủ "
+        "giá, hình ảnh và thông số để tư vấn đáng tin cậy.</p>"
+        "<p>Mình sẽ không dùng sản phẩm thiếu dữ liệu làm kết quả tư vấn. "
+        "Bạn có thể bổ sung hãng, ngân sách hoặc thông số ưu tiên để mình lọc lại.</p>"
+        "</div>"
+    )
 
 
 def generate_clarifying_question(user_message, user_name="", parsed_query=None, matched_products=None):
@@ -3555,7 +4806,15 @@ def find_similar_products_clip_faiss(query_embedding, k=5):
     scored_results, error = search_faiss_products_with_scores(query_embedding, k=k)
     if error:
         return [], error
-    return [item["product"] for item in scored_results], None
+
+    base_products = [item["product"] for item in scored_results]
+    hydrated = _hydrate_catalog_products_by_id(
+        [product.get("id") for product in base_products]
+    )
+    return [
+        hydrated.get(str(product.get("id", "")), product)
+        for product in base_products
+    ], None
 
 
 CLIP_TEXT_TRANSLATIONS = {
@@ -3565,6 +4824,8 @@ CLIP_TEXT_TRANSLATIONS = {
     "may tinh xach tay": "laptop notebook computer",
     "may tinh": "computer laptop",
     "tai nghe": "headphones earphones earbuds headset",
+    "loa": "speaker bluetooth speaker portable speaker",
+    "soundbar": "soundbar home theater speaker",
     "may tinh bang": "tablet ipad",
     "dong ho thong minh": "smartwatch wearable watch",
     "dong ho": "watch smartwatch",
@@ -3572,7 +4833,24 @@ CLIP_TEXT_TRANSLATIONS = {
     "sac du phong": "power bank portable charger",
     "cap sac": "charging cable",
     "cu sac": "wall charger power adapter",
+    "balo": "backpack laptop bag",
+    "ban phim": "keyboard mechanical keyboard",
+    "chuot": "mouse wireless mouse gaming mouse",
+    "hub chuyen doi": "usb c hub adapter docking station",
+    "thiet bi mang": "network device wifi router mesh router",
+    "may chieu": "projector mini projector",
+    "tv box": "android tv box streaming media player",
     "quat": "electric fan appliance",
+    "quat suoi": "space heater fan heater appliance",
+    "ban ui": "steam iron clothes iron appliance",
+    "am sieu toc": "electric kettle appliance",
+    "may xay sinh to": "blender appliance",
+    "may ep trai cay": "juicer appliance",
+    "may lam sua hat": "nut milk maker appliance",
+    "bep dien": "electric stove induction cooker appliance",
+    "can suc khoe": "smart body scale health scale",
+    "may tam nuoc": "water flosser oral irrigator",
+    "may do huyet ap": "blood pressure monitor",
     "do gia dung": "home appliance",
     "khong day": "wireless bluetooth",
     "co day": "wired",
@@ -3585,6 +4863,8 @@ CLIP_TEXT_TRANSLATIONS = {
     "pin lau": "long battery life",
     "mic thu am": "microphone recording mic condenser microphone",
     "micro": "microphone recording mic",
+    "robot hut bui": "robot vacuum cleaner",
+    "may hut bui cam tay": "handheld cordless vacuum cleaner",
     "may hut bui": "vacuum cleaner",
     "may hut am": "dehumidifier appliance",
     "may loc khong khi": "air purifier appliance",
@@ -3719,6 +4999,103 @@ def _semantic_similarity_for_product(product_id, query_embedding, known_hits):
     return float(np.dot(query_embedding, candidate))
 
 
+def _fts_phrase(value):
+    normalized = _normalize_search_text(value)
+    tokens = re.findall(r"[a-z0-9]+", normalized)
+    if not tokens:
+        return ""
+    return f'"{" ".join(tokens)}"'
+
+
+def _catalog_fts_queries(parsed_query):
+    strict_parts = []
+    relaxed_terms = []
+
+    for concept in parsed_query.get("concepts", []):
+        aliases = []
+        for alias in concept.get("aliases", []):
+            phrase = _fts_phrase(alias)
+            if phrase and phrase not in aliases:
+                aliases.append(phrase)
+            for token in re.findall(r"[a-z0-9]+", _normalize_search_text(alias)):
+                token_phrase = _fts_phrase(token)
+                if token_phrase and token_phrase not in relaxed_terms:
+                    relaxed_terms.append(token_phrase)
+        if aliases:
+            strict_parts.append(f"({' OR '.join(aliases)})")
+
+    for token in parsed_query.get("tokens", []):
+        phrase = _fts_phrase(token)
+        if not phrase:
+            continue
+        strict_parts.append(phrase)
+        if phrase not in relaxed_terms:
+            relaxed_terms.append(phrase)
+
+    queries = []
+    if strict_parts:
+        queries.append(" AND ".join(strict_parts))
+    if relaxed_terms:
+        relaxed_query = " OR ".join(relaxed_terms)
+        if relaxed_query not in queries:
+            queries.append(relaxed_query)
+    return queries
+
+
+def search_products_detailed_catalog(
+    user_message,
+    parsed_query=None,
+    limit=200,
+):
+    if catalog_search_store is None:
+        return []
+
+    parsed_query = parsed_query or _parse_search_query(user_message)
+    fetch_limit = max(100, min(1000, int(limit) * 5))
+
+    for fts_query in _catalog_fts_queries(parsed_query):
+        try:
+            documents = catalog_search_store.search(
+                fts_query,
+                limit=fetch_limit,
+            )
+        except Exception as exc:
+            print(f"Cảnh báo tìm kiếm catalog SQLite: {exc}")
+            return []
+
+        candidates = [
+            normalize_product_document(document)
+            for document in documents
+            if isinstance(document, dict)
+        ]
+        matched, _ = search_products(
+            user_message,
+            candidates,
+            limit=limit,
+        )
+        if matched:
+            return matched
+
+    return []
+
+
+def _hydrate_catalog_products_by_id(product_id_values):
+    if catalog_search_store is None:
+        return {}
+    try:
+        documents = catalog_search_store.get_by_ids(product_id_values)
+    except Exception as exc:
+        print(f"Cảnh báo đọc chi tiết catalog SQLite: {exc}")
+        return {}
+
+    hydrated = {}
+    for lookup_id, document in documents.items():
+        if not isinstance(document, dict):
+            continue
+        hydrated[str(lookup_id)] = normalize_product_document(document)
+    return hydrated
+
+
 def search_products_text_embedding(user_message, product_list=None, limit=20):
     """
     Hybrid retrieval nhưng embedding là bắt buộc khi FAISS hoạt động:
@@ -3729,8 +5106,23 @@ def search_products_text_embedding(user_message, product_list=None, limit=20):
     source_products = product_list if product_list is not None else products
     parsed_query = _parse_search_query(user_message)
 
+    def keyword_fallback():
+        catalog_products = search_products_detailed_catalog(
+            user_message,
+            parsed_query=parsed_query,
+            limit=limit,
+        )
+        if catalog_products or catalog_search_store is not None:
+            return catalog_products
+        keyword_products, _ = search_products(
+            user_message,
+            source_products,
+            limit=limit,
+        )
+        return keyword_products
+
     if not TEXT_EMBEDDING_SEARCH_ENABLED:
-        keyword_products, _ = search_products(user_message, source_products, limit=limit)
+        keyword_products = keyword_fallback()
         return keyword_products, parsed_query, {
             "mode": "keyword_only_disabled",
             "clip_query": None,
@@ -3738,7 +5130,7 @@ def search_products_text_embedding(user_message, product_list=None, limit=20):
         }
 
     if faiss_index is None or product_embeddings is None:
-        keyword_products, _ = search_products(user_message, source_products, limit=limit)
+        keyword_products = keyword_fallback()
         return keyword_products, parsed_query, {
             "mode": "keyword_fallback_no_faiss",
             "clip_query": None,
@@ -3749,7 +5141,7 @@ def search_products_text_embedding(user_message, product_list=None, limit=20):
     try:
         query_embedding = get_clip_text_embedding(clip_query)
     except Exception as exc:
-        keyword_products, _ = search_products(user_message, source_products, limit=limit)
+        keyword_products = keyword_fallback()
         return keyword_products, parsed_query, {
             "mode": "keyword_fallback_clip_error",
             "clip_query": clip_query,
@@ -3758,7 +5150,7 @@ def search_products_text_embedding(user_message, product_list=None, limit=20):
 
     query_embedding, validation_error = _validate_query_embedding(query_embedding)
     if validation_error:
-        keyword_products, _ = search_products(user_message, source_products, limit=limit)
+        keyword_products = keyword_fallback()
         return keyword_products, parsed_query, {
             "mode": "keyword_fallback_dimension_error",
             "clip_query": clip_query,
@@ -3770,41 +5162,51 @@ def search_products_text_embedding(user_message, product_list=None, limit=20):
         k=TEXT_FAISS_CANDIDATES,
     )
     if semantic_error:
-        keyword_products, _ = search_products(user_message, source_products, limit=limit)
+        keyword_products = keyword_fallback()
         return keyword_products, parsed_query, {
             "mode": "keyword_fallback_faiss_error",
             "clip_query": clip_query,
             "error": semantic_error,
         }
 
-    candidate_by_id = {}
-    known_similarity = {}
-    for hit in semantic_hits:
-        product = hit["product"]
-        product_id = str(product.get("id", ""))
-        if not product_id:
-            continue
-        candidate_by_id[product_id] = product
-        known_similarity[product_id] = float(hit["similarity"])
-
-    # Chỉ xếp hạng lại các ứng viên do FAISS trả về.
-    # Không quét toàn bộ catalog sản phẩm trong mỗi request.
-    semantic_candidate_products = [
-        hit["product"]
+    semantic_product_ids = [
+        str(hit["product"].get("id", ""))
         for hit in semantic_hits
         if hit.get("product")
     ]
-    keyword_candidates, _ = search_products(
-        user_message,
-        source_products,
-        limit=max(limit * 5, 50),
+    hydrated_semantic_products = _hydrate_catalog_products_by_id(
+        semantic_product_ids
     )
+
+    candidate_by_id = {}
+    known_similarity = {}
+    for hit in semantic_hits:
+        base_product = hit["product"]
+        product_id = str(base_product.get("id", ""))
+        if not product_id:
+            continue
+        product = hydrated_semantic_products.get(product_id, base_product)
+        candidate_by_id[product_id] = product
+        known_similarity[product_id] = float(hit["similarity"])
+
+    if catalog_search_store is not None:
+        keyword_candidates = search_products_detailed_catalog(
+            user_message,
+            parsed_query=parsed_query,
+            limit=max(limit * 5, 100),
+        )
+    else:
+        keyword_candidates, _ = search_products(
+            user_message,
+            source_products,
+            limit=max(limit * 5, 50),
+        )
     for product in keyword_candidates:
         product_id = str(product.get("id", ""))
         if product_id:
             candidate_by_id[product_id] = product
 
-    if _query_requests_phone_device(parsed_query):
+    if catalog_search_store is None and _query_requests_phone_device(parsed_query):
         keyword_limit = max((int(limit) if limit is not None else 20) * 8, 80)
         phone_keyword_candidates, _ = search_products(
             user_message,
@@ -3842,7 +5244,8 @@ def search_products_text_embedding(user_message, product_list=None, limit=20):
         ):
             continue
 
-        combined_score = (
+        identity_score = _product_identity_match_score(product, parsed_query)
+        combined_score = identity_score + (
             TEXT_SEMANTIC_WEIGHT * semantic_similarity
             + TEXT_KEYWORD_WEIGHT * keyword_normalized
         )
@@ -3878,6 +5281,11 @@ def search_products_text_embedding(user_message, product_list=None, limit=20):
         parsed_query,
         product_index=3,
         price_constraints=price_constraints,
+    )
+    ranked = _prioritize_specific_model_ranked(
+        ranked,
+        parsed_query,
+        product_index=3,
     )
 
     selected = [item[3] for item in ranked[:max(0, int(limit))]]
