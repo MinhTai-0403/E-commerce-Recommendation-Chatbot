@@ -1,4 +1,5 @@
 import { iphone17ProMaxDetail } from './iphone17ProMaxDetail';
+import { buildCategoryPath } from '../utils/linkRoutes';
 
 const djiPocketMediaBase = 'https://cdn2.cellphones.com.vn/x/media/catalog/product/m/a';
 
@@ -15,9 +16,9 @@ export const productDetails = [
     brand: 'DJI',
     categoryTrail: [
       { id: 'home', name: 'Trang chủ', href: '/' },
-      { id: 'phu-kien', name: 'Phụ kiện', href: '#' },
-      { id: 'camera', name: 'Camera', href: '#' },
-      { id: 'dji', name: 'DJI', href: '#' },
+      { id: 'phu-kien', name: 'Phụ kiện', href: buildCategoryPath('Phụ kiện') },
+      { id: 'camera', name: 'Camera', href: buildCategoryPath('Camera') },
+      { id: 'dji', name: 'DJI', href: buildCategoryPath('Camera', { brand: 'DJI', keyword: 'DJI', title: 'DJI' }) },
     ],
     currentPrice: 12800000,
     originalPrice: 17990000,
