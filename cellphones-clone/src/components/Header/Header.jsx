@@ -95,10 +95,10 @@ export function TopBar() {
           </div>
         </div>
         <nav className="topbar-links" aria-label="Liên kết hỗ trợ">
-          <a href="#stores">
+          <a href="/he-thong-cua-hang">
             <StoreIcon /> Cửa hàng gần bạn
           </a>
-          <a href="#orders">
+          <a href="/tra-cuu-don-hang">
             <OrderIcon /> Tra cứu đơn hàng
           </a>
           <a href="tel:18002097">
@@ -110,7 +110,14 @@ export function TopBar() {
   );
 }
 
-export function MainHeader({ activePopup, setActivePopup, selectedLocation, currentUser }) {
+export function MainHeader({
+  activePopup,
+  setActivePopup,
+  selectedLocation,
+  currentUser,
+  cartCount = 0,
+  onGoCart,
+}) {
   const accountLabel = currentUser?.fullName
     ? currentUser.fullName.split(" ").slice(-2).join(" ")
     : currentUser?.email || "Đăng nhập";
@@ -197,7 +204,7 @@ export function MainHeader({ activePopup, setActivePopup, selectedLocation, curr
         </button>
 
         {/* Search */}
-        <div className="header-search" id="header-search">
+        <form className="header-search" id="header-search" action="/search" method="get">
           <svg
             className="search-icon"
             width="20"
@@ -212,15 +219,30 @@ export function MainHeader({ activePopup, setActivePopup, selectedLocation, curr
           </svg>
           <input
             type="text"
+            name="keyword"
             placeholder="Bạn muốn mua gì hôm nay?"
             className="search-input"
           />
-        </div>
+        </form>
 
         {/* Right Actions */}
         <div className="header-actions">
-          <a href="#" className="header-cart-btn" id="header-cart-btn">
+          <a
+            href="/cart"
+            className="header-cart-btn"
+            id="header-cart-btn"
+            onClick={(event) => {
+              if (!onGoCart) return;
+              event.preventDefault();
+              onGoCart();
+            }}
+          >
             <span className="header-action-label">Giỏ hàng</span>
+            {cartCount > 0 && (
+              <span className="header-cart-count" aria-label={`${cartCount} sản phẩm trong giỏ`}>
+                {cartCount > 99 ? '99+' : cartCount}
+              </span>
+            )}
             <svg
               width="20"
               height="20"

@@ -197,6 +197,16 @@
   scroll-snap-align: start;
 }
 
+.hot-trend-empty {
+  min-width: 100%;
+  padding: 24px;
+  border-radius: 12px;
+  background: #fff;
+  color: #64748b;
+  font-weight: 700;
+  text-align: center;
+}
+
 @media (max-width: 640px) {
   .hot-trend { margin-top: 12px; }
   .hot-trend-tab-btn { height: 48px; padding: 4px 6px; }

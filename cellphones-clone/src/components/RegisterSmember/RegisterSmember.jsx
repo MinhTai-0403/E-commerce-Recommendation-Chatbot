@@ -68,7 +68,7 @@ function RegisterLeftPanel() {
           </li>
         </ul>
 
-        <a href="#policy" className="policy-link-anchor">
+        <a href="/uu-dai-smember" className="policy-link-anchor">
           Xem chi tiết chính sách ưu đãi Smember ›
         </a>
       </div>
@@ -230,11 +230,19 @@ export default function RegisterSmember({ onBackToHome, onGoLogin, onAuthSuccess
 
           <div className="register-social-heading">Đăng ký bằng tài khoản mạng xã hội</div>
           <div className="social-login-grid register-social-grid">
-            <button type="button" className="social-login-btn btn-google">
+            <button
+              type="button"
+              className="social-login-btn btn-google"
+              onClick={() => setErrorMessage("Đăng ký bằng Google chưa cấu hình OAuth. Vui lòng đăng ký bằng email và OTP trước.")}
+            >
               <img src="https://developers.google.com/identity/images/g-logo.png" alt="Google" />
               <span>Google</span>
             </button>
-            <button type="button" className="social-login-btn btn-zalo">
+            <button
+              type="button"
+              className="social-login-btn btn-zalo"
+              onClick={() => setErrorMessage("Đăng ký bằng Zalo chưa cấu hình OAuth. Vui lòng đăng ký bằng email và OTP trước.")}
+            >
               <img
                 src="https://cdn-static.smember.com.vn/_next/static/media/logo-zalo.120d889f.svg"
                 alt="Zalo"

@@ -1,4 +1,5 @@
 import { createProductSlug, extractProductSlug } from '../data/productCatalog';
+import { buildCategoryPath } from '../utils/linkRoutes';
 
 const DEFAULT_API_BASE_URL = 'http://localhost:5050';
 const PRODUCT_IMAGE_FALLBACK =
@@ -102,9 +103,21 @@ const normalizeSpecificationGroups = (groups = []) => (
 );
 
 const normalizeMedia = (product, image) => {
+  if (Array.isArray(product.media) && product.media.length > 0) {
+    return product.media
+      .map((item, index) => ({
+        id: item.id || `${product.slug || product.sku || 'product'}-media-${index + 1}`,
+        type: item.type || 'image',
+        label: item.label || (index === 0 ? 'Ảnh chính' : `Ảnh ${index + 1}`),
+        src: item.src || item.image || item.thumbnail,
+        thumbnail: item.thumbnail || item.src || item.image,
+        alt: item.alt || product.name,
+      }))
+      .filter((item) => hasUsableImage(item.src || item.thumbnail));
+  }
+
   const images = [
     ...(Array.isArray(product.images) ? product.images : []),
-    ...(Array.isArray(product.media) ? product.media.map((item) => item.src || item.thumbnail) : []),
   ].filter(hasUsableImage);
 
   const uniqueImages = Array.from(new Set(images.length ? images : [image]));
@@ -124,7 +137,7 @@ const normalizeCategoryTrail = (product) => {
     return product.categoryTrail.map((item, index) => ({
       id: item.id || `breadcrumb-${index + 1}`,
       name: item.name || item.label || 'Danh mục',
-      href: item.href || '#',
+      href: item.href || buildCategoryPath(item.name || item.label || 'Danh mục'),
     }));
   }
 
@@ -133,7 +146,7 @@ const normalizeCategoryTrail = (product) => {
     ...(Array.isArray(product.categories) ? product.categories : []).map((category) => ({
       id: createProductSlug(category),
       name: category,
-      href: '#',
+      href: buildCategoryPath(category),
     })),
   ];
 };
@@ -182,7 +195,7 @@ const buildArticleSections = (product) => {
   return [
     {
       id: 'mo-ta-san-pham',
-      heading: `Đánh giá ${product.name}`,
+      heading: 'Đặc điểm nổi bật',
       paragraphs: paragraphs.length ? paragraphs : [description],
     },
   ];
@@ -272,10 +285,26 @@ export const isSellableApiProduct = (product) => (
   hasUsableImage(product.image || product.thumbnail)
 );
 
+export const isUsableApiProductDetail = (product) => {
+  if (!product) return false;
+  const name = String(product.name || '').trim();
+  const media = Array.isArray(product.media) ? product.media : [];
+  const specifications = Array.isArray(product.specifications) ? product.specifications : [];
+  const specRows = specifications.reduce((total, group) => total + (group.rows?.length || 0), 0);
+  const hasImage = hasUsableImage(product.image || product.thumbnail || product.primaryImage) ||
+    media.some((item) => hasUsableImage(item?.src || item?.thumbnail));
+  const hasContent = Number(product.currentPrice) > 0 ||
+    specRows > 0 ||
+    Boolean(product.articleHtml || product.description);
+
+  return Boolean(name && name !== 'Sản phẩm CellphoneS' && hasImage && hasContent);
+};
+
 export const toProductDetailProduct = (product = {}, relatedProducts = []) => {
   const cardProduct = toProductCardProduct(product);
   const specifications = normalizeSpecificationGroups(product.specifications);
   const media = normalizeMedia(product, cardProduct.image);
+  const availabilityStatus = product.availability?.status || product.availability;
 
   return {
     ...product,
@@ -287,11 +316,20 @@ export const toProductDetailProduct = (product = {}, relatedProducts = []) => {
     colors: Array.isArray(product.colors) ? product.colors : [],
     promotions: buildPromotions(product),
     policies: buildPolicies(product),
+    privileges: Array.isArray(product.privileges) ? product.privileges : [],
+    paymentOffers: Array.isArray(product.paymentOffers) ? product.paymentOffers : [],
+    priceBenefits: Array.isArray(product.priceBenefits) ? product.priceBenefits : [],
     specifications,
+    articleHtml: product.articleHtml || '',
+    articleTitle: product.articleTitle,
     articleSections: buildArticleSections(product),
     faqs: Array.isArray(product.faqs) ? product.faqs : [],
+    news: Array.isArray(product.news) ? product.news : [],
+    reviewSummary: product.reviewSummary,
+    stockNote: product.stockNote,
+    shortNotice: product.shortNotice,
     relatedProducts,
-    statusLabel: product.availability === 'InStock' ? 'Còn hàng' : 'Liên hệ',
+    statusLabel: product.statusLabel || (availabilityStatus === 'InStock' ? 'Còn hàng' : 'Liên hệ'),
   };
 };
 
@@ -327,8 +365,11 @@ export async function fetchProducts(params = {}, signal) {
 }
 
 export async function fetchProductDetail(slug, signal) {
-  const payload = await fetchApiJson(`/api/products/${encodeURIComponent(slug)}`, {}, signal);
-  return payload.data;
+  const payload = await fetchApiJson(`/api/products/${encodeURIComponent(slug)}/details`, {}, signal);
+  return {
+    ...(payload.product || {}),
+    ...(payload.data || {}),
+  };
 }
 
 export async function fetchRelatedProducts(slug, limit = 8, signal) {

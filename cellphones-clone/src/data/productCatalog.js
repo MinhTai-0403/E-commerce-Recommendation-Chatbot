@@ -89,7 +89,7 @@ const buildFallbackDetail = (product) => ({
   brand: product.brandName || product.brand,
   categoryTrail: [
     { id: 'home', name: 'Trang chủ', href: '/' },
-    { id: 'catalog', name: 'Sản phẩm', href: '#' },
+    { id: 'catalog', name: 'Sản phẩm', href: '/category/san-pham' },
   ],
   currentPrice: product.currentPrice,
   originalPrice: product.originalPrice,

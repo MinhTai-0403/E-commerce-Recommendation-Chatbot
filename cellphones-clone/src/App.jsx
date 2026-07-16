@@ -1,20 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import './App.css';
 import { TopBar, MainHeader } from './components/Header/Header';
-import HeroSection from './components/HeroSection/HeroSection';
-import HotTrend from './components/HotTrend/HotTrend';
-import CategoryBlock from './components/CategoryBlock/CategoryBlock';
-import AccessoryCategories from './components/AccessoryCategories/AccessoryCategories';
-import HomeApplianceCategories from './components/HomeApplianceCategories/HomeApplianceCategories';
-import UsedProducts from './components/UsedProducts/UsedProducts';
-import TechNews from './components/TechNews/TechNews';
-import Footer from './components/Footer/Footer';
 import ChatbotWidget from './components/ChatbotWidget/ChatbotWidget';
-import ProductDetail from './components/ProductDetail/ProductDetail';
-import LoginSmember from './components/LoginSmember/LoginSmember';
-import RegisterSmember from './components/RegisterSmember/RegisterSmember';
-import AdminDashboard from './components/AdminDashboard/AdminDashboard';
+import { FloatingActions, HeaderPopups } from './components/AppChrome/AppChrome';
 import { extractProductSlug, findProductDetailByPathname } from './data/productCatalog';
+import { getInfoRouteKind, getRouteForDeadAnchor } from './utils/linkRoutes';
 import {
   phoneSubCategories, phoneBrandFilters, phoneProducts,
   laptopBrandFilters, laptopProducts,
@@ -25,17 +15,35 @@ import {
   hotTrendProducts,
 } from './data/mockData';
 import { useApiProductDetail, useApiProducts } from './hooks/useApiProducts';
-import { clearAuthSession, fetchCurrentSmember, getStoredUser } from './services/apiAuth';
+import useCart from './hooks/useCart';
+import { clearAuthSession, fetchCurrentSmember, getStoredUser, logoutSmember } from './services/apiAuth';
+
+const ProductDetail = lazy(() => import('./components/ProductDetail/ProductDetail'));
+const HeroSection = lazy(() => import('./components/HeroSection/HeroSection'));
+const HotTrend = lazy(() => import('./components/HotTrend/HotTrend'));
+const CategoryBlock = lazy(() => import('./components/CategoryBlock/CategoryBlock'));
+const AccessoryCategories = lazy(() => import('./components/AccessoryCategories/AccessoryCategories'));
+const HomeApplianceCategories = lazy(() => import('./components/HomeApplianceCategories/HomeApplianceCategories'));
+const UsedProducts = lazy(() => import('./components/UsedProducts/UsedProducts'));
+const TechNews = lazy(() => import('./components/TechNews/TechNews'));
+const Footer = lazy(() => import('./components/Footer/Footer'));
+const LoginSmember = lazy(() => import('./components/LoginSmember/LoginSmember'));
+const RegisterSmember = lazy(() => import('./components/RegisterSmember/RegisterSmember'));
+const AdminDashboard = lazy(() => import('./components/AdminDashboard/AdminDashboard'));
+const CartPage = lazy(() => import('./components/CartPage/CartPage'));
+const CheckoutPage = lazy(() => import('./components/CheckoutPage/CheckoutPage'));
+const SmemberAccount = lazy(() => import('./components/SmemberAccount/SmemberAccount'));
+const InfoPage = lazy(() => import('./components/InfoPage/InfoPage'));
 
 const homeProductQueries = {
-  hotTrend: { category: 'Phụ kiện', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
-  phones: { category: 'Điện thoại', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
-  laptops: { category: 'Laptop', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
-  audio: { category: 'Âm thanh', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
-  watches: { category: 'Đồng hồ thông minh', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
-  tvs: { category: 'Tivi', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
-  appliances: { category: 'Đồ gia dụng', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
-  coldAppliances: { include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'price_desc' },
+  hotTrend: { category: 'Phụ kiện', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
+  phones: { category: 'Điện thoại', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
+  laptops: { category: 'Laptop', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
+  audio: { category: 'Âm thanh', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
+  watches: { category: 'Đồng hồ thông minh', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
+  tvs: { category: 'Tivi', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
+  appliances: { category: 'Đồ gia dụng', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
+  coldAppliances: { include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
 };
 
 const homeTabQueries = {
@@ -81,8 +89,21 @@ const getAuthPageFromPathname = (pathname = '') => {
 const getAppPageFromPathname = (pathname = '') => {
   const cleaned = pathname.replace(/\/+$/g, '') || '/';
   if (cleaned === '/admin') return 'admin';
+  if (cleaned === '/cart' || cleaned === '/gio-hang') return 'cart';
+  if (cleaned === '/checkout' || cleaned === '/thanh-toan') return 'checkout';
+  if (cleaned === '/smember' || cleaned === '/smember/profile' || cleaned === '/smember/account' || cleaned === '/thong-tin-ca-nhan') return 'account';
   return getAuthPageFromPathname(cleaned);
 };
+
+const getPageFromPathname = (pathname = '') => (
+  getAppPageFromPathname(pathname) || getInfoRouteKind(pathname)
+);
+
+const getBrowserLocationState = () => ({
+  pathname: window.location.pathname,
+  search: window.location.search,
+  hash: window.location.hash,
+});
 
 const audioBrandFilters = [
   { id: 'all', name: 'Tất cả' },
@@ -144,57 +165,10 @@ const CELLPHONES_47_PROVINCES = [
   'Vĩnh Phúc',
 ].sort((a, b) => a.localeCompare(b, 'vi'));
 
-function FloatingActions() {
-  const [visible, setVisible] = useState(false);
-  const [showApp, setShowApp] = useState(true);
-
-  useEffect(() => {
-    const handleScroll = () => setVisible(window.scrollY > 400);
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
-
-  const scrollToTop = () => {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  return (
-    <aside className="floating-actions" aria-label="Liên kết hỗ trợ nhanh">
-      {showApp && (
-        <div className="floating-app">
-          <button type="button" onClick={() => setShowApp(false)} aria-label="Đóng quảng cáo tải ứng dụng">×</button>
-          <a href="#" aria-label="Tải ứng dụng CellphoneS">
-            <img src="https://cdn2.cellphones.com.vn/insecure/rs:fill:100:100/q:100/plain/https://cellphones.com.vn/media/wysiwyg/icon_downloadapp.png" alt="Tải ứng dụng CellphoneS" width="100" height="100" />
-          </a>
-        </div>
-      )}
-      <button
-        className={`floating-action-button back-to-top ${visible ? 'visible' : ''}`}
-        onClick={scrollToTop}
-        type="button"
-      >
-        <span>Lên đầu</span>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
-          <polyline points="18 15 12 9 6 15" />
-          <polyline points="18 20 12 14 6 20" />
-        </svg>
-      </button>
-      <a className="floating-action-button floating-contact" href="#">
-        <span>Liên hệ</span>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-          <path d="M4 14v-2a8 8 0 0 1 16 0v2" />
-          <path d="M18 19h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2h-1zM6 19H5a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h1z" />
-          <path d="M18 19c0 1.1-.9 2-2 2h-3" />
-        </svg>
-      </a>
-    </aside>
-  );
-}
-
-function ProductRoute({ slug, currentUser, onGoLogin }) {
+function ProductRoute({ slug, pathname = window.location.pathname, currentUser, onGoLogin, onAddToCart, onGoCart }) {
   const fallbackProduct = useMemo(() => (
-    findProductDetailByPathname(window.location.pathname)
-  ), []);
+    findProductDetailByPathname(pathname)
+  ), [pathname]);
   const { product, loading, error, source } = useApiProductDetail(slug, fallbackProduct);
   const resolvedProduct = source === 'api' ? product : (fallbackProduct || product);
 
@@ -204,6 +178,8 @@ function ProductRoute({ slug, currentUser, onGoLogin }) {
         product={resolvedProduct}
         currentUser={currentUser}
         onGoLogin={onGoLogin}
+        onAddToCart={onAddToCart}
+        onGoCart={onGoCart}
       />
     );
   }
@@ -213,11 +189,9 @@ function ProductRoute({ slug, currentUser, onGoLogin }) {
       <div className="container">
         <div className="route-state-box">
           <h1>{loading ? 'Đang tải sản phẩm từ MongoDB...' : 'Không tìm thấy sản phẩm'}</h1>
-          <p>
-            {error
-              ? 'API chưa trả về sản phẩm này. Kiểm tra lại backend hoặc slug sản phẩm trong MongoDB.'
-              : 'Frontend đang kết nối API backend để lấy chi tiết sản phẩm.'}
-          </p>
+          {error && (
+            <p>API chưa trả về sản phẩm này. Kiểm tra lại backend hoặc slug sản phẩm trong MongoDB.</p>
+          )}
           <a href="/">Quay lại trang chủ</a>
         </div>
       </div>
@@ -324,16 +298,18 @@ function HomePage({ currentUser, onGoLogin, onGoRegister }) {
 }
 
 function App() {
-  const appPage = getAppPageFromPathname(window.location.pathname);
-  const productSlug = appPage ? '' : extractProductSlug(window.location.pathname);
-  const isProductRoute = Boolean(productSlug) && !appPage;
+  const [currentLocation, setCurrentLocation] = useState(() => getBrowserLocationState());
+  const initialPage = getPageFromPathname(currentLocation.pathname);
+  const productSlug = initialPage ? '' : extractProductSlug(currentLocation.pathname);
+  const isProductRoute = Boolean(productSlug) && !initialPage;
   const [activePopup, setActivePopup] = useState(null);
   const [currentPage, setCurrentPage] = useState(() => (
-    appPage || 'home'
+    initialPage || 'home'
   ));
   const [currentUser, setCurrentUser] = useState(() => getStoredUser());
   const [selectedLocation, setSelectedLocation] = useState('Hồ Chí Minh');
   const [locationSearch, setLocationSearch] = useState('');
+  const cartState = useCart(currentUser);
 
   useEffect(() => {
     let ignore = false;
@@ -359,30 +335,112 @@ function App() {
     province.toLowerCase().includes(locationSearch.toLowerCase())
   ));
 
-  const handleCloseAllPopups = () => {
+  const handleCloseAllPopups = useCallback(() => {
     setActivePopup(null);
     setLocationSearch('');
-  };
+  }, []);
 
   const goHome = () => {
     window.history.pushState(null, '', '/');
+    setCurrentLocation(getBrowserLocationState());
     setCurrentPage('home');
   };
 
+  const navigateToPath = useCallback((path) => {
+    if (!path || path === '#') return;
+    if (/^https?:\/\//i.test(path) || path.startsWith('tel:') || path.startsWith('mailto:')) {
+      window.location.href = path;
+      return;
+    }
+
+    window.history.pushState(null, '', path);
+    const nextLocation = getBrowserLocationState();
+    setCurrentLocation(nextLocation);
+    const nextPage = getPageFromPathname(nextLocation.pathname) || 'home';
+    setCurrentPage(nextPage);
+    handleCloseAllPopups();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [handleCloseAllPopups]);
+
   const goLogin = () => {
     window.history.pushState(null, '', '/smember/login');
+    setCurrentLocation(getBrowserLocationState());
     setCurrentPage('login');
   };
 
   const goRegister = () => {
     window.history.pushState(null, '', '/smember/register');
+    setCurrentLocation(getBrowserLocationState());
     setCurrentPage('register');
   };
 
   const goAdmin = () => {
     window.history.pushState(null, '', '/admin');
+    setCurrentLocation(getBrowserLocationState());
     setCurrentPage('admin');
   };
+
+  const goCart = () => {
+    window.history.pushState(null, '', '/cart');
+    setCurrentLocation(getBrowserLocationState());
+    setCurrentPage('cart');
+    handleCloseAllPopups();
+  };
+
+  const goCheckout = () => {
+    window.history.pushState(null, '', '/checkout');
+    setCurrentLocation(getBrowserLocationState());
+    setCurrentPage('checkout');
+    handleCloseAllPopups();
+  };
+
+  const goAccount = () => {
+    window.history.pushState(null, '', '/smember');
+    setCurrentLocation(getBrowserLocationState());
+    setCurrentPage('account');
+    handleCloseAllPopups();
+  };
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const nextLocation = getBrowserLocationState();
+      setCurrentLocation(nextLocation);
+      setCurrentPage(getPageFromPathname(nextLocation.pathname) || 'home');
+      handleCloseAllPopups();
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [handleCloseAllPopups]);
+
+  useEffect(() => {
+    const handleDocumentClick = (event) => {
+      const anchor = event.target.closest?.('a');
+      if (!anchor || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+
+      const href = anchor.getAttribute('href') || '';
+      if (!href) return;
+      if (anchor.target && anchor.target !== '_self') return;
+      if (href.startsWith('tel:') || href.startsWith('mailto:') || /^https?:\/\//i.test(href)) return;
+
+      if (href.startsWith('#')) {
+        const targetId = href.slice(1);
+        if (targetId && document.getElementById(targetId)) return;
+
+        event.preventDefault();
+        navigateToPath(getRouteForDeadAnchor(anchor));
+        return;
+      }
+
+      if (href.startsWith('/') && !href.toLowerCase().endsWith('.html')) {
+        event.preventDefault();
+        navigateToPath(href);
+      }
+    };
+
+    document.addEventListener('click', handleDocumentClick);
+    return () => document.removeEventListener('click', handleDocumentClick);
+  }, [navigateToPath]);
 
   const handleAuthSuccess = (user) => {
     if (user) setCurrentUser(user);
@@ -393,11 +451,31 @@ function App() {
     goHome();
   };
 
-  const handleLogout = () => {
-    clearAuthSession();
+  const handleLogout = async () => {
+    try {
+      await logoutSmember();
+    } catch {
+      clearAuthSession();
+    }
+
     setCurrentUser(null);
     handleCloseAllPopups();
     goHome();
+  };
+
+  const headerPopupProps = {
+    activePopup,
+    currentUser,
+    filteredProvinces,
+    goAccount,
+    goLogin,
+    goRegister,
+    handleCloseAllPopups,
+    handleLogout,
+    locationSearch,
+    selectedLocation,
+    setLocationSearch,
+    setSelectedLocation,
   };
 
   if (currentPage === 'login') {
@@ -431,38 +509,153 @@ function App() {
     );
   }
 
+  if (currentPage === 'account') {
+    return (
+      <div className="app">
+        <TopBar />
+        <MainHeader
+          activePopup={activePopup}
+          setActivePopup={setActivePopup}
+          selectedLocation={selectedLocation}
+          currentUser={currentUser}
+          cartCount={cartState.count}
+          onGoCart={goCart}
+        />
+        <main className="main-content">
+          <SmemberAccount
+            currentUser={currentUser}
+            onGoLogin={goLogin}
+            onGoHome={goHome}
+            onLogout={handleLogout}
+            onUserUpdate={setCurrentUser}
+          />
+        </main>
+        <Footer />
+        <FloatingActions />
+        <HeaderPopups {...headerPopupProps} />
+      </div>
+    );
+  }
+
+  if (currentPage === 'cart') {
+    return (
+      <div className="app">
+        <TopBar />
+        <MainHeader
+          activePopup={activePopup}
+          setActivePopup={setActivePopup}
+          selectedLocation={selectedLocation}
+          currentUser={currentUser}
+          cartCount={cartState.count}
+          onGoCart={goCart}
+        />
+        <main className="main-content">
+          <CartPage
+            cart={cartState.cart}
+            loading={cartState.loading}
+            error={cartState.error}
+            currentUser={currentUser}
+            onUpdateItem={cartState.updateItem}
+            onRemoveItem={cartState.removeItem}
+            onClearCart={cartState.clearCart}
+            onGoHome={goHome}
+            onGoLogin={goLogin}
+            onGoCheckout={goCheckout}
+          />
+        </main>
+        <Footer />
+        <FloatingActions />
+        <HeaderPopups {...headerPopupProps} />
+      </div>
+    );
+  }
+
+  if (currentPage === 'checkout') {
+    return (
+      <div className="app">
+        <TopBar />
+        <MainHeader
+          activePopup={activePopup}
+          setActivePopup={setActivePopup}
+          selectedLocation={selectedLocation}
+          currentUser={currentUser}
+          cartCount={cartState.count}
+          onGoCart={goCart}
+        />
+        <main className="main-content">
+          <CheckoutPage
+            cart={cartState.cart}
+            currentUser={currentUser}
+            selectedLocation={selectedLocation}
+            onGoCart={goCart}
+            onGoHome={goHome}
+            onGoAccount={goAccount}
+            onClearCart={cartState.clearCart}
+          />
+        </main>
+        <Footer />
+        <FloatingActions />
+        <HeaderPopups {...headerPopupProps} />
+      </div>
+    );
+  }
+
+  if (currentPage === 'info') {
+    return (
+      <div className="app">
+        <TopBar />
+        <MainHeader
+          activePopup={activePopup}
+          setActivePopup={setActivePopup}
+          selectedLocation={selectedLocation}
+          currentUser={currentUser}
+          cartCount={cartState.count}
+          onGoCart={goCart}
+        />
+        <main className="main-content">
+          <InfoPage
+            pathname={currentLocation.pathname}
+            search={currentLocation.search}
+            onGoHome={goHome}
+          />
+        </main>
+        <Footer />
+        <FloatingActions />
+        <HeaderPopups {...headerPopupProps} />
+        <ChatbotWidget
+          userName={
+            currentUser?.fullName
+            || currentUser?.displayName
+            || currentUser?.name
+            || currentUser?.username
+            || ''
+          }
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="app">
-      {activePopup === 'category' && (
-        <div
-          className="global-backdrop-overlay"
-          onClick={handleCloseAllPopups}
-          role="presentation"
-        />
-      )}
-
-      {(activePopup === 'location' || activePopup === 'auth') && (
-        <div
-          className="location-global-overlay"
-          onClick={handleCloseAllPopups}
-          role="presentation"
-        />
-      )}
-
       <TopBar />
       <MainHeader
         activePopup={activePopup}
         setActivePopup={setActivePopup}
         selectedLocation={selectedLocation}
         currentUser={currentUser}
+        cartCount={cartState.count}
+        onGoCart={goCart}
       />
 
       <main className={`main-content ${isProductRoute ? 'product-detail-main' : ''}`}>
         {isProductRoute ? (
           <ProductRoute
+            pathname={currentLocation.pathname}
             slug={productSlug}
             currentUser={currentUser}
             onGoLogin={goLogin}
+            onAddToCart={cartState.addItem}
+            onGoCart={goCart}
           />
         ) : (
           <HomePage
@@ -476,6 +669,8 @@ function App() {
       <Footer />
 
       <FloatingActions />
+
+      <HeaderPopups {...headerPopupProps} />
 
       <ChatbotWidget
         userName={
@@ -574,6 +769,13 @@ function App() {
                 <span>Role: {currentUser.role || 'customer'}</span>
               </div>
               <div className="auth-modal-actions stacked">
+                <button
+                  className="auth-btn btn-login"
+                  onClick={goAccount}
+                  type="button"
+                >
+                  Thông tin cá nhân
+                </button>
                 <button
                   className="auth-btn btn-register"
                   onClick={handleLogout}

@@ -1358,6 +1358,7 @@ SEARCH_STOPWORDS = {
     "xem", "san", "pham", "cac", "mot", "vai", "loai", "hang", "thuong",
     "hieu", "theo", "co", "nao", "phu", "hop", "voi", "cua", "ban", "nhe",
     "a", "la", "ve", "trong", "tren", "duoi", "shop", "cua", "hang",
+    "xin", "chao", "hello", "hi", "hey", "halo", "alo",
     "danh", "muc", "category", "catalog", "mongodb", "database",
 }
 
@@ -2412,6 +2413,53 @@ def looks_like_product_request(user_message):
     return _classify_product_intent_with_gemini(user_message)
 
 
+def generate_unrecognized_message_reply(user_name=""):
+    customer_name = _clean_chat_user_name(user_name)
+    prefix = f"{_safe_text(customer_name)}, " if customer_name else ""
+    return (
+        f"{prefix}<strong>xin lỗi</strong>, mình chưa hiểu rõ ý bạn muốn hỏi. "
+        "Bạn vui lòng nhập lại tên sản phẩm hoặc nhu cầu cụ thể hơn nhé.<br>"
+        "<small>Ví dụ: laptop học tập dưới 15 triệu, tai nghe không dây, "
+        "đồng hồ Garmin pin lâu.</small>"
+    )
+
+
+def is_unrecognized_non_product_message(user_message, product_list=None):
+    """
+    Chặn các câu không phải lời chào/xã giao và cũng không có tín hiệu sản phẩm.
+    Route /chat đã xử lý social trước khi gọi hàm này.
+    """
+    normalized = _normalize_user_query(user_message)
+    if not normalized:
+        return False
+
+    parsed_query = _parse_search_query(user_message)
+    if not parsed_query.get("concepts") and not parsed_query.get("tokens"):
+        return True
+
+    product_intent_terms = (
+        PRODUCT_REQUEST_TERMS
+        + NON_PHONE_QUERY_TERMS
+        + NON_PHONE_PRODUCT_TERMS
+        + tuple(QUERY_ALIAS_GROUPS.keys())
+    )
+    if any(_contains_search_term(normalized, term) for term in product_intent_terms):
+        return False
+
+    keyword_matches, _ = search_products(
+        user_message,
+        product_list if product_list is not None else products,
+        limit=1,
+    )
+    if keyword_matches:
+        return False
+
+    if _classify_product_intent_with_gemini(user_message):
+        return False
+
+    return True
+
+
 def generate_natural_chat_reply(user_message, user_name=""):
     """
     Dùng Gemini cho hội thoại chung, nhưng không cho phép bịa tên,
@@ -3346,8 +3394,8 @@ PRODUCT_CLARIFY_GUIDES = {
     "laptop": {
         "title": "Laptop",
         "triggers": ["laptop", "may tinh xach tay", "notebook", "macbook", "ultrabook"],
-        "questions": ["Bạn dùng laptop để học tập, văn phòng, đồ họa hay gaming?", "Tầm giá khoảng bao nhiêu?", "Cần RAM/SSD bao nhiêu?", "Ưu tiên mỏng nhẹ, pin lâu hay hiệu năng mạnh?"],
-        "chips": ["Học tập", "Văn phòng", "Gaming", "Đồ họa", "RAM 16GB", "SSD 512GB", "Mỏng nhẹ", "Pin lâu"],
+        "questions": ["Bạn muốn laptop hãng nào như Lenovo, ASUS, Acer, Dell hay HP?", "Bạn dùng laptop để học tập, văn phòng, đồ họa hay gaming?", "Tầm giá khoảng bao nhiêu?", "Cần RAM/SSD bao nhiêu?"],
+        "chips": ["Lenovo", "ASUS", "Acer", "Dell", "Học tập", "Văn phòng", "Gaming", "Đồ họa", "RAM 16GB", "SSD 512GB"],
         "example": "laptop học tập dưới 15 triệu RAM 16GB",
     },
     "audio": {
@@ -4446,6 +4494,9 @@ def is_broad_product_query(user_message, parsed_query=None, matched_products=Non
     parsed_query = parsed_query or _parse_search_query(user_message)
 
     guide_key = detect_clarify_guide_key(user_message, parsed_query, matched_products)
+    direct_guide_key = _best_guide_key_from_text(
+        parsed_query.get("normalized_query", "")
+    )
     has_broad_brand = bool(
         _matched_brand_phrases(parsed_query.get("normalized_query", ""))
     )
@@ -4454,6 +4505,12 @@ def is_broad_product_query(user_message, parsed_query=None, matched_products=Non
 
     if guide_key and _is_plain_guide_query(parsed_query, guide_key):
         return True
+
+    # Loại sản phẩm + hãng đã là một bộ lọc có nghĩa. Ví dụ "Lenovo" rồi
+    # "laptop" phải trả kết quả cho laptop Lenovo, không hỏi lại lần nữa.
+    # Một hãng đứng riêng như "Samsung" vẫn được hỏi rõ loại sản phẩm.
+    if direct_guide_key and has_broad_brand:
+        return False
 
     normalized = parsed_query.get("normalized_query", "")
     if re.search(r"\d", normalized):
@@ -4495,6 +4552,314 @@ def get_clarification_suggestions(
     return _unique_strings([*brands[:4], *categories[:4]])[:8]
 
 
+BRAND_DISPLAY_NAMES = {
+    "apple": "Apple",
+    "samsung": "Samsung",
+    "xiaomi": "Xiaomi",
+    "oppo": "OPPO",
+    "realme": "realme",
+    "vivo": "vivo",
+    "asus": "ASUS",
+    "acer": "Acer",
+    "hp": "HP",
+    "dell": "Dell",
+    "lenovo": "Lenovo",
+    "msi": "MSI",
+    "lg": "LG",
+    "sony": "Sony",
+    "jbl": "JBL",
+    "logitech": "Logitech",
+    "anker": "Anker",
+    "baseus": "Baseus",
+    "havit": "Havit",
+    "philips": "Philips",
+    "panasonic": "Panasonic",
+    "garmin": "Garmin",
+}
+
+BRAND_ALIAS_DISPLAY_NAMES = {
+    "iphone": "iPhone",
+    "ipad": "iPad",
+    "macbook": "MacBook",
+    "airpods": "AirPods",
+}
+
+
+def _clarification_brand_fields(value):
+    """Lấy hãng/dòng hãng theo dạng hiển thị, không phụ thuộc thứ tự người nhập."""
+    normalized = _normalize_user_query(value)
+    fields = []
+
+    for canonical, aliases in KNOWN_BRAND_ALIASES.items():
+        candidates = _unique_strings([canonical, *aliases])
+        matched_aliases = [
+            phrase for phrase in candidates
+            if _contains_search_term(normalized, phrase)
+        ]
+        if not matched_aliases:
+            continue
+
+        preferred_alias = next(
+            (
+                phrase for phrase in matched_aliases
+                if phrase in BRAND_ALIAS_DISPLAY_NAMES
+            ),
+            "",
+        )
+        display = BRAND_ALIAS_DISPLAY_NAMES.get(
+            preferred_alias,
+            BRAND_DISPLAY_NAMES.get(canonical, str(canonical).title()),
+        )
+        fields.append((canonical, display))
+
+    return fields
+
+
+def _standalone_clarification_brand_fields(value):
+    """Trả hãng khi toàn bộ fragment chỉ là một tên hãng/dòng hãng."""
+    normalized = _normalize_user_query(value)
+    if not normalized:
+        return []
+
+    standalone_fields = []
+    for canonical, display in _clarification_brand_fields(value):
+        aliases = _unique_strings([
+            canonical,
+            *KNOWN_BRAND_ALIASES.get(canonical, []),
+        ])
+        if normalized in {
+            _normalize_user_query(alias)
+            for alias in aliases
+            if _normalize_user_query(alias)
+        }:
+            standalone_fields.append((canonical, display))
+    return standalone_fields
+
+
+def _clarification_product_display_name(guide_key):
+    guide = PRODUCT_CLARIFY_GUIDES.get(guide_key) or {}
+    triggers = guide.get("triggers", [])
+    if not triggers:
+        return ""
+
+    trigger = str(triggers[0]).strip()
+    return get_product_query_display_name(
+        trigger,
+        parsed_query=_parse_search_query(trigger),
+    )
+
+
+def _lower_query_fragment(value):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+
+    first_token = text.split(maxsplit=1)[0]
+    if first_token.isupper() or any(character.isdigit() for character in first_token):
+        return text
+    return text[:1].lower() + text[1:]
+
+
+def _format_query_price(value):
+    number = int(value or 0)
+    if number <= 0:
+        return ""
+    if number % 1_000_000 == 0:
+        return f"{number // 1_000_000} triệu"
+    if number >= 1_000_000:
+        amount = f"{number / 1_000_000:.1f}".rstrip("0").rstrip(".")
+        return f"{amount.replace('.', ',')} triệu"
+    if number % 1_000 == 0:
+        return f"{number // 1_000} nghìn"
+    return f"{number} đồng"
+
+
+def _clarification_price_field(value):
+    constraints = parse_price_constraints(value)
+    price_min = constraints.get("price_min")
+    price_max = constraints.get("price_max")
+
+    if price_min is not None and price_max is not None:
+        return (
+            f"từ {_format_query_price(price_min)} "
+            f"đến {_format_query_price(price_max)}"
+        )
+    if price_max is not None:
+        return f"dưới {_format_query_price(price_max)}"
+    if price_min is not None:
+        return f"trên {_format_query_price(price_min)}"
+    return ""
+
+
+def build_canonical_clarification_query(
+    user_message,
+    selected_label="",
+    parsed_query=None,
+    matched_products=None,
+):
+    """Ghép truy vấn theo thứ tự: sản phẩm, hãng, nhu cầu/thông số, giá."""
+    parsed_query = parsed_query or _parse_search_query(user_message)
+    matched_products = list(matched_products or [])
+    base_guide_key = detect_clarify_guide_key(
+        user_message,
+        parsed_query,
+        matched_products,
+    )
+    selected_guide_key = _best_guide_key_from_text(selected_label)
+    guide_key = selected_guide_key or base_guide_key
+
+    product_name = _clarification_product_display_name(guide_key)
+    if not product_name:
+        categories, _ = _extract_top_result_context(matched_products, max_items=1)
+        product_name = categories[0] if categories else get_product_query_display_name(
+            user_message,
+            parsed_query,
+            matched_products,
+        )
+
+    source_text = " ".join(
+        part for part in [str(user_message or ""), str(selected_label or "")]
+        if part.strip()
+    )
+    normalized_source = _normalize_user_query(source_text)
+
+    selected_brand_fields = _clarification_brand_fields(selected_label)
+    detected_brand_fields = selected_brand_fields
+    if not detected_brand_fields:
+        batch_brand_fields = []
+        message_fragments = [
+            fragment.strip()
+            for fragment in str(user_message or "").splitlines()
+            if fragment.strip()
+        ]
+        for fragment in message_fragments:
+            fragment_brands = _clarification_brand_fields(fragment)
+            if fragment_brands:
+                batch_brand_fields.append(fragment_brands)
+
+        # Trong batch nhiều tin, fragment có hãng xuất hiện sau cùng là lựa
+        # chọn mới nhất. Nếu một fragment chứa nhiều hãng để so sánh thì vẫn
+        # giữ đủ các hãng trong chính fragment đó.
+        detected_brand_fields = (
+            batch_brand_fields[-1]
+            if len(message_fragments) > 1 and batch_brand_fields
+            else _clarification_brand_fields(source_text)
+        )
+
+    brand_fields = []
+    seen_brands = set()
+    for canonical, display in detected_brand_fields:
+        if canonical in seen_brands:
+            continue
+        seen_brands.add(canonical)
+        brand_fields.append(display)
+
+    candidate_labels = []
+    for candidate_guide_key in _unique_strings([base_guide_key, guide_key]):
+        guide = PRODUCT_CLARIFY_GUIDES.get(candidate_guide_key) or {}
+        candidate_labels.extend(guide.get("chips", []))
+    if selected_label:
+        candidate_labels.append(selected_label)
+
+    criteria = []
+    seen_criteria = set()
+    normalized_selected = _normalize_user_query(selected_label)
+    for label in _unique_strings(candidate_labels):
+        normalized_label = _normalize_user_query(label)
+        if not normalized_label:
+            continue
+        if _clarification_brand_fields(label):
+            continue
+        if _best_guide_key_from_text(label) == guide_key:
+            continue
+        if not (
+            _contains_search_term(normalized_source, normalized_label)
+            or normalized_label == normalized_selected
+        ):
+            continue
+
+        key = _normalize_search_text(label)
+        if key in seen_criteria:
+            continue
+        seen_criteria.add(key)
+        criteria.append(_lower_query_fragment(label))
+
+    price_field = _clarification_price_field(source_text)
+    fields = [product_name, *brand_fields, *criteria, price_field]
+    return " ".join(str(field).strip() for field in fields if str(field).strip())
+
+
+def canonicalize_batched_product_query(user_message, matched_products=None):
+    """Sắp lại batch nhiều tin theo sản phẩm, hãng, tiêu chí và giá."""
+    fragments = [
+        " ".join(str(fragment or "").split())
+        for fragment in str(user_message or "").splitlines()
+        if str(fragment or "").strip()
+    ]
+    if len(fragments) <= 1:
+        return fragments[0] if fragments else ""
+
+    fallback = " ".join(fragments)
+    parsed_query = _parse_search_query(fallback)
+    canonical = build_canonical_clarification_query(
+        "\n".join(fragments),
+        parsed_query=parsed_query,
+        matched_products=matched_products,
+    )
+    if not canonical:
+        return fallback
+
+    canonical_parsed = _parse_search_query(canonical)
+    original_concepts = {
+        concept.get("trigger")
+        for concept in parsed_query.get("concepts", [])
+        if concept.get("trigger")
+    }
+    canonical_concepts = {
+        concept.get("trigger")
+        for concept in canonical_parsed.get("concepts", [])
+        if concept.get("trigger")
+    }
+    original_tokens = set(parsed_query.get("tokens", []))
+    canonical_tokens = set(canonical_parsed.get("tokens", []))
+
+    batch_brand_fields = [
+        fragment_brands
+        for fragment in fragments
+        if (fragment_brands := _clarification_brand_fields(fragment))
+    ]
+    latest_batch_brands = batch_brand_fields[-1] if batch_brand_fields else []
+    if latest_batch_brands:
+        selected_brands = {
+            canonical for canonical, _ in latest_batch_brands
+        }
+        for brand_canonical, _ in _clarification_brand_fields(fallback):
+            if brand_canonical in selected_brands:
+                continue
+            for alias in _unique_strings([
+                brand_canonical,
+                *KNOWN_BRAND_ALIASES.get(brand_canonical, []),
+            ]):
+                original_tokens.difference_update(
+                    re.findall(r"[a-z0-9]+", _normalize_search_text(alias))
+                )
+
+    # Không làm mất tiêu chí tự do mà guide chưa biết, chẳng hạn một mô tả
+    # rất riêng của người dùng. Khi đó chỉ nối batch và để parser gốc xử lý.
+    if not original_concepts.issubset(canonical_concepts):
+        return fallback
+    if not original_tokens.issubset(canonical_tokens):
+        return fallback
+
+    original_price = parse_price_constraints(fallback)
+    canonical_price = parse_price_constraints(canonical)
+    for key in ("price_min", "price_max"):
+        if original_price.get(key) != canonical_price.get(key):
+            return fallback
+
+    return canonical
+
+
 def get_clarification_suggestion_actions(
     user_message,
     parsed_query=None,
@@ -4505,27 +4870,16 @@ def get_clarification_suggestion_actions(
         parsed_query=parsed_query,
         matched_products=matched_products,
     )
-    base_message = str(user_message or "").strip()
-    normalized_base = _normalize_search_text(base_message)
-    identity_phrases = set(_known_brand_phrases())
-    for guide in PRODUCT_CLARIFY_GUIDES.values():
-        identity_phrases.update(
-            _normalize_search_text(trigger)
-            for trigger in guide.get("triggers", [])
-            if _normalize_search_text(trigger)
-        )
-
     actions = []
     for label in labels:
-        normalized_label = _normalize_search_text(label)
-        if not normalized_label:
+        if not _normalize_search_text(label):
             continue
-        if _contains_search_term(normalized_base, normalized_label):
-            message = base_message
-        elif normalized_label in identity_phrases:
-            message = str(label)
-        else:
-            message = f"{base_message} {label}".strip()
+        message = build_canonical_clarification_query(
+            user_message,
+            selected_label=label,
+            parsed_query=parsed_query,
+            matched_products=matched_products,
+        )
         actions.append({"label": str(label), "message": message})
     return actions
 

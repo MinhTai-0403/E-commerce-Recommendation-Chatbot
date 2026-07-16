@@ -18,7 +18,8 @@ def chat():
         return jsonify({"error": auth_error}), 401
 
     payload = request.get_json(silent=True) or {}
-    user_message = str(payload.get("message", "")).strip()
+    raw_user_message = str(payload.get("message", "")).strip()
+    user_message = core.canonicalize_batched_product_query(raw_user_message)
 
     authenticated_name = (
         str(user_document.get("full_name", "")).strip()
@@ -51,6 +52,13 @@ def chat():
                 "Hãy chạy build_index.py và kiểm tra thư mục index."
             )
         }), 503
+
+    if core.is_unrecognized_non_product_message(user_message, current_products):
+        return jsonify({
+            "reply": core.generate_unrecognized_message_reply(user_name),
+            "response_type": "unrecognized_message",
+            "products": [],
+        })
 
     matched_products, parsed_query, retrieval_info = core.search_products_text_embedding(
         user_message,

@@ -9,6 +9,7 @@ const CHATBOT_API_URL = (
 
 const CHATBOT_IMAGE = 'https://cellphones.com.vn/media/wysiwyg/ant-smile.png';
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
+const TEXT_BATCH_DELAY_MS = 6000;
 
 const DIRECT_NAME_KEYS = [
   'userName',
@@ -113,6 +114,7 @@ function ChatbotWidget({ userName = '' }) {
   const [isDraggingImage, setIsDraggingImage] = useState(false);
   const [storedUserName, setStoredUserName] = useState(() => readStoredUserName());
   const [loading, setLoading] = useState(false);
+  const [isWaitingForMoreText, setIsWaitingForMoreText] = useState(false);
 
   const activeUserName = normalizeUserName(userName) || storedUserName;
 
@@ -124,10 +126,23 @@ function ChatbotWidget({ userName = '' }) {
   const fileInputRef = useRef(null);
   const textareaRef = useRef(null);
   const dragDepthRef = useRef(0);
+  const activeUserNameRef = useRef(activeUserName);
+  const textBatchTimerRef = useRef(null);
+  const textBatchRef = useRef([]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, loading, isOpen]);
+  }, [messages, loading, isWaitingForMoreText, isOpen]);
+
+  useEffect(() => {
+    activeUserNameRef.current = activeUserName;
+  }, [activeUserName]);
+
+  useEffect(() => () => {
+    if (textBatchTimerRef.current) {
+      window.clearTimeout(textBatchTimerRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     const syncStoredUserName = () => {
@@ -191,6 +206,111 @@ function ChatbotWidget({ userName = '' }) {
         suggestions,
       },
     ]);
+  };
+
+  const buildBatchedTextMessage = (items) => {
+    const texts = items
+      .map((item) => String(item || '').trim())
+      .filter(Boolean);
+
+    if (texts.length <= 1) return texts[0] || '';
+
+    return texts.join('\n');
+  };
+
+  const clearTextBatchTimer = () => {
+    if (!textBatchTimerRef.current) return;
+
+    window.clearTimeout(textBatchTimerRef.current);
+    textBatchTimerRef.current = null;
+  };
+
+  const showChatbotConnectionError = (error) => {
+    const errorMessage = error instanceof Error
+      ? error.message
+      : 'Da xay ra loi khong xac dinh.';
+
+    addBotMessage(
+      'Minh chua the ket noi toi may chu chatbot. '
+      + 'Ban kiem tra Flask dang chay o cong 5000 nhe.'
+      + `<br><small>${escapeHtml(errorMessage)}</small>`,
+    );
+  };
+
+  const sendTextToChatbot = async (text) => {
+    const authToken = getAuthToken();
+
+    const response = await fetch(`${CHATBOT_API_URL}/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authToken
+          ? { Authorization: `Bearer ${authToken}` }
+          : {}),
+      },
+      body: JSON.stringify({
+        message: text,
+        user_name: activeUserNameRef.current || null,
+      }),
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(
+        data.reply
+        || data.error
+        || `May chu phan hoi loi HTTP ${response.status}`,
+      );
+    }
+
+    addBotMessage(
+      data.reply || 'Minh chua nhan duoc noi dung phan hoi.',
+      {
+        responseType: data.response_type,
+        suggestions: data.suggestions,
+      },
+    );
+  };
+
+  const flushTextBatch = async () => {
+    const batchedText = buildBatchedTextMessage(textBatchRef.current);
+
+    clearTextBatchTimer();
+    textBatchRef.current = [];
+    setIsWaitingForMoreText(false);
+
+    if (!batchedText) return;
+
+    setLoading(true);
+
+    try {
+      await sendTextToChatbot(batchedText);
+    } catch (error) {
+      showChatbotConnectionError(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const queueTextMessage = (text) => {
+    const userMessage = {
+      id: createMessageId(),
+      role: 'user',
+      text,
+      image: '',
+    };
+
+    textBatchRef.current = [...textBatchRef.current, text];
+
+    setMessages((current) => [...current, userMessage]);
+    setMessage('');
+    setIsWaitingForMoreText(true);
+
+    clearTextBatchTimer();
+    textBatchTimerRef.current = window.setTimeout(() => {
+      flushTextBatch();
+    }, TEXT_BATCH_DELAY_MS);
   };
 
   const selectImageFile = (file) => {
@@ -297,6 +417,23 @@ function ChatbotWidget({ userName = '' }) {
     const fileToSend = selectedFile;
     const previewToKeep = imagePreview;
     const authToken = getAuthToken();
+    const uploadMessage = buildBatchedTextMessage([
+      ...textBatchRef.current,
+      text || (
+        fileToSend
+          ? 'Tim giup toi san pham tuong tu nhu anh nay'
+          : ''
+      ),
+    ]);
+
+    if (!fileToSend) {
+      queueTextMessage(text);
+      return;
+    }
+
+    clearTextBatchTimer();
+    textBatchRef.current = [];
+    setIsWaitingForMoreText(false);
 
     const userMessage = {
       id: createMessageId(),
@@ -321,6 +458,8 @@ function ChatbotWidget({ userName = '' }) {
           text || 'Tìm giúp tôi sản phẩm tương tự như ảnh này',
         );
 
+        formData.set('message', uploadMessage);
+
         if (activeUserName) {
           formData.append('user_name', activeUserName);
         }
@@ -331,20 +470,6 @@ function ChatbotWidget({ userName = '' }) {
             ? { Authorization: `Bearer ${authToken}` }
             : {},
           body: formData,
-        });
-      } else {
-        response = await fetch(`${CHATBOT_API_URL}/chat`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(authToken
-              ? { Authorization: `Bearer ${authToken}` }
-              : {}),
-          },
-          body: JSON.stringify({
-            message: text,
-            user_name: activeUserName || null,
-          }),
         });
       }
 
@@ -375,6 +500,39 @@ function ChatbotWidget({ userName = '' }) {
         + 'Bạn kiểm tra Flask đang chạy ở cổng 5000 nhé.'
         + `<br><small>${escapeHtml(errorMessage)}</small>`,
       );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const sendSuggestionMessage = async (suggestionValue) => {
+    const text = String(suggestionValue || '').trim();
+    if (!text || loading) return;
+
+    const requestText = buildBatchedTextMessage([
+      ...textBatchRef.current,
+      text,
+    ]);
+
+    clearTextBatchTimer();
+    textBatchRef.current = [];
+    setIsWaitingForMoreText(false);
+    setMessage('');
+    setMessages((current) => [
+      ...current,
+      {
+        id: createMessageId(),
+        role: 'user',
+        text,
+        image: '',
+      },
+    ]);
+    setLoading(true);
+
+    try {
+      await sendTextToChatbot(requestText);
+    } catch (error) {
+      showChatbotConnectionError(error);
     } finally {
       setLoading(false);
     }
@@ -484,7 +642,7 @@ function ChatbotWidget({ userName = '' }) {
                             <button
                               type="button"
                               key={`${suggestion.label}-${suggestion.value}`}
-                              onClick={() => sendMessage(suggestion.value)}
+                              onClick={() => sendSuggestionMessage(suggestion.value)}
                               disabled={loading}
                             >
                               {suggestion.label}
@@ -500,7 +658,7 @@ function ChatbotWidget({ userName = '' }) {
               </div>
             ))}
 
-            {loading && (
+            {(loading || isWaitingForMoreText) && (
               <div className="chatbot-message-row bot">
                 <span className="chatbot-avatar chatbot-avatar-message">
                   <img src={CHATBOT_IMAGE} alt="" />
@@ -530,7 +688,7 @@ function ChatbotWidget({ userName = '' }) {
                 <button
                   type="button"
                   key={suggestion}
-                  onClick={() => sendMessage(suggestion)}
+                  onClick={() => sendSuggestionMessage(suggestion)}
                 >
                   {suggestion}
                 </button>

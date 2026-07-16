@@ -51,9 +51,10 @@ class QuerySpecificityTests(unittest.TestCase):
             "tablet",
             "iPhone",
             "Samsung",
-            "điện thoại Samsung",
         ]
         specific_queries = [
+            "điện thoại Samsung",
+            "Lenovo laptop",
             "điện thoại pin trâu",
             "tablet có bút",
             "laptop mỏng nhẹ",
@@ -94,7 +95,53 @@ class QuerySpecificityTests(unittest.TestCase):
         pin_action = next(
             item for item in actions if item["label"] == "Pin lâu"
         )
-        self.assertEqual("điện thoại Pin lâu", pin_action["message"])
+        self.assertEqual("điện thoại pin lâu", pin_action["message"])
+
+    def test_clarification_chip_drops_greeting_and_orders_query_fields(self):
+        actions = core.get_clarification_suggestion_actions(
+            "học tập\nLenovo\nlaptop\nhi"
+        )
+        storage_action = next(
+            item for item in actions if item["label"] == "SSD 512GB"
+        )
+        self.assertEqual(
+            "laptop Lenovo học tập SSD 512GB",
+            storage_action["message"],
+        )
+
+    def test_laptop_brand_chip_builds_product_then_brand(self):
+        actions = core.get_clarification_suggestion_actions("laptop")
+        lenovo_action = next(
+            item for item in actions if item["label"] == "Lenovo"
+        )
+        self.assertEqual("laptop Lenovo", lenovo_action["message"])
+
+    def test_new_brand_chip_replaces_previous_brand(self):
+        actions = core.get_clarification_suggestion_actions("laptop ASUS")
+        lenovo_action = next(
+            item for item in actions if item["label"] == "Lenovo"
+        )
+        self.assertEqual("laptop Lenovo", lenovo_action["message"])
+
+    def test_batched_query_orders_fields_and_uses_latest_brand(self):
+        cases = {
+            "Lenovo\nlaptop": "laptop Lenovo",
+            "laptop\nLenovo": "laptop Lenovo",
+            "laptop ASUS\nLenovo": "laptop Lenovo",
+            "học tập\nLenovo\nlaptop\nhi": "laptop Lenovo học tập",
+        }
+        for query, expected in cases.items():
+            with self.subTest(query=query):
+                canonical = core.canonicalize_batched_product_query(query)
+                self.assertEqual(expected, canonical)
+                self.assert_clarification(canonical, False)
+
+    def test_social_words_are_not_product_search_tokens(self):
+        parsed = core._parse_search_query("laptop\nhi")
+        self.assertNotIn("hi", parsed["tokens"])
+        self.assertEqual(["laptop"], [
+            concept["trigger"] for concept in parsed["concepts"]
+        ])
 
     def test_price_numbers_are_not_treated_as_product_models(self):
         cases = (
@@ -328,6 +375,38 @@ class ChatRouteSpecificityTests(unittest.TestCase):
         self.assertEqual([], payload["products"])
         self.assertEqual("clarification", payload["response_type"])
         self.assertTrue(payload["suggestions"])
+
+    def test_reversed_batched_query_searches_canonical_product_brand(self):
+        product = make_product(
+            "lenovo-laptop",
+            "Laptop Lenovo IdeaPad",
+            "Laptop",
+            price=14990000,
+            brand="Lenovo",
+        )
+        parsed = core._parse_search_query("laptop Lenovo")
+        with patch.object(
+            core,
+            "search_products_text_embedding",
+            return_value=([product], parsed, {"mode": "test"}),
+        ) as search, patch.object(
+            core,
+            "product_satisfies_user_requirements",
+            return_value=True,
+        ):
+            response = self.client.post(
+                "/chat",
+                json={"message": "Lenovo\nlaptop"},
+            )
+
+        payload = response.get_json()
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("product_search", payload["response_type"])
+        self.assertIn("Laptop Lenovo IdeaPad", payload["reply"])
+        self.assertEqual(
+            "laptop Lenovo",
+            search.call_args.args[0],
+        )
 
     def test_specific_requirement_returns_product_card(self):
         product = make_product(
