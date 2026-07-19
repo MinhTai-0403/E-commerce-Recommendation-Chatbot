@@ -37,6 +37,14 @@ export const buildCategoryPath = (category = '', options = {}) => {
   appendTruthyParam(params, 'inStock', options.inStock);
   appendTruthyParam(params, 'priceMin', options.priceMin);
   appendTruthyParam(params, 'priceMax', options.priceMax);
+  appendTruthyParam(params, 'ram', options.ram);
+  appendTruthyParam(params, 'storage', options.storage);
+  appendTruthyParam(params, 'screenSize', options.screenSize);
+  appendTruthyParam(params, 'usage', options.usage);
+  appendTruthyParam(params, 'display', options.display);
+  appendTruthyParam(params, 'camera', options.camera);
+  appendTruthyParam(params, 'refreshRate', options.refreshRate);
+  appendTruthyParam(params, 'special', options.special);
 
   const query = params.toString();
   return `/category/${createSiteSlug(categoryText || keyword || 'san-pham')}${query ? `?${query}` : ''}`;
@@ -111,6 +119,7 @@ export const directInfoRoutes = {
   '/he-thong-cua-hang': 'Hệ thống cửa hàng CellphoneS',
   '/tra-cuu-don-hang': 'Tra cứu đơn hàng',
   '/lien-he': 'Liên hệ CellphoneS',
+  '/support': 'Góp ý - Phản hồi - Hỗ trợ',
   '/dieu-khoan-su-dung': 'Điều khoản sử dụng',
   '/tos': 'Quy chế hoạt động',
   '/thanh-vien/dienthoaivui': 'Điện Thoại Vui',
@@ -145,6 +154,7 @@ const directLabelRoutes = [
   { keywords: ['quy che hoat dong'], path: '/tos' },
   { keywords: ['bao mat thong tin ca nhan', 'chinh sach bao mat'], path: '/tos?part=privacy-policy' },
   { keywords: ['lien he hop tac kinh doanh'], path: '/lien-he-hop-tac' },
+  { keywords: ['gop y phan hoi ho tro', 'phan hoi ho tro', 'ho tro khach hang'], path: '/support' },
   { keywords: ['dich vu bao hanh mo rong', 'bao hanh mo rong'], path: '/bieu-phi-bao-hanh-mo-rong' },
   { keywords: ['dieu khoan su dung'], path: '/dieu-khoan-su-dung' },
 ];
@@ -270,6 +280,14 @@ export function buildInfoPageModel(pathname = '', search = '') {
   const inStock = params.get('inStock') || '';
   const priceMin = params.get('priceMin') || '';
   const priceMax = params.get('priceMax') || '';
+  const ram = params.get('ram') || '';
+  const storage = params.get('storage') || '';
+  const screenSize = params.get('screenSize') || params.get('screen_size') || '';
+  const usage = params.get('usage') || '';
+  const display = params.get('display') || '';
+  const camera = params.get('camera') || '';
+  const refreshRate = params.get('refreshRate') || params.get('refresh_rate') || '';
+  const special = params.get('special') || '';
   const titleParam = params.get('title') || '';
   const segments = pathname.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean);
   const root = segments[0] || 'info';
@@ -335,6 +353,14 @@ export function buildInfoPageModel(pathname = '', search = '') {
     inStock,
     priceMin,
     priceMax,
+    ram,
+    storage,
+    screenSize,
+    usage,
+    display,
+    camera,
+    refreshRate,
+    special,
     isBrandCategory: root === 'category' && Boolean(brand),
     isListing,
     title,

@@ -335,53 +335,12 @@ function detectDeviceBrand(deviceLine, fallbackBrand) {
   return brand || fallbackBrand || null;
 }
 
-function buildTags(values) {
-  return unique(
-    [
-      ...values.labelPath,
-      ...values.categoryPath,
-      values.section,
-      values.deviceGroup,
-      values.deviceType,
-      values.productName,
-      values.brand,
-      values.deviceBrand,
-      values.deviceLine,
-      values.modelCode,
-      values.sku,
-    ]
-      .filter(Boolean)
-      .flatMap((value) => [value, slugify(value)])
-  );
-}
-
 function confidenceScore({ labelPath, categoryPath, deviceLine }) {
   let score = 0.55;
   if (labelPath.length >= 3) score += 0.25;
   if (categoryPath.length >= 2) score += 0.1;
   if (deviceLine) score += 0.08;
   return Math.min(0.99, Number(score.toFixed(2)));
-}
-
-function evidenceFor(product, labelPath, deviceLine) {
-  return [
-    labelPath.length ? "breadcrumbs" : null,
-    product.categories.length ? "categories" : null,
-    product.name ? "name" : null,
-    product.brand ? "brand" : null,
-    product.sku ? "sku" : null,
-    deviceLine ? "device_line_rule" : null,
-  ].filter(Boolean);
-}
-
-function priceTier(price) {
-  if (!price || price <= 0) return "unknown";
-  if (price < 2000000) return "duoi_2_trieu";
-  if (price < 5000000) return "2_5_trieu";
-  if (price < 10000000) return "5_10_trieu";
-  if (price < 20000000) return "10_20_trieu";
-  if (price < 30000000) return "20_30_trieu";
-  return "tren_30_trieu";
 }
 
 function cleanText(value) {

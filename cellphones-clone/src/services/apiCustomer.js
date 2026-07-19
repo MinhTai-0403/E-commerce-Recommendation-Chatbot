@@ -111,6 +111,19 @@ export async function fetchCustomerInvoices() {
   return payload.data || [];
 }
 
+export async function fetchCustomerReturns(params = {}) {
+  const payload = await customerRequest('/api/returns', { params });
+  return payload.data || [];
+}
+
+export async function createCustomerReturnRequest(body) {
+  const payload = await customerRequest('/api/returns', {
+    method: 'POST',
+    body,
+  });
+  return payload.data;
+}
+
 export async function markCustomerNotificationRead(notificationId) {
   const payload = await customerRequest(`/api/notifications/${encodeURIComponent(notificationId)}/read`, {
     method: 'PATCH',

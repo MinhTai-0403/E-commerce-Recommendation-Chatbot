@@ -1,10 +1,13 @@
 const crypto = require("crypto");
+const dns = require("dns").promises;
 const nodemailer = require("nodemailer");
+const { OAuth2Client } = require("google-auth-library");
 const { ObjectId } = require("mongodb");
 const { rateLimitOrSend } = require("../middlewares/rate-limit");
 
 const OTP_PURPOSE_REGISTER = "register";
 const OTP_PURPOSE_FORGOT_PASSWORD = "forgot_password";
+const OTP_PURPOSE_EDUCATION = "education_verification";
 const MAX_OTP_ATTEMPTS = 5;
 const PASSWORD_ITERATIONS = 120_000;
 const PASSWORD_KEY_LENGTH = 32;
@@ -12,6 +15,7 @@ const PASSWORD_DIGEST = "sha256";
 
 let indexesReady = false;
 let mailTransporter;
+let googleOAuthClient;
 
 function getAuthConfig() {
   const smtpUser = process.env.SMTP_USER || process.env.gmail || "";
@@ -27,12 +31,22 @@ function getAuthConfig() {
     otpResendCooldownSeconds: Number(process.env.OTP_RESEND_COOLDOWN_SECONDS || 60),
     authCookieName: process.env.AUTH_COOKIE_NAME || "cellphones_auth",
     authCookieSecure: String(process.env.AUTH_COOKIE_SECURE || "false").toLowerCase() === "true",
+    googleClientId: process.env.GOOGLE_CLIENT_ID || "",
     smtpUser,
     smtpAppPassword,
     mailFrom:
       process.env.MAIL_FROM ||
       `${process.env.MAIL_FROM_NAME || "CellphoneS Clone"} <${smtpUser}>`,
   };
+}
+
+function getGoogleOAuthClient() {
+  const clientId = getAuthConfig().googleClientId;
+  if (!clientId) {
+    throw new Error("Missing auth environment variable: GOOGLE_CLIENT_ID");
+  }
+  if (!googleOAuthClient) googleOAuthClient = new OAuth2Client(clientId);
+  return { client: googleOAuthClient, clientId };
 }
 
 function requireAuthSecrets() {
@@ -62,12 +76,38 @@ function validateEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+function isEducationEmail(email = "") {
+  if (!validateEmail(email)) return false;
+  const domain = normalizeEmail(email).split("@")[1] || "";
+  return domain.includes("edu") || domain.includes("uni");
+}
+
+async function hasMailExchange(email = "") {
+  const domain = normalizeEmail(email).split("@")[1] || "";
+  if (!domain) return false;
+
+  try {
+    const records = await dns.resolveMx(domain);
+    return records.some((record) => cleanText(record.exchange, 255));
+  } catch {
+    return false;
+  }
+}
+
 function sanitizeCustomerType(value = "normal") {
-  return ["normal", "student", "business"].includes(value) ? value : "normal";
+  return ["normal", "student", "teacher", "business"].includes(value) ? value : "normal";
 }
 
 function cleanText(value = "", maxLength = 255) {
   return String(value || "").trim().slice(0, maxLength);
+}
+
+function sanitizeBusinessDocument(value = "") {
+  const dataUrl = String(value || "").trim();
+  const match = dataUrl.match(/^data:image\/(jpeg|jpg|png|webp);base64,([a-z0-9+/=]+)$/i);
+  if (!match) return "";
+  const estimatedBytes = Math.floor((match[2].length * 3) / 4);
+  return estimatedBytes <= 2_000_000 ? dataUrl : "";
 }
 
 function validatePasswordInput(password = "") {
@@ -354,6 +394,190 @@ async function sendForgotPasswordOtpEmail({ email, fullName, otp }) {
   });
 }
 
+async function sendEducationOtpEmail({ email, fullName, otp, verificationType }) {
+  const config = requireAuthSecrets();
+  const typeLabel = verificationType === "teacher" ? "giáo viên" : "sinh viên";
+  const safeName = cleanText(fullName || "bạn", 120);
+  const html = `
+    <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111827">
+      <h2 style="color:#d70018;margin-bottom:8px">Xác minh S-Student/S-Teacher</h2>
+      <p>Xin chào ${safeName},</p>
+      <p>Mã OTP xác minh email ${typeLabel} của bạn là:</p>
+      <div style="font-size:28px;font-weight:700;letter-spacing:6px;color:#d70018;margin:20px 0">${otp}</div>
+      <p>Mã hết hạn sau ${config.otpExpiresMinutes} phút.</p>
+      <p style="color:#6b7280;font-size:13px">Email được gửi tự động, vui lòng không trả lời.</p>
+    </div>
+  `;
+
+  const delivery = await getMailTransporter().sendMail({
+    from: config.mailFrom,
+    to: email,
+    subject: `Mã OTP xác minh ${typeLabel} CellphoneS Clone`,
+    text: `Mã OTP xác minh ${typeLabel} của bạn là ${otp}. Mã hết hạn sau ${config.otpExpiresMinutes} phút.`,
+    html,
+  });
+
+  const accepted = Array.isArray(delivery.accepted)
+    ? delivery.accepted.map(normalizeEmail)
+    : [];
+  if (!accepted.includes(normalizeEmail(email))) {
+    throw new Error("EDUCATION_EMAIL_NOT_ACCEPTED");
+  }
+
+  return delivery;
+}
+
+async function sendNewsletterCouponEmail({ email, couponCode = "khuyenmai10" }) {
+  const config = requireAuthSecrets();
+  const safeCode = cleanText(couponCode, 80) || "khuyenmai10";
+  const html = `
+    <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111827;max-width:560px;margin:0 auto">
+      <div style="background:#d70018;color:#fff;padding:18px 22px;border-radius:14px 14px 0 0">
+        <h2 style="margin:0;font-size:22px">CellphoneS tặng bạn mã giảm giá 10%</h2>
+      </div>
+      <div style="border:1px solid #fecdd3;border-top:none;padding:22px;border-radius:0 0 14px 14px;background:#fff">
+        <p>Xin chào,</p>
+        <p>Cảm ơn bạn đã đăng ký nhận tin khuyến mãi từ CellphoneS.</p>
+        <p>Mã giảm giá của bạn là:</p>
+        <div style="font-size:30px;font-weight:800;letter-spacing:2px;color:#d70018;background:#fff1f2;border:1px dashed #d70018;border-radius:12px;padding:14px 18px;text-align:center;margin:18px 0;text-transform:uppercase">
+          ${safeCode}
+        </div>
+        <p>Nhập mã này ở bước thanh toán để nhận ưu đãi 10%.</p>
+        <p style="color:#6b7280;font-size:13px">Email được gửi tự động, vui lòng không trả lời.</p>
+      </div>
+    </div>
+  `;
+
+  return getMailTransporter().sendMail({
+    from: config.mailFrom,
+    to: email,
+    subject: "Mã giảm giá 10% từ CellphoneS",
+    text: `Cảm ơn bạn đã đăng ký nhận tin khuyến mãi. Mã giảm giá 10% của bạn là ${safeCode}.`,
+    html,
+  });
+}
+
+function escapeEmailHtml(value = "") {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function formatInvoiceMoney(value) {
+  return `${Math.max(0, Number(value || 0)).toLocaleString("vi-VN")} đ`;
+}
+
+function buildOrderInvoiceEmailHtml(order = {}) {
+  const invoice = order.companyInvoice || {};
+  const customer = order.customer || {};
+  const receiver = order.receiver || {};
+  const shippingAddress = order.shippingAddress || {};
+  const totals = order.totals || {};
+  const items = Array.isArray(order.items) ? order.items : [];
+  const createdAt = order.createdAt ? new Date(order.createdAt) : new Date();
+  const createdAtText = Number.isNaN(createdAt.getTime())
+    ? ""
+    : createdAt.toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
+  const deliveryAddress = shippingAddress.fullAddress || [
+    shippingAddress.addressLine,
+    shippingAddress.ward,
+    shippingAddress.district,
+    shippingAddress.province,
+  ].filter(Boolean).join(", ");
+  const rows = items.map((item, index) => {
+    const quantity = Math.max(1, Number(item.quantity || 1));
+    const price = Math.max(0, Number(item.currentPrice || item.price || 0));
+    return `
+      <tr>
+        <td style="border:1px solid #e5e7eb;padding:10px;text-align:center">${index + 1}</td>
+        <td style="border:1px solid #e5e7eb;padding:10px">${escapeEmailHtml(item.name || "Sản phẩm CellphoneS")}</td>
+        <td style="border:1px solid #e5e7eb;padding:10px;text-align:center">${quantity}</td>
+        <td style="border:1px solid #e5e7eb;padding:10px;text-align:right">${formatInvoiceMoney(price)}</td>
+        <td style="border:1px solid #e5e7eb;padding:10px;text-align:right;font-weight:700">${formatInvoiceMoney(price * quantity)}</td>
+      </tr>
+    `;
+  }).join("");
+
+  return `<!doctype html>
+  <html lang="vi">
+    <head><meta charset="utf-8"><title>Hóa đơn ${escapeEmailHtml(order.orderCode || "")}</title></head>
+    <body style="margin:0;background:#f3f4f6;font-family:Arial,sans-serif;color:#111827">
+      <div style="max-width:760px;margin:24px auto;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #e5e7eb">
+        <div style="background:#d70018;color:#fff;padding:22px 28px">
+          <h1 style="margin:0;font-size:25px">CELLPHONES</h1>
+          <p style="margin:6px 0 0">Hóa đơn đặt hàng #${escapeEmailHtml(order.orderCode || "")}</p>
+        </div>
+        <div style="padding:26px 28px">
+          <p>Xin chào <strong>${escapeEmailHtml(customer.fullName || receiver.fullName || "Quý khách")}</strong>,</p>
+          <p>Bill của đơn hàng đã được tạo theo yêu cầu xuất hóa đơn và gửi đến email này.</p>
+
+          <table style="width:100%;border-collapse:collapse;margin:18px 0">
+            <tr><td style="padding:5px 0;color:#6b7280">Ngày đặt hàng</td><td style="padding:5px 0;text-align:right;font-weight:700">${escapeEmailHtml(createdAtText)}</td></tr>
+            <tr><td style="padding:5px 0;color:#6b7280">Công ty</td><td style="padding:5px 0;text-align:right;font-weight:700">${escapeEmailHtml(invoice.companyName || "")}</td></tr>
+            <tr><td style="padding:5px 0;color:#6b7280">Mã số thuế</td><td style="padding:5px 0;text-align:right;font-weight:700">${escapeEmailHtml(invoice.taxCode || "")}</td></tr>
+            <tr><td style="padding:5px 0;color:#6b7280">Địa chỉ công ty</td><td style="padding:5px 0;text-align:right;font-weight:700">${escapeEmailHtml(invoice.companyAddress || "")}</td></tr>
+            <tr><td style="padding:5px 0;color:#6b7280">Người nhận</td><td style="padding:5px 0;text-align:right;font-weight:700">${escapeEmailHtml(receiver.fullName || customer.fullName || "")}</td></tr>
+            <tr><td style="padding:5px 0;color:#6b7280">Địa chỉ nhận hàng</td><td style="padding:5px 0;text-align:right;font-weight:700">${escapeEmailHtml(deliveryAddress)}</td></tr>
+          </table>
+
+          <table style="width:100%;border-collapse:collapse;margin-top:18px">
+            <thead>
+              <tr style="background:#f9fafb">
+                <th style="border:1px solid #e5e7eb;padding:10px">STT</th>
+                <th style="border:1px solid #e5e7eb;padding:10px;text-align:left">Sản phẩm</th>
+                <th style="border:1px solid #e5e7eb;padding:10px">SL</th>
+                <th style="border:1px solid #e5e7eb;padding:10px;text-align:right">Đơn giá</th>
+                <th style="border:1px solid #e5e7eb;padding:10px;text-align:right">Thành tiền</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+
+          <div style="margin:20px 0 0 auto;max-width:380px">
+            <div style="display:flex;justify-content:space-between;padding:5px 0"><span>Tạm tính</span><strong>${formatInvoiceMoney(totals.subtotal)}</strong></div>
+            <div style="display:flex;justify-content:space-between;padding:5px 0"><span>Phí vận chuyển</span><strong>${formatInvoiceMoney(totals.shippingFee)}</strong></div>
+            <div style="display:flex;justify-content:space-between;padding:5px 0;color:#d70018"><span>Tổng giảm giá</span><strong>- ${formatInvoiceMoney(totals.totalDiscount)}</strong></div>
+            <div style="display:flex;justify-content:space-between;border-top:2px solid #111827;margin-top:8px;padding-top:12px;font-size:20px"><span>Tổng thanh toán</span><strong style="color:#d70018">${formatInvoiceMoney(totals.total || totals.roundedTotal)}</strong></div>
+          </div>
+
+          <p style="margin-top:26px;color:#6b7280;font-size:13px">Đây là bill xác nhận thông tin đơn hàng. Hóa đơn điện tử chính thức sẽ được xử lý theo thông tin doanh nghiệp đã cung cấp.</p>
+        </div>
+      </div>
+    </body>
+  </html>`;
+}
+
+async function sendOrderInvoiceEmail({ order }) {
+  const config = requireAuthSecrets();
+  const invoice = order?.companyInvoice || {};
+  const email = normalizeEmail(invoice.invoiceEmail || invoice.email || order?.customer?.email);
+  if (!validateEmail(email)) throw new Error("INVOICE_EMAIL_INVALID");
+
+  const orderCode = cleanText(order?.orderCode, 80) || "DON-HANG";
+  const html = buildOrderInvoiceEmailHtml(order);
+  const delivery = await getMailTransporter().sendMail({
+    from: config.mailFrom,
+    to: email,
+    subject: `Bill đơn hàng ${orderCode} - CellphoneS`,
+    text: `Bill đơn hàng ${orderCode} có tổng thanh toán ${formatInvoiceMoney(order?.totals?.total || order?.totals?.roundedTotal)}.`,
+    html,
+    attachments: [
+      {
+        filename: `hoa-don-${orderCode}.html`,
+        content: Buffer.from(html, "utf8"),
+        contentType: "text/html; charset=utf-8",
+      },
+    ],
+  });
+
+  const accepted = Array.isArray(delivery.accepted) ? delivery.accepted.map(normalizeEmail) : [];
+  if (accepted.length && !accepted.includes(email)) throw new Error("INVOICE_EMAIL_NOT_ACCEPTED");
+  return delivery;
+}
+
 async function ensureAuthIndexes(db) {
   if (indexesReady) return;
 
@@ -373,6 +597,30 @@ async function ensureAuthIndexes(db) {
     users.createIndex(
       { phoneNormalized: 1 },
       { unique: true, sparse: true, name: "unique_user_phone" }
+    ),
+    users.createIndex(
+      { googleSub: 1 },
+      { unique: true, sparse: true, name: "unique_user_google_sub" }
+    ),
+    users.createIndex(
+      { "educationVerification.emailNormalized": 1 },
+      { unique: true, sparse: true, name: "unique_education_email" }
+    ),
+    users.createIndex(
+      { "businessVerification.taxCode": 1 },
+      {
+        unique: true,
+        name: "unique_business_tax_code",
+        partialFilterExpression: { "businessVerification.taxCode": { $type: "string" } },
+      }
+    ),
+    users.createIndex(
+      { "businessVerification.emailNormalized": 1 },
+      {
+        unique: true,
+        name: "unique_business_email",
+        partialFilterExpression: { "businessVerification.emailNormalized": { $type: "string" } },
+      }
     ),
     otps.createIndex({ emailNormalized: 1, purpose: 1 }, { name: "otp_email_purpose" }),
     otps.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0, name: "otp_expiry_ttl" }),
@@ -528,6 +776,12 @@ async function computeUserMemberStats(getDb, user = {}) {
   }
 }
 
+function publicBusinessVerification(value = null) {
+  if (!value || typeof value !== "object") return null;
+  const { registrationDocument, ...safeValue } = value;
+  return safeValue;
+}
+
 function publicUser(user, memberStats = null) {
   return {
     id: String(user._id || user.id),
@@ -542,11 +796,317 @@ function publicUser(user, memberStats = null) {
     role: user.role || "customer",
     status: user.status || "active",
     emailVerified: Boolean(user.emailVerified),
+    educationVerification: user.educationVerification || null,
+    businessVerification: publicBusinessVerification(user.businessVerification),
+    memberTags: Array.isArray(user.memberTags) ? user.memberTags : [],
     ...(memberStats || {}),
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
     lastLoginAt: user.lastLoginAt,
   };
+}
+
+async function getAuthenticatedUser(req, getDb) {
+  const payload = verifyJwt(getAuthToken(req));
+  if (!payload?.sub || !ObjectId.isValid(payload.sub)) return null;
+  const { users } = await getAuthCollections(getDb);
+  return users.findOne({ _id: new ObjectId(payload.sub), status: { $ne: "blocked" } });
+}
+
+async function handleRequestEducationOtp({ req, res, parseJsonBody, sendJson, sendError, getDb }) {
+  requireAuthSecrets();
+  const user = await getAuthenticatedUser(req, getDb);
+  if (!user) {
+    sendError(res, 401, "Vui lòng đăng nhập Smember trước khi xác minh.");
+    return;
+  }
+
+  const body = await parseJsonBody(req);
+  const email = normalizeEmail(body.email);
+  const verificationType = body.type === "teacher" ? "teacher" : "student";
+  const schoolName = cleanText(body.schoolName, 180);
+
+  if (!isEducationEmail(email)) {
+    sendError(res, 400, "Email trường không hợp lệ. Vui lòng kiểm tra lại email trường.");
+    return;
+  }
+  if (!(await hasMailExchange(email))) {
+    sendError(res, 400, "Tên miền email trường không tồn tại hoặc không thể nhận email. Vui lòng dùng email trường thật.");
+    return;
+  }
+  if (!schoolName) {
+    sendError(res, 400, "Vui lòng nhập tên trường hoặc cơ sở giáo dục.");
+    return;
+  }
+  if (!rateLimitOrSend({
+    req,
+    res,
+    sendError,
+    scope: "auth:education-otp",
+    identifier: `${user._id}:${email}`,
+    message: "Bạn yêu cầu OTP xác minh quá nhanh. Vui lòng thử lại sau ít phút.",
+  })) return;
+
+  const { config, users, otps } = await getAuthCollections(getDb);
+  const duplicate = await users.findOne({
+    _id: { $ne: user._id },
+    "educationVerification.emailNormalized": email,
+    "educationVerification.status": "verified",
+  });
+  if (duplicate) {
+    sendError(res, 409, "Email trường này đã được xác minh cho tài khoản khác.");
+    return;
+  }
+
+  const now = new Date();
+  const existingOtp = await otps.findOne({
+    userId: String(user._id),
+    purpose: OTP_PURPOSE_EDUCATION,
+    expiresAt: { $gt: now },
+  });
+  if (existingOtp?.lastSentAt) {
+    const elapsed = (Date.now() - new Date(existingOtp.lastSentAt).getTime()) / 1000;
+    if (elapsed < config.otpResendCooldownSeconds) {
+      sendError(res, 429, `Vui lòng chờ ${Math.ceil(config.otpResendCooldownSeconds - elapsed)} giây trước khi gửi lại OTP.`);
+      return;
+    }
+  }
+
+  const otp = createOtp();
+  const expiresAt = new Date(Date.now() + config.otpExpiresMinutes * 60 * 1000);
+  await otps.updateOne(
+    { userId: String(user._id), purpose: OTP_PURPOSE_EDUCATION },
+    {
+      $set: {
+        userId: String(user._id),
+        email,
+        emailNormalized: email,
+        purpose: OTP_PURPOSE_EDUCATION,
+        otpHash: hashOtp(email, otp),
+        attempts: 0,
+        profile: { verificationType, schoolName },
+        expiresAt,
+        lastSentAt: now,
+        updatedAt: now,
+      },
+      $setOnInsert: { createdAt: now },
+    },
+    { upsert: true }
+  );
+
+  try {
+    await sendEducationOtpEmail({
+      email,
+      fullName: user.fullName,
+      otp,
+      verificationType,
+    });
+  } catch (error) {
+    await otps.deleteOne({ userId: String(user._id), purpose: OTP_PURPOSE_EDUCATION });
+    console.error(`[education-otp] Không thể gửi OTP tới ${email}:`, error?.message || error);
+    sendError(res, 502, "Không thể gửi OTP tới email này. Vui lòng kiểm tra lại địa chỉ email hoặc thử lại sau.");
+    return;
+  }
+  authSuccess(res, sendJson, 200, "OTP xác minh đã được gửi về email trường.", {
+    data: { email, type: verificationType, schoolName, expiresAt },
+  });
+}
+
+async function handleVerifyEducationOtp({ req, res, parseJsonBody, sendJson, sendError, getDb }) {
+  requireAuthSecrets();
+  const user = await getAuthenticatedUser(req, getDb);
+  if (!user) {
+    sendError(res, 401, "Vui lòng đăng nhập Smember trước khi xác minh.");
+    return;
+  }
+
+  const body = await parseJsonBody(req);
+  const email = normalizeEmail(body.email);
+  const otp = String(body.otp || "").trim();
+  if (!isEducationEmail(email) || !/^\d{6}$/.test(otp)) {
+    sendError(res, 400, "Email trường hoặc mã OTP không hợp lệ.");
+    return;
+  }
+  if (!rateLimitOrSend({
+    req,
+    res,
+    sendError,
+    scope: "auth:education-verify",
+    identifier: `${user._id}:${email}`,
+    message: "Bạn xác minh OTP quá nhanh. Vui lòng thử lại sau ít phút.",
+  })) return;
+
+  const { users, otps } = await getAuthCollections(getDb);
+  const now = new Date();
+  const otpDoc = await otps.findOne({
+    userId: String(user._id),
+    emailNormalized: email,
+    purpose: OTP_PURPOSE_EDUCATION,
+    expiresAt: { $gt: now },
+  });
+  if (!otpDoc) {
+    sendError(res, 400, "OTP đã hết hạn hoặc không tồn tại.");
+    return;
+  }
+  if (Number(otpDoc.attempts || 0) >= MAX_OTP_ATTEMPTS) {
+    sendError(res, 429, "Bạn đã nhập sai OTP quá nhiều lần. Vui lòng gửi mã mới.");
+    return;
+  }
+  if (otpDoc.otpHash !== hashOtp(email, otp)) {
+    await otps.updateOne({ _id: otpDoc._id }, { $inc: { attempts: 1 }, $set: { updatedAt: now } });
+    sendError(res, 400, "Mã OTP không chính xác.");
+    return;
+  }
+
+  const verificationType = otpDoc.profile?.verificationType === "teacher" ? "teacher" : "student";
+  const expiresAt = new Date(now);
+  expiresAt.setFullYear(expiresAt.getFullYear() + 1);
+  const educationVerification = {
+    provider: "internal_school_email",
+    status: "verified",
+    type: verificationType,
+    email,
+    emailNormalized: email,
+    schoolName: cleanText(otpDoc.profile?.schoolName, 180),
+    verifiedAt: now,
+    expiresAt,
+  };
+  const memberTag = verificationType === "teacher" ? "S-Teacher" : "S-Student";
+  const result = await users.findOneAndUpdate(
+    { _id: user._id },
+    {
+      $set: {
+        customerType: verificationType,
+        educationVerification,
+        updatedAt: now,
+      },
+      $addToSet: { memberTags: memberTag },
+    },
+    { returnDocument: "after" }
+  );
+  await otps.deleteOne({ _id: otpDoc._id });
+  const updatedUser = result?.value || result;
+  authSuccess(res, sendJson, 200, `Xác minh ${memberTag} thành công.`, {
+    data: { user: publicUser(updatedUser, await computeUserMemberStats(getDb, updatedUser)) },
+  });
+}
+
+async function handleSubmitBusinessVerification({ req, res, parseJsonBody, sendJson, sendError, getDb }) {
+  const user = await getAuthenticatedUser(req, getDb);
+  if (!user) {
+    sendError(res, 401, "Vui lòng đăng nhập Smember trước khi gửi hồ sơ doanh nghiệp.");
+    return;
+  }
+
+  if (user.businessVerification?.status === "verified") {
+    sendError(res, 409, "Tài khoản đã được xác minh S-Business.");
+    return;
+  }
+
+  const body = await parseJsonBody(req);
+  const companyName = cleanText(body.companyName, 180);
+  const taxCode = cleanText(body.taxCode, 20).replace(/[^\d-]/g, "");
+  const companyAddress = cleanText(body.companyAddress, 320);
+  const representativeName = cleanText(body.representativeName || user.fullName, 120);
+  const position = cleanText(body.position, 120);
+  const email = normalizeEmail(body.email || body.businessEmail);
+  const phone = normalizePhone(body.phone || body.businessPhone);
+  const registrationDocument = sanitizeBusinessDocument(body.registrationDocument);
+
+  if (companyName.length < 2) {
+    sendError(res, 400, "Vui lòng nhập tên doanh nghiệp.");
+    return;
+  }
+  if (!/^\d{10}(?:-\d{3})?$/.test(taxCode)) {
+    sendError(res, 400, "Mã số thuế cần gồm 10 chữ số hoặc 10 chữ số kèm mã đơn vị 3 chữ số.");
+    return;
+  }
+  if (companyAddress.length < 5) {
+    sendError(res, 400, "Vui lòng nhập địa chỉ trụ sở doanh nghiệp.");
+    return;
+  }
+  if (representativeName.length < 2 || position.length < 2) {
+    sendError(res, 400, "Vui lòng nhập người đại diện và chức vụ.");
+    return;
+  }
+  if (!validateEmail(email)) {
+    sendError(res, 400, "Email doanh nghiệp không hợp lệ.");
+    return;
+  }
+  if (!/^0\d{9}$/.test(phone)) {
+    sendError(res, 400, "Số điện thoại doanh nghiệp cần gồm 10 chữ số và bắt đầu bằng 0.");
+    return;
+  }
+  if (!registrationDocument) {
+    sendError(res, 400, "Vui lòng tải ảnh Giấy chứng nhận đăng ký doanh nghiệp hợp lệ.");
+    return;
+  }
+  if (!rateLimitOrSend({
+    req,
+    res,
+    sendError,
+    scope: "auth:business-submit",
+    identifier: `${user._id}:${taxCode}:${email}`,
+    message: "Bạn gửi hồ sơ quá nhanh. Vui lòng thử lại sau ít phút.",
+  })) return;
+
+  const { users } = await getAuthCollections(getDb);
+  const duplicate = await users.findOne({
+    _id: { $ne: user._id },
+    $or: [
+      { "businessVerification.taxCode": taxCode },
+      { "businessVerification.emailNormalized": email },
+    ],
+    "businessVerification.status": { $in: ["pending", "verified"] },
+  });
+  if (duplicate) {
+    sendError(res, 409, "Mã số thuế hoặc email doanh nghiệp đã được sử dụng trong hồ sơ khác.");
+    return;
+  }
+
+  const now = new Date();
+  const businessVerification = {
+    provider: "manual_admin_review",
+    status: "pending",
+    companyName,
+    taxCode,
+    companyAddress,
+    representativeName,
+    position,
+    email,
+    emailNormalized: email,
+    phone,
+    registrationDocument,
+    submittedAt: now,
+    reviewedAt: null,
+    reviewedBy: null,
+    reviewNote: "",
+  };
+
+  try {
+    const result = await users.findOneAndUpdate(
+      { _id: user._id },
+      {
+        $set: {
+          businessVerification,
+          updatedAt: now,
+        },
+        $pull: { memberTags: "S-Business" },
+      },
+      { returnDocument: "after" }
+    );
+    const updatedUser = result?.value || result;
+
+    authSuccess(res, sendJson, 200, "Hồ sơ doanh nghiệp đã được gửi và đang chờ admin duyệt.", {
+      data: { user: publicUser(updatedUser, await computeUserMemberStats(getDb, updatedUser)) },
+    });
+  } catch (error) {
+    if (error?.code === 11000) {
+      sendError(res, 409, "Mã số thuế hoặc email doanh nghiệp đã được sử dụng trong hồ sơ khác.");
+      return;
+    }
+    throw error;
+  }
 }
 
 function authSuccess(res, sendJson, statusCode, message, data = {}) {
@@ -881,6 +1441,127 @@ async function handleLogin({ req, res, parseJsonBody, sendJson, sendError, getDb
     data: {
       token,
       user: publicUser(user, await computeUserMemberStats(getDb, user)),
+    },
+  });
+}
+
+async function handleGoogleLogin({ req, res, parseJsonBody, sendJson, sendError, getDb }) {
+  requireAuthSecrets();
+
+  const body = await parseJsonBody(req);
+  const credential = cleanText(body.credential, 10_000);
+  if (!credential) {
+    sendError(res, 400, "Thiếu thông tin xác thực từ Google.");
+    return;
+  }
+
+  if (
+    !rateLimitOrSend({
+      req,
+      res,
+      sendError,
+      scope: "auth:google",
+      identifier: req.socket?.remoteAddress || "google",
+      message: "Bạn đăng nhập Google quá nhanh. Vui lòng thử lại sau ít phút.",
+    })
+  ) {
+    return;
+  }
+
+  let googleProfile;
+  try {
+    const { client, clientId } = getGoogleOAuthClient();
+    const ticket = await client.verifyIdToken({ idToken: credential, audience: clientId });
+    googleProfile = ticket.getPayload();
+  } catch {
+    sendError(res, 401, "Phiên đăng nhập Google không hợp lệ hoặc đã hết hạn.");
+    return;
+  }
+
+  const googleSub = cleanText(googleProfile?.sub, 255);
+  const email = normalizeEmail(googleProfile?.email);
+  if (!googleSub || !validateEmail(email) || googleProfile?.email_verified !== true) {
+    sendError(res, 401, "Google chưa xác minh được địa chỉ email của tài khoản này.");
+    return;
+  }
+
+  const { users } = await getAuthCollections(getDb);
+  const now = new Date();
+  let isNewUser = false;
+  let user = await users.findOne({
+    $or: [{ googleSub }, { emailNormalized: email }],
+  });
+
+  if (user?.status && user.status !== "active") {
+    sendError(res, 403, "Tài khoản đang bị khóa hoặc chưa được kích hoạt.");
+    return;
+  }
+
+  if (!user) {
+    const newUser = {
+      fullName: cleanText(googleProfile.name, 120) || email.split("@")[0],
+      email,
+      emailNormalized: email,
+      avatar: cleanText(googleProfile.picture, 1_500),
+      googleSub,
+      authProviders: ["google"],
+      customerType: "normal",
+      emailVerified: true,
+      role: "customer",
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+      lastLoginAt: now,
+    };
+
+    try {
+      const result = await users.insertOne(newUser);
+      newUser._id = result.insertedId;
+      user = newUser;
+      isNewUser = true;
+    } catch (error) {
+      if (error?.code !== 11000) throw error;
+      user = await users.findOne({ $or: [{ googleSub }, { emailNormalized: email }] });
+    }
+  }
+
+  if (!user) {
+    sendError(res, 409, "Không thể liên kết tài khoản Google. Vui lòng thử lại.");
+    return;
+  }
+
+  const update = {
+    googleSub,
+    emailVerified: true,
+    lastLoginAt: now,
+    updatedAt: now,
+  };
+  if (!user.avatar && googleProfile.picture) update.avatar = cleanText(googleProfile.picture, 1_500);
+  if (!user.fullName && googleProfile.name) update.fullName = cleanText(googleProfile.name, 120);
+
+  await users.updateOne(
+    { _id: user._id },
+    {
+      $set: update,
+      $addToSet: { authProviders: "google" },
+    }
+  );
+  user = await users.findOne({ _id: user._id });
+
+  const token = signJwt({
+    sub: String(user._id),
+    role: user.role || "customer",
+    email: user.email,
+    phone: user.phone,
+  });
+
+  setAuthCookie(res, token);
+  authSuccess(res, sendJson, 200, "Đăng nhập Google thành công.", {
+    token,
+    data: {
+      token,
+      user: publicUser(user, await computeUserMemberStats(getDb, user)),
+      isNewUser,
     },
   });
 }
@@ -1220,6 +1901,21 @@ async function handleAuthRequest(context) {
     return;
   }
 
+  if (req.method === "POST" && action === "education" && pathParts[3] === "request-otp") {
+    await handleRequestEducationOtp(context);
+    return;
+  }
+
+  if (req.method === "POST" && action === "education" && pathParts[3] === "verify-otp") {
+    await handleVerifyEducationOtp(context);
+    return;
+  }
+
+  if (req.method === "POST" && action === "business" && pathParts[3] === "submit") {
+    await handleSubmitBusinessVerification(context);
+    return;
+  }
+
   if (req.method === "POST" && action === "forgot-password" && pathParts[3] === "request-otp") {
     await handleRequestForgotPasswordOtp(context);
     return;
@@ -1232,6 +1928,11 @@ async function handleAuthRequest(context) {
 
   if (req.method === "POST" && action === "login") {
     await handleLogin(context);
+    return;
+  }
+
+  if (req.method === "POST" && action === "google") {
+    await handleGoogleLogin(context);
     return;
   }
 
@@ -1255,7 +1956,7 @@ async function handleAuthRequest(context) {
     return;
   }
 
-  sendError(res, 404, "Auth route not found.");
+  sendError(res, 404, "Không tìm thấy chức năng xác thực.");
 }
 
 module.exports = {
@@ -1266,4 +1967,6 @@ module.exports = {
   getAuthConfig,
   publicUser,
   createPasswordHash,
+  sendNewsletterCouponEmail,
+  sendOrderInvoiceEmail,
 };

@@ -3,6 +3,7 @@ const path = require("path");
 const zlib = require("zlib");
 const { promisify } = require("util");
 const { Binary } = require("mongodb");
+const { buildProductSpecFacets } = require("../utils/product-spec-facets");
 
 const gzip = promisify(zlib.gzip);
 const gunzip = promisify(zlib.gunzip);
@@ -185,6 +186,7 @@ function buildProductDetailManifest(detail, storage) {
     image: detail.image || detail.thumbnail,
     primaryImage: detail.primaryImage || detail.thumbnail || detail.image,
     images: Array.isArray(detail.images) ? detail.images.slice(0, 8) : [],
+    facets: buildProductSpecFacets(detail),
     storage,
     storageStatus: storage?.type === "inline-gzip" ? "inline-backed" : "file-backed",
     storageVersion: STORAGE_VERSION,

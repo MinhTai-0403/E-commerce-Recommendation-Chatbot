@@ -131,6 +131,27 @@
   accent-color: #d70018;
 }
 
+.footer-newsletter-status {
+  margin: 4px 0 2px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.footer-newsletter-status.success {
+  border: 1px solid #bbf7d0;
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.footer-newsletter-status.error {
+  border: 1px solid #fecdd3;
+  background: #fff1f2;
+  color: #d70018;
+}
+
 .footer-newsletter button {
   height: 40px;
   border-radius: 7px;
@@ -139,6 +160,11 @@
   font-size: 14px;
   font-weight: 600;
   text-transform: uppercase;
+}
+
+.footer-newsletter button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
 }
 
 .footer-link-list {

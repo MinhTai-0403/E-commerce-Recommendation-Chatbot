@@ -25,39 +25,39 @@ const normalizeText = (value = '') => String(value || '')
 
 const mainTabConfig = {
   deal: { sort: 'hot_deal', filter: 'hot-deal' },
-  hot: { sort: 'latest', filter: 'hot-trend' },
-  new: { sort: 'latest', filter: 'new' },
+  hot: { sort: 'hot_trend' },
+  new: { sort: 'latest' },
 };
 
 const categoryQueryMap = {
   'phu-kien': { category: 'Phụ kiện' },
-  'dong-ho': { q: 'đồng hồ tai nghe loa âm thanh' },
+  'dong-ho': { category: 'Đồng hồ thông minh|Âm thanh' },
   'dien-thoai': { category: 'Điện thoại' },
   tablet: { category: 'Máy tính bảng' },
   laptop: { category: 'Laptop' },
-  'man-hinh': { q: 'màn hình pc máy tính' },
-  'dien-may': { category: 'Đồ gia dụng' },
+  'man-hinh': { category: 'Màn hình|Linh kiện máy tính' },
+  'dien-may': { category: 'Đồ gia dụng|Tivi' },
 };
 
 const subFilterQueryMap = {
   all: {},
-  'cu-cap': { q: 'củ sạc cáp sạc' },
-  chuot: { q: 'chuột bàn phím' },
-  sac: { q: 'sạc dự phòng' },
-  camera: { q: 'camera' },
-  'apple-pk': { q: 'phụ kiện apple iphone' },
-  'tien-ich': { q: 'phụ kiện tiện ích' },
-  'op-lung': { q: 'ốp lưng bao da' },
+  'cu-cap': { productType: 'cu-cap' },
+  chuot: { productType: 'chuot-ban-phim' },
+  sac: { productType: 'sac-du-phong' },
+  camera: { productType: 'camera' },
+  'apple-pk': { productType: 'phu-kien-apple' },
+  'tien-ich': { productType: 'phu-kien-tien-ich' },
+  'op-lung': { productType: 'op-lung' },
 };
 
-const categoryKeywordMap = {
-  'phu-kien': ['phu kien', 'sac', 'cap', 'op lung', 'bao da', 'camera', 'chuot', 'ban phim', 'tai nghe'],
-  'dong-ho': ['dong ho', 'am thanh', 'tai nghe', 'loa', 'apple watch', 'garmin', 'soundpeats', 'jbl'],
-  'dien-thoai': ['dien thoai', 'iphone', 'samsung', 'xiaomi', 'oppo', 'honor', 'realme'],
-  tablet: ['tablet', 'may tinh bang', 'ipad'],
-  laptop: ['laptop', 'macbook', 'asus', 'lenovo', 'acer', 'hp', 'dell'],
-  'man-hinh': ['man hinh', 'pc', 'may tinh', 'gaming pc'],
-  'dien-may': ['dien may', 'gia dung', 'tivi', 'may hut bui', 'tu lanh', 'may giat', 'noi chien'],
+const categoryValueMap = {
+  'phu-kien': ['phu kien'],
+  'dong-ho': ['dong ho thong minh', 'am thanh'],
+  'dien-thoai': ['dien thoai'],
+  tablet: ['may tinh bang'],
+  laptop: ['laptop'],
+  'man-hinh': ['man hinh', 'linh kien may tinh'],
+  'dien-may': ['do gia dung', 'nha thong minh', 'tivi'],
 };
 
 const categoryFallbackProducts = {
@@ -72,13 +72,20 @@ const categoryFallbackProducts = {
 
 const subKeywordMap = {
   all: [],
-  'cu-cap': ['cu sac', 'cap sac', 'adapter', 'usb c', 'type c'],
+  'cu-cap': ['cu sac', 'cap sac', 'adapter', 'cap type c', 'type c to', 'lightning'],
   chuot: ['chuot', 'ban phim', 'keyboard', 'mouse'],
   sac: ['sac du phong', 'pin du phong', 'power bank'],
-  camera: ['camera', 'webcam', 'ip 360', 'dji', 'gimbal', 'flycam'],
-  'apple-pk': ['apple', 'iphone', 'airpods', 'magsafe'],
-  'tien-ich': ['tien ich', 'quat', 'den', 'may loc', 'massage'],
-  'op-lung': ['op lung', 'bao da', 'case'],
+  camera: ['camera ip', 'camera wifi', 'camera an ninh', 'camera giam sat', 'camera hanh trinh', 'webcam', 'ip 360', 'dji osmo', 'may quay', 'gimbal', 'flycam'],
+  'apple-pk': ['apple', 'iphone', 'ipad', 'macbook', 'airpods', 'airtag', 'apple pencil', 'apple watch', 'magic keyboard', 'magic mouse'],
+  'tien-ich': ['tien ich', 'quat', 'den led', 'den ban', 'den ngu', 'den pin', 'gia do', 'gay selfie', 'hub', 'thiet bi mang', 'kich song', 'bo phat wifi', 'router', 'tripod', 'but cam ung', 'tay cam', 'bo chuyen doi'],
+  'op-lung': ['op lung', 'bao da'],
+};
+
+const subExcludeKeywordMap = {
+  'cu-cap': ['du phong', 'power bank', 'flash drive', 'usb sandisk', 'o cung', 'the nho'],
+  camera: ['op lung', 'bao da', ' case ', 'dan man hinh', 'mieng dan', 'kinh cuong luc', 'bao ve camera', 'vien camera', 'camera control', 'sticker'],
+  'tien-ich': ['dan man hinh', 'mieng dan', 'kinh cuong luc', 'op lung', 'bao da'],
+  'op-lung': ['dan man hinh', 'mieng dan', 'kinh cuong luc', 'screen protector'],
 };
 
 const textOfProduct = (product = {}) => normalizeText([
@@ -86,6 +93,10 @@ const textOfProduct = (product = {}) => normalizeText([
   product.title,
   product.category,
   product.categoryName,
+  ...(Array.isArray(product.categories) ? product.categories : []),
+  ...(Array.isArray(product.categoryTrail)
+    ? product.categoryTrail.flatMap((item) => [item?.name, item?.label, item?.href])
+    : []),
   product.brand,
   product.brandKey,
   product.segment,
@@ -93,10 +104,37 @@ const textOfProduct = (product = {}) => normalizeText([
   product.slug,
 ].filter(Boolean).join(' '));
 
-const matchesKeywords = (product, keywords = []) => {
-  if (!keywords.length) return true;
-  const text = textOfProduct(product);
-  return keywords.some((keyword) => text.includes(keyword));
+const categoryValuesOfProduct = (product = {}) => [
+  product.category,
+  product.categoryName,
+  ...(Array.isArray(product.categories) ? product.categories : []),
+  ...(Array.isArray(product.categoryTrail)
+    ? product.categoryTrail.flatMap((item) => [item?.name, item?.label])
+    : []),
+].filter(Boolean).map(normalizeText);
+
+const matchesCategory = (product, categoryId) => {
+  const acceptedValues = categoryValueMap[categoryId] || [];
+  if (!acceptedValues.length) return true;
+  const productValues = categoryValuesOfProduct(product);
+  return acceptedValues.some((accepted) => productValues.includes(accepted));
+};
+
+const matchesSubFilter = (product, filterId) => {
+  if (filterId === 'all') return true;
+  const text = ` ${textOfProduct(product)} `;
+  const excludedKeywords = subExcludeKeywordMap[filterId] || [];
+  if (excludedKeywords.some((value) => text.includes(value))) {
+    return false;
+  }
+  return (subKeywordMap[filterId] || []).some((keyword) => text.includes(keyword));
+};
+
+const hasSellablePrice = (product = {}) => toNumber(product.currentPrice || product.price) > 0;
+
+const isAvailableProduct = (product = {}) => {
+  const status = normalizeText(product.statusLabel || product.availability?.status || product.availability);
+  return hasSellablePrice(product) && !['lien he', 'het hang', 'outofstock'].some((value) => status.includes(value));
 };
 
 const toNumber = (value) => {
@@ -149,17 +187,35 @@ export default function HotTrend({ products = hotTrendProducts, loading = false 
       seen.add(key);
       return true;
     });
-    const categoryKeywords = categoryKeywordMap[activeCategory] || [];
-    const subKeywords = activeCategory === 'phu-kien' ? (subKeywordMap[activeSubFilter] || []) : [];
     const filtered = source
-      .filter((product) => matchesKeywords(product, categoryKeywords))
-      .filter((product) => matchesKeywords(product, subKeywords))
+      .filter((product) => matchesCategory(product, activeCategory))
+      .filter((product) => activeCategory !== 'phu-kien' || matchesSubFilter(product, activeSubFilter))
       .sort((a, b) => productScore(b, activeMainTab) - productScore(a, activeMainTab));
+
+    // A selected sub-filter is strict. Falling back to the whole accessory
+    // category is what caused "Camera" to show cases and unrelated products.
+    if (activeCategory === 'phu-kien' && activeSubFilter !== 'all') {
+      return filtered.slice(0, 12);
+    }
 
     return (filtered.length ? filtered : categoryProducts).slice(0, 12);
   }, [activeCategory, activeMainTab, activeSubFilter, products]);
   const trendProducts = useApiProducts(query, fallbackProducts);
-  const displayProducts = trendProducts.products?.length ? trendProducts.products : fallbackProducts;
+  const displayProducts = useMemo(() => {
+    const seen = new Set();
+    const source = [...(trendProducts.products || [])].filter((product) => {
+      const key = product?.id || product?.slug || product?.sku || product?.name;
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    return source
+      .filter(isAvailableProduct)
+      .filter((product) => matchesCategory(product, activeCategory))
+      .filter((product) => activeCategory !== 'phu-kien' || matchesSubFilter(product, activeSubFilter))
+      .sort((a, b) => productScore(b, activeMainTab) - productScore(a, activeMainTab))
+      .slice(0, 12);
+  }, [activeCategory, activeMainTab, activeSubFilter, trendProducts.products]);
   const isLoading = loading || trendProducts.loading;
   const resetSubFilter = () => setActiveSubFilter('all');
   const scrollSubFilters = () => {
@@ -206,7 +262,7 @@ export default function HotTrend({ products = hotTrendProducts, loading = false 
             </div>
 
             {/* Sub Filters (Icons) */}
-            <div className="hot-trend-sub-filters-container">
+            {activeCategory === 'phu-kien' && <div className="hot-trend-sub-filters-container">
               <div className="hot-trend-sub-filters">
                 {hotTrendSubFilters.map(filter => (
                   <button 
@@ -225,7 +281,7 @@ export default function HotTrend({ products = hotTrendProducts, loading = false 
                   <polyline points="9 18 15 12 9 6"/>
                 </svg>
               </button>
-            </div>
+            </div>}
 
             {/* Products */}
             <div className="hot-trend-products" aria-busy={isLoading}>

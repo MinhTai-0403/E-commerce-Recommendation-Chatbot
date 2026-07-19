@@ -93,28 +93,51 @@ export const heroSlides = [
     id: 1,
     image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:1036:450/q:100/plain/https://media-asset.cellphones.com.vn/dashboard-v1/manage-banner/KTBD-Home-6.png',
     bgColor: '#f0f0f0',
+    href: '/category/khuyen-mai?keyword=Khai+tr%C6%B0%C6%A1ng&category=Khuy%E1%BA%BFn+m%C3%A3i&title=%C6%AFu+%C4%91%C3%A3i+khai+tr%C6%B0%C6%A1ng',
+    title: 'Xem ưu đãi khai trương',
   },
   {
     id: 2,
     image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:1036:450/q:100/plain/https://media-asset.cellphones.com.vn/dashboard-v1/manage-banner/Home_s26_0626_2.png',
     bgColor: '#0c0c0c',
+    href: '/dien-thoai-samsung-galaxy-s26-ultra-16gb-1tb.html',
+    title: 'Xem Samsung Galaxy S26 Ultra',
   },
   {
     id: 3,
     image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:1036:450/q:100/plain/https://media-asset.cellphones.com.vn/dashboard-v1/manage-banner/690x300_iPhone17ProMax_0626.png',
     bgColor: '#f5f5f7',
+    href: '/iphone-17-pro-max.html',
+    title: 'Xem iPhone 17 Pro Max',
   },
   {
     id: 4,
     image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:1036:450/q:100/plain/https://media-asset.cellphones.com.vn/dashboard-v1/manage-banner/Oppofin%20x9%20ultra_oppen-home.png',
     bgColor: '#1a1a1a',
+    href: '/oppo-find-x9-ultra.html',
+    title: 'Xem OPPO Find X9 Ultra',
   },
 ];
 
 export const subBanners = [
-  { id: 1, alt: 'MacBook Pro M5', image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:690:300/q:50/plain/https://media-asset.cellphones.com.vn/dashboard-v1/mbannnmacpro.png' },
-  { id: 2, alt: 'Samsung Galaxy A37', image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:690:300/q:50/plain/https://media-asset.cellphones.com.vn/dashboard-v1/manage-banner/a3757-0626.png' },
-  { id: 3, alt: 'Laptop Back to School', image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:690:300/q:50/plain/https://media-asset.cellphones.com.vn/dashboard-v1/manage-banner/Artboard5.png' },
+  {
+    id: 1,
+    alt: 'MacBook Pro M5',
+    image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:690:300/q:50/plain/https://media-asset.cellphones.com.vn/dashboard-v1/mbannnmacpro.png',
+    href: '/macbook-pro-m5.html',
+  },
+  {
+    id: 2,
+    alt: 'Samsung Galaxy A37',
+    image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:690:300/q:50/plain/https://media-asset.cellphones.com.vn/dashboard-v1/manage-banner/a3757-0626.png',
+    href: '/samsung-galaxy-a37.html',
+  },
+  {
+    id: 3,
+    alt: 'Laptop Back to School',
+    image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:690:300/q:50/plain/https://media-asset.cellphones.com.vn/dashboard-v1/manage-banner/Artboard5.png',
+    href: '/category/laptop?keyword=Laptop&category=Laptop&usage=H%E1%BB%8Dc+t%E1%BA%ADp+-+v%C4%83n+ph%C3%B2ng&title=Laptop+cho+h%E1%BB%8Dc+sinh+sinh+vi%C3%AAn',
+  },
 ];
 
 // ============ PROMO STRIP (below hero) ============
@@ -294,10 +317,10 @@ export const hotTrendProducts = [
 
 // ============ PHONE PRODUCTS ============
 export const phoneSubCategories = [
-  { id: 'game', name: 'Điện thoại chơi game', image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:300:300/q:100/plain/https://cellphones.com.vn/media/catalog/product/d/i/dien-thoai-nubia-neo-5-5g-den.jpg' },
-  { id: 'pin', name: 'Điện thoại pin trâu', image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:300:300/q:100/plain/https://cellphones.com.vn/media/catalog/product/s/a/samsung-galaxy-a17-5g-back.jpg' },
-  { id: '5g', name: 'Điện thoại 5G', image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:300:300/q:100/plain/https://cellphones.com.vn/media/catalog/product/s/a/samsung-galaxy-s26-10.jpg' },
-  { id: 'camera', name: 'Điện thoại chụp ảnh đẹp', image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:300:300/q:100/plain/https://cellphones.com.vn/media/catalog/product/d/i/dien-thoai-oppo-find-x9-ultra-cam-8.jpg' },
+  { id: 'game', segment: null, query: { facet: 'usage', usage: 'choi-game' }, name: 'Điện thoại chơi game', image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:300:300/q:100/plain/https://cellphones.com.vn/media/catalog/product/d/i/dien-thoai-nubia-neo-5-5g-den.jpg' },
+  { id: 'pin', segment: null, query: { facet: 'usage', usage: 'pin-trau' }, name: 'Điện thoại pin trâu', image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:300:300/q:100/plain/https://cellphones.com.vn/media/catalog/product/s/a/samsung-galaxy-a17-5g-back.jpg' },
+  { id: '5g', segment: null, query: { facet: 'special', special: '5g' }, name: 'Điện thoại 5G', image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:300:300/q:100/plain/https://cellphones.com.vn/media/catalog/product/s/a/samsung-galaxy-s26-10.jpg' },
+  { id: 'camera', segment: null, query: { facet: 'usage', usage: 'chup-anh-dep' }, name: 'Điện thoại chụp ảnh đẹp', image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:300:300/q:100/plain/https://cellphones.com.vn/media/catalog/product/d/i/dien-thoai-oppo-find-x9-ultra-cam-8.jpg' },
   { id: 'gap', name: 'Điện thoại gập', image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:300:300/q:100/plain/https://cellphones.com.vn/media/catalog/product/o/p/oppo-find-n6-0.jpg' },
 ];
 

@@ -1,8 +1,9 @@
-import { useMemo } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import './InfoPage.css';
 import { useApiProducts } from '../../hooks/useApiProducts';
 import ProductCard, { ProductCardSkeleton } from '../ProductCard/ProductCard';
 import { getInfoPageContent, infoNavigationGroups } from '../../data/infoPageContent';
+import { createSupportRequest } from '../../services/apiSupport';
 import {
   buildCategoryPath,
   buildInfoPageModel,
@@ -76,6 +77,10 @@ const installmentFaqs = [
 
 const installmentBrandFilters = ['Tất cả', 'Apple', 'Samsung', 'Xiaomi', 'OPPO', 'TECNO', 'Honor', 'Nubia', 'Sony', 'Nokia', 'Infinix', 'Nothing', 'realme'];
 
+const CATEGORY_INITIAL_LIMIT = 30;
+const CATEGORY_LOAD_MORE_STEP = 20;
+const CATEGORY_MAX_LIMIT = 300;
+
 const makeFooterLandingProfile = ({
   title,
   eyebrow = 'Thông tin CellphoneS',
@@ -92,10 +97,75 @@ const makeFooterLandingProfile = ({
   cta = null,
 }) => ({ title, eyebrow, description, sourceUrl, tone, stats, tabs, highlights, sections, table, faqs, form, cta });
 
+const emptySupportForm = {
+  issueType: '',
+  fullName: '',
+  phone: '',
+  email: '',
+  orderCode: '',
+  content: '',
+  attachment: null,
+};
+
+function readSupportImageAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    if (!file) {
+      resolve(null);
+      return;
+    }
+
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      reject(new Error('Vui lòng chọn ảnh JPG, PNG hoặc WEBP.'));
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      reject(new Error('Ảnh quá lớn. Vui lòng chọn ảnh dưới 5MB.'));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Không thể đọc ảnh đã chọn.'));
+    reader.onload = () => {
+      const image = new Image();
+      image.onerror = () => reject(new Error('File ảnh không hợp lệ.'));
+      image.onload = () => {
+        const maxDimension = 1200;
+        const scale = Math.min(1, maxDimension / Math.max(image.width, image.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(image.width * scale));
+        canvas.height = Math.max(1, Math.round(image.height * scale));
+
+        const context = canvas.getContext('2d');
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+        const base64 = dataUrl.split(',')[1] || '';
+        const size = Math.floor((base64.length * 3) / 4);
+        if (size > 1_100_000) {
+          reject(new Error('Ảnh sau khi xử lý vẫn quá lớn. Vui lòng chọn ảnh nhỏ hơn.'));
+          return;
+        }
+
+        resolve({
+          name: file.name || 'anh-dinh-kem.jpg',
+          type: 'image/jpeg',
+          size,
+          dataUrl,
+        });
+      };
+      image.src = String(reader.result || '');
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 const footerLandingProfiles = {
   '/chinh-sach-giao-hang': makeFooterLandingProfile({
     title: 'Hướng dẫn mua hàng từ xa',
-    description: 'Trang mô phỏng chính sách mua hàng online, thanh toán, giao hàng, phí vận chuyển, thời gian nhận hàng và xử lý hoàn tiền của CellphoneS.',
+    description: 'Thông tin mua hàng online, thanh toán, giao hàng, phí vận chuyển, thời gian nhận hàng và xử lý hoàn tiền tại CellphoneS.',
     sourceUrl: 'https://cellphones.com.vn/chinh-sach-giao-hang',
     stats: [['300k+', 'Miễn phí vận chuyển'], ['1-2h', 'Giao nhanh nội thành'], ['1800.2097', 'Tư vấn mua hàng']],
     tabs: ['Tra cứu đơn hàng', 'Thanh toán', 'Giao hàng', 'Hoàn tiền', 'Đổi mới'],
@@ -122,7 +192,7 @@ const footerLandingProfiles = {
   }),
   '/tos?part=refund-policy': makeFooterLandingProfile({
     title: 'Chính sách đổi trả',
-    description: 'Trang đổi trả mô phỏng phần refund-policy trong quy chế hoạt động của CellphoneS, tập trung vào điều kiện đổi mới, trả hàng và hoàn tiền.',
+    description: 'Thông tin về điều kiện đổi mới, trả hàng và hoàn tiền tại CellphoneS.',
     sourceUrl: 'https://cellphones.com.vn/tos?part=refund-policy',
     stats: [['15-35 ngày', 'Mốc tham khảo'], ['IMEI/Serial', 'Cần đối chiếu'], ['CSKH', 'Hỗ trợ xử lý']],
     tabs: ['Điều kiện', 'Quy trình', 'Sản phẩm lỗi', 'Hoàn tiền'],
@@ -218,7 +288,7 @@ const footerLandingProfiles = {
   '/vat-refund': makeFooterLandingProfile({
     title: 'Tax refund at CellphoneS',
     eyebrow: 'VAT Refund in Vietnam',
-    description: 'Landing page tiếng Anh mô phỏng trang hoàn thuế GTGT cho khách đủ điều kiện khi mua hàng tại CellphoneS.',
+    description: 'Thông tin hoàn thuế GTGT dành cho khách hàng đủ điều kiện khi mua hàng tại CellphoneS.',
     sourceUrl: 'https://cellphones.com.vn/vat-refund',
     tone: 'blue',
     stats: [['177+', 'Stores'], ['3M+', 'Smembers'], ['VAT', 'Full invoice']],
@@ -229,7 +299,7 @@ const footerLandingProfiles = {
   '/dich-vu-khach-hang-doanh-nghiep': makeFooterLandingProfile({
     title: 'Khách hàng doanh nghiệp',
     eyebrow: 'B2B',
-    description: 'Landing page cho khách hàng doanh nghiệp mua số lượng lớn, cần báo giá, hóa đơn, thiết bị công nghệ và hỗ trợ triển khai.',
+    description: 'Dịch vụ dành cho khách hàng doanh nghiệp mua số lượng lớn, cần báo giá, hóa đơn, thiết bị công nghệ và hỗ trợ triển khai.',
     sourceUrl: 'https://cellphones.com.vn/dich-vu-khach-hang-doanh-nghiep',
     tone: 'blue',
     stats: [['B2B', 'Mua số lượng lớn'], ['VAT', 'Hỗ trợ chứng từ'], ['Dự án', 'Giao hàng linh hoạt']],
@@ -260,7 +330,7 @@ const footerLandingProfiles = {
   }),
   '/tos?part=privacy-policy': makeFooterLandingProfile({
     title: 'Chính sách bảo mật thông tin cá nhân',
-    description: 'Trang bảo mật thông tin cá nhân mô phỏng phần privacy-policy trong quy chế hoạt động của CellphoneS.',
+    description: 'Chính sách bảo mật thông tin cá nhân khi sử dụng dịch vụ tại CellphoneS.',
     sourceUrl: 'https://cellphones.com.vn/tos?part=privacy-policy',
     stats: [['Tài khoản', 'Thông tin đăng nhập'], ['Đơn hàng', 'Thông tin giao nhận'], ['CSKH', 'Dữ liệu hỗ trợ']],
     tabs: ['Thu thập', 'Mục đích', 'Lưu trữ', 'Chia sẻ', 'Quyền khách hàng'],
@@ -268,15 +338,125 @@ const footerLandingProfiles = {
     sections: [{ title: 'Nhóm dữ liệu thường dùng', items: ['Thông tin tài khoản và liên hệ.', 'Thông tin đơn hàng, giao nhận, bảo hành.', 'Lịch sử tương tác hỗ trợ, đánh giá, hỏi đáp.'] }],
   }),
   '/chinh-sach-bao-hanh': makeFooterLandingProfile({
-    title: 'Chính sách bảo hành và đổi trả sản phẩm',
-    eyebrow: 'Bảo hành',
-    description: 'Trang chính sách bảo hành, đổi trả sản phẩm tại CellphoneS với nhóm bảo hành hãng, 1 đổi 1, sửa chữa và hỗ trợ sau bán hàng.',
+    title: 'Chính sách bảo hành',
+    eyebrow: 'Chính sách sau bán hàng',
+    description: 'Thông tin đổi mới, bảo hành tiêu chuẩn và các gói bảo hành mở rộng dành cho sản phẩm mua tại CellphoneS.',
     sourceUrl: 'https://cellphones.com.vn/chinh-sach-bao-hanh',
     tone: 'blue',
-    stats: [['Bảo hành hãng', 'Theo thương hiệu'], ['1 đổi 1', 'Theo điều kiện'], ['CSKH', 'Hỗ trợ sau bán']],
-    tabs: ['Bảo hành', 'Đổi trả', 'Sửa chữa', 'FAQ'],
-    highlights: ['Chính sách bảo hành phụ thuộc từng sản phẩm và thương hiệu', 'Khách hàng cần thông tin mua hàng/IMEI/Serial khi gửi bảo hành', 'Một số sản phẩm có chính sách đổi mới riêng trong thời gian đầu'],
-    sections: [{ title: 'Quy trình bảo hành', items: ['Tiếp nhận sản phẩm và thông tin mua hàng.', 'Kiểm tra điều kiện bảo hành/đổi trả.', 'Cập nhật phương án xử lý cho khách hàng.'] }],
+    stats: [['30 ngày', 'Đổi mới theo điều kiện'], ['1800.2097', 'Tổng đài bảo hành'], ['IMEI/Serial', 'Thông tin tra cứu']],
+    tabs: ['Đổi mới 30 ngày', 'Bảo hành tiêu chuẩn', 'Bảo hành mở rộng', 'Điểm bảo hành'],
+    highlights: [
+      'Điều kiện bảo hành và đổi mới phụ thuộc từng sản phẩm, thương hiệu và thời điểm mua hàng.',
+      'Khách hàng nên chuẩn bị số điện thoại mua hàng, mã đơn, IMEI hoặc Serial sản phẩm.',
+      'Sản phẩm cần được kiểm tra ngoại quan và tình trạng kỹ thuật trước khi xác nhận phương án xử lý.',
+    ],
+    sections: [
+      {
+        title: 'I. Đổi mới 30 ngày miễn phí',
+        items: [
+          'Tiếp nhận sản phẩm phát sinh lỗi kỹ thuật trong thời gian áp dụng chính sách đổi mới.',
+          'Kiểm tra tình trạng máy, phụ kiện, hộp và thông tin mua hàng theo từng nhóm sản phẩm.',
+          'Thực hiện đổi mới hoặc phương án hỗ trợ phù hợp sau khi xác nhận đủ điều kiện.',
+        ],
+      },
+      {
+        title: 'II. Bảo hành tiêu chuẩn',
+        items: [
+          'Điện thoại và Laptop được bảo hành theo chính sách của hãng hoặc trung tâm bảo hành ủy quyền.',
+          'Phụ kiện áp dụng thời hạn và hình thức bảo hành riêng tùy thương hiệu.',
+          'Thời gian xử lý phụ thuộc tình trạng lỗi, linh kiện và quy trình của đơn vị bảo hành.',
+        ],
+      },
+      {
+        title: 'III. Bảo hành mở rộng',
+        items: [
+          'Bảo hành 1 đổi 1 VIP theo phạm vi và thời hạn của gói dịch vụ.',
+          'Gói bảo hành rơi vỡ, ngấm nước áp dụng theo điều kiện loại trừ cụ thể.',
+          'Gói S24+ hỗ trợ kéo dài thời gian bảo vệ sản phẩm sau thời hạn tiêu chuẩn.',
+        ],
+      },
+      {
+        title: 'Chọn hãng cần tìm điểm bảo hành',
+        items: [
+          'Apple · Samsung · Xiaomi · OPPO · Vivo · Realme · Nokia · Huawei',
+          'Asus · Lenovo · Dell · HP · Acer · MSI · LG · Sony',
+          'Logitech · Garmin · JBL · Anker · Belkin · Kingston · Sandisk và các thương hiệu khác.',
+        ],
+      },
+    ],
+    faqs: [
+      ['Cần mang theo gì khi đi bảo hành?', 'Nên mang sản phẩm, phụ kiện liên quan và cung cấp số điện thoại mua hàng, mã đơn hoặc IMEI/Serial.'],
+      ['Sản phẩm rơi vỡ có được bảo hành miễn phí không?', 'Bảo hành tiêu chuẩn thường không bao gồm lỗi do tác động vật lý; trường hợp có gói bảo hành mở rộng sẽ xử lý theo điều kiện của gói.'],
+    ],
+  }),
+  '/support': makeFooterLandingProfile({
+    title: 'Góp ý - Phản hồi - Hỗ trợ',
+    eyebrow: 'Smember hỗ trợ khách hàng',
+    description: 'Gửi yêu cầu hỗ trợ về tài khoản Smember, đơn hàng, bảo hành, ưu đãi hoặc chất lượng dịch vụ.',
+    sourceUrl: 'https://smember.com.vn/support',
+    tone: 'member',
+    stats: [['1800.2097', 'Mua hàng - bảo hành'], ['1800.2063', 'Khiếu nại'], ['1 yêu cầu', 'Theo dõi theo mã phản hồi']],
+    tabs: ['Chọn vấn đề', 'Thông tin liên hệ', 'Nội dung phản hồi', 'Gửi yêu cầu'],
+    highlights: [
+      'Chọn đúng nhóm vấn đề để yêu cầu được chuyển tới bộ phận phụ trách.',
+      'Nhập số điện thoại hoặc email đang dùng cho tài khoản Smember.',
+      'Có thể cung cấp mã đơn hàng và hình ảnh để việc kiểm tra nhanh hơn.',
+    ],
+    sections: [
+      {
+        title: 'Các nhóm hỗ trợ',
+        items: [
+          'Tài khoản Smember, đăng nhập, tích điểm và hạng thành viên.',
+          'Đơn hàng, thanh toán, giao nhận và hóa đơn điện tử.',
+          'Bảo hành, đổi trả, sửa chữa và chất lượng sản phẩm.',
+          'Góp ý về cửa hàng, nhân viên hoặc trải nghiệm dịch vụ.',
+        ],
+      },
+      {
+        title: 'Quy trình tiếp nhận',
+        items: [
+          'Khách hàng gửi đầy đủ thông tin và nội dung cần hỗ trợ.',
+          'Hệ thống ghi nhận yêu cầu và chuyển tới bộ phận liên quan.',
+          'Nhân viên liên hệ lại qua số điện thoại hoặc email đã cung cấp.',
+        ],
+      },
+    ],
+    form: {
+      title: 'Gửi yêu cầu hỗ trợ',
+      fields: [
+        {
+          label: 'Nhóm vấn đề',
+          name: 'issueType',
+          type: 'select',
+          required: true,
+          options: ['Tài khoản Smember', 'Đơn hàng - Thanh toán', 'Bảo hành - Đổi trả', 'Góp ý chất lượng dịch vụ', 'Vấn đề khác'],
+        },
+        { label: 'Họ và tên', name: 'fullName', required: true },
+        { label: 'Số điện thoại', name: 'phone', type: 'tel' },
+        { label: 'Email', name: 'email', type: 'email' },
+        { label: 'Mã đơn hàng', name: 'orderCode', placeholder: 'Nhập mã đơn nếu có' },
+        {
+          label: 'Nội dung cần hỗ trợ',
+          name: 'content',
+          type: 'textarea',
+          full: true,
+          required: true,
+          placeholder: 'Mô tả chi tiết vấn đề bạn đang gặp...',
+        },
+        {
+          label: 'Hình ảnh đính kèm',
+          name: 'attachment',
+          type: 'file',
+          accept: 'image/jpeg,image/png,image/webp',
+          full: true,
+        },
+      ],
+      button: 'Gửi yêu cầu',
+    },
+    faqs: [
+      ['Sau khi gửi yêu cầu bao lâu sẽ được phản hồi?', 'Thời gian phản hồi phụ thuộc nhóm vấn đề và thời điểm tiếp nhận. Các trường hợp cần kiểm tra đơn hàng hoặc bảo hành có thể cần thêm thời gian đối chiếu.'],
+      ['Có thể gửi yêu cầu khi chưa đăng nhập không?', 'Có thể, nhưng cần cung cấp đúng số điện thoại hoặc email để nhân viên liên hệ và đối chiếu thông tin.'],
+    ],
   }),
   '/lien-he-hop-tac': makeFooterLandingProfile({
     title: 'Liên hệ hợp tác cùng CellphoneS',
@@ -290,7 +470,7 @@ const footerLandingProfiles = {
   '/tuyen-dung': makeFooterLandingProfile({
     title: 'Tuyển dụng CellphoneS',
     eyebrow: 'Careers',
-    description: 'Trang tuyển dụng local cho các vị trí bán hàng, kỹ thuật, vận hành, marketing và công nghệ.',
+    description: 'Thông tin tuyển dụng cho các vị trí bán hàng, kỹ thuật, vận hành, marketing và công nghệ.',
     sourceUrl: 'https://tuyendung.cellphones.com.vn/',
     tone: 'promo',
     stats: [['Retail', 'Bán hàng'], ['Tech', 'Kỹ thuật'], ['Back office', 'Vận hành']],
@@ -357,19 +537,182 @@ const iPhoneSeries = [
 ];
 
 const categoryCriteria = [
-  { id: 'all', label: 'Bộ lọc', icon: 'filter' },
+  { id: 'all', label: 'Bộ lọc', icon: 'filter', dropdown: true },
   { id: 'in-stock', label: 'Sẵn hàng', icon: 'truck', filter: 'in-stock', inStock: true },
   { id: 'new', label: 'Hàng mới về', icon: 'new', filter: 'new', sort: 'latest' },
-  { id: 'price', label: 'Xem theo giá', icon: 'price', filter: 'price', sort: 'price_asc' },
-  { id: 'storage', label: 'Bộ nhớ trong', icon: 'storage', facet: 'storage' },
-  { id: 'ram', label: 'Dung lượng RAM', icon: 'ram', facet: 'ram' },
-  { id: 'screen-size', label: 'Kích thước màn hình', icon: 'screenSize', facet: 'screen-size' },
-  { id: 'usage', label: 'Nhu cầu sử dụng', icon: 'usage', facet: 'usage' },
-  { id: 'display', label: 'Kiểu màn hình', icon: 'display', facet: 'display' },
-  { id: 'camera', label: 'Tính năng camera', icon: 'camera', facet: 'camera' },
-  { id: 'refresh-rate', label: 'Tần số quét', icon: 'refresh', facet: 'refresh-rate' },
-  { id: 'special', label: 'Tính năng đặc biệt', icon: 'special', facet: 'special' },
+  { id: 'price', label: 'Xem theo giá', icon: 'price', filter: 'price', sort: 'price_asc', dropdown: true },
+  { id: 'storage', label: 'Bộ nhớ trong', icon: 'storage', facet: 'storage', dropdown: true },
+  { id: 'ram', label: 'Dung lượng RAM', icon: 'ram', facet: 'ram', dropdown: true },
+  { id: 'screen-size', label: 'Kích thước màn hình', icon: 'screenSize', facet: 'screen-size', dropdown: true },
+  { id: 'usage', label: 'Nhu cầu sử dụng', icon: 'usage', facet: 'usage', dropdown: true },
+  { id: 'display', label: 'Kiểu màn hình', icon: 'display', facet: 'display', dropdown: true },
+  { id: 'camera', label: 'Tính năng camera', icon: 'camera', facet: 'camera', dropdown: true },
+  { id: 'refresh-rate', label: 'Tần số quét', icon: 'refresh', facet: 'refresh-rate', dropdown: true },
+  { id: 'special', label: 'Tính năng đặc biệt', icon: 'special', facet: 'special', dropdown: true },
 ];
+
+const filterParamByFacet = {
+  storage: 'storage',
+  ram: 'ram',
+  'screen-size': 'screenSize',
+  usage: 'usage',
+  display: 'display',
+  camera: 'camera',
+  'refresh-rate': 'refreshRate',
+  special: 'special',
+};
+
+const detailedFilterGroups = {
+  all: [
+    {
+      title: 'Khoảng giá',
+      options: [
+        { label: 'Dưới 2 triệu', priceMax: '2000000' },
+        { label: 'Từ 2 - 4 triệu', priceMin: '2000000', priceMax: '4000000' },
+        { label: 'Từ 4 - 7 triệu', priceMin: '4000000', priceMax: '7000000' },
+        { label: 'Từ 7 - 13 triệu', priceMin: '7000000', priceMax: '13000000' },
+        { label: 'Từ 13 - 20 triệu', priceMin: '13000000', priceMax: '20000000' },
+        { label: 'Trên 20 triệu', priceMin: '20000000' },
+      ],
+    },
+    {
+      title: 'Tình trạng',
+      options: [
+        { label: 'Sẵn hàng', overrides: { inStock: 'true', filter: 'in-stock', facet: '' } },
+        { label: 'Khuyến mãi HOT', overrides: { filter: 'hot-deal', sort: 'hot_deal', facet: '' } },
+        { label: 'Hàng mới về', overrides: { filter: 'new', sort: 'latest', facet: '' } },
+      ],
+    },
+  ],
+  price: [
+    {
+      title: 'Xem theo giá',
+      options: [
+        { label: 'Dưới 2 triệu', priceMax: '2000000' },
+        { label: 'Từ 2 - 4 triệu', priceMin: '2000000', priceMax: '4000000' },
+        { label: 'Từ 4 - 7 triệu', priceMin: '4000000', priceMax: '7000000' },
+        { label: 'Từ 7 - 13 triệu', priceMin: '7000000', priceMax: '13000000' },
+        { label: 'Từ 13 - 20 triệu', priceMin: '13000000', priceMax: '20000000' },
+        { label: 'Trên 20 triệu', priceMin: '20000000' },
+      ],
+    },
+  ],
+  storage: [
+    { title: 'Bộ nhớ trong', param: 'storage', options: ['32GB', '64GB', '128GB', '256GB', '512GB', '1TB', '2TB'].map((value) => ({ label: value, value })) },
+  ],
+  ram: [
+    { title: 'Dung lượng RAM', param: 'ram', options: ['2GB RAM', '3GB RAM', '4GB RAM', '6GB RAM', '8GB RAM', '12GB RAM', '16GB RAM', '24GB RAM', '32GB RAM'].map((value) => ({ label: value, value })) },
+  ],
+  display: [
+    { title: 'Kiểu màn hình', param: 'display', options: ['OLED', 'AMOLED', 'Super AMOLED', 'IPS LCD', 'Retina', 'Mini LED', 'QLED', 'Màn hình cong'].map((value) => ({ label: value, value })) },
+  ],
+  camera: [
+    { title: 'Tính năng camera', param: 'camera', options: ['Chống rung OIS', 'Zoom xa', 'Góc siêu rộng', 'Quay video 4K', 'Camera AI', 'Leica / ZEISS / Hasselblad', 'Chụp đêm'].map((value) => ({ label: value, value })) },
+  ],
+  'refresh-rate': [
+    { title: 'Tần số quét', param: 'refreshRate', options: ['60Hz', '90Hz', '100Hz', '120Hz', '144Hz', '165Hz', '180Hz', '240Hz'].map((value) => ({ label: value, value })) },
+  ],
+  special: [
+    { title: 'Tính năng đặc biệt', param: 'special', options: ['5G', 'NFC', 'Sạc nhanh', 'Sạc không dây', 'Kháng nước IP68', 'AI tích hợp', 'MagSafe', 'Wi-Fi 6/7', 'Bluetooth 5.3'].map((value) => ({ label: value, value })) },
+  ],
+};
+
+const mapDetailedOptions = (title, param, values) => ([{
+  title,
+  param,
+  options: values.map((value) => ({ label: value, value })),
+}]);
+
+// CellphoneS dùng các khoảng kích thước và nhóm nhu cầu khác nhau cho từng
+// ngành hàng. Không được trộn số inch của điện thoại, tablet, laptop và màn
+// hình máy tính trong cùng một dropdown.
+const contextualDetailedFilterGroups = {
+  phone: {
+    'screen-size': mapDetailedOptions('Kích thước màn hình', 'screenSize', [
+      'Trên 6 inch',
+      'Dưới 6 inch',
+    ]),
+    usage: mapDetailedOptions('Nhu cầu sử dụng', 'usage', [
+      'Dung lượng lớn',
+      'Cấu hình cao',
+      'Chơi game',
+      'Pin trâu',
+      'Chụp ảnh đẹp',
+      'Livestream',
+      'Nhỏ gọn, dễ cầm nắm',
+      'Mỏng nhẹ',
+    ]),
+  },
+  tablet: {
+    'screen-size': mapDetailedOptions('Kích thước màn hình', 'screenSize', [
+      'Khoảng 7 - 8 inch',
+      '8 inch',
+      '9 inch',
+      'Từ 10 đến 11 inch',
+      '11 inch',
+      '12 inch',
+      'Từ 12 inch trở lên',
+    ]),
+    usage: mapDetailedOptions('Nhu cầu sử dụng', 'usage', [
+      'Học tập - Văn phòng',
+      'Giải trí',
+      'Đồ họa - Sáng tạo',
+      'Chơi game',
+      'Cho trẻ em',
+    ]),
+  },
+  laptop: {
+    'screen-size': mapDetailedOptions('Kích thước màn hình', 'screenSize', [
+      'Khoảng 13 inch',
+      'Khoảng 14 inch',
+      'Trên 15 inch',
+    ]),
+    usage: mapDetailedOptions('Nhu cầu sử dụng', 'usage', [
+      'Học tập - Văn phòng',
+      'Cao cấp - Sang trọng',
+      'Mỏng nhẹ',
+      'Gaming',
+      'Đồ họa - Kỹ thuật',
+      'Laptop sáng tạo nội dung',
+    ]),
+  },
+  monitor: {
+    'screen-size': mapDetailedOptions('Kích thước màn hình', 'screenSize', [
+      '24 inch',
+      '27 inch',
+      '32 inch',
+    ]),
+  },
+};
+
+const basicCategoryCriteria = categoryCriteria.slice(0, 4);
+const laptopCategoryCriteria = categoryCriteria.filter((item) => (
+  ['all', 'in-stock', 'new', 'price', 'ram', 'screen-size', 'usage', 'display', 'refresh-rate', 'special'].includes(item.id)
+));
+const audioCategoryCriteria = categoryCriteria.filter((item) => (
+  ['all', 'in-stock', 'new', 'price', 'special'].includes(item.id)
+));
+const monitorCategoryCriteria = categoryCriteria.filter((item) => (
+  ['all', 'in-stock', 'new', 'price', 'screen-size', 'display', 'refresh-rate', 'special'].includes(item.id)
+));
+
+const getCategoryCriteriaForPage = (page, apiCategory = '') => {
+  const key = normalizeLabel([
+    apiCategory,
+    page.category,
+    page.categoryParam,
+    page.keyword,
+    page.title,
+    page.segment,
+  ].filter(Boolean).join(' '));
+
+  if (key.includes('hang cu') || key.includes('used-')) return basicCategoryCriteria;
+  if (key.includes('tai nghe') || key.includes('loa') || key.includes('am thanh')) return audioCategoryCriteria;
+  if (key.includes('man hinh') || key.includes('monitor')) return monitorCategoryCriteria;
+  if (key.includes('laptop') || key.includes('macbook') || key.includes('pc gaming')) return laptopCategoryCriteria;
+  if (key.includes('dien thoai') || key.includes('may tinh bang') || key.includes('iphone') || key.includes('galaxy')) return categoryCriteria;
+  return basicCategoryCriteria;
+};
 
 const sortOptions = [
   { label: 'Phổ biến', sort: 'latest', icon: 'popular' },
@@ -406,13 +749,115 @@ const getApiCategory = (page) => {
   const key = normalizeLabel(category);
   if (key.includes('dien thoai')) return 'Điện thoại';
   if (key.includes('tablet') || key.includes('may tinh bang')) return 'Máy tính bảng';
-  if (!page.categoryParam && getBrandFromText(page.title || page.keyword || page.slug)) return 'Điện thoại';
+  if (!page.categoryParam) {
+    const pageIdentity = normalizeLabel([page.title, page.keyword, page.slug].filter(Boolean).join(' '));
+    if (pageIdentity.includes('iphone') || pageIdentity.includes('dien thoai')) return 'Điện thoại';
+    if (pageIdentity.includes('ipad') || pageIdentity.includes('tablet') || pageIdentity.includes('may tinh bang')) {
+      return 'Máy tính bảng';
+    }
+  }
   return category;
 };
 
 const getOverrideValue = (overrides, page, key) => (
   Object.prototype.hasOwnProperty.call(overrides, key) ? overrides[key] : page[key]
 );
+
+const getActiveDetailedValue = (page, item = {}) => {
+  if (item.id === 'price') {
+    return [page.priceMin, page.priceMax].filter(Boolean).join('-');
+  }
+
+  const paramKey = filterParamByFacet[item.facet || item.id];
+  return paramKey ? page[paramKey] || '' : '';
+};
+
+const getDetailedFilterContext = (page = {}, apiCategory = '') => {
+  const key = normalizeLabel([
+    apiCategory,
+    page.category,
+    page.categoryParam,
+    page.keyword,
+    page.title,
+    page.segment,
+  ].filter(Boolean).join(' '));
+
+  if (key.includes('may tinh bang') || key.includes('tablet') || key.includes('ipad')) return 'tablet';
+  if (key.includes('man hinh') || key.includes('monitor')) return 'monitor';
+  if (key.includes('laptop') || key.includes('macbook')) return 'laptop';
+  return 'phone';
+};
+
+const getDetailedFilterGroups = (item = {}, page = {}, apiCategory = '') => {
+  const id = item.id || item.facet;
+  const context = getDetailedFilterContext(page, apiCategory);
+  return contextualDetailedFilterGroups[context]?.[id]
+    || detailedFilterGroups[id]
+    || [];
+};
+
+const buildDetailedFilterPath = (page, item = {}, group = {}, option = {}) => {
+  const paramKey = group.param || filterParamByFacet[item.facet || item.id];
+  const baseOverrides = {
+    filter: item.filter || item.id,
+    facet: item.facet || '',
+    sort: item.sort || page.sort || 'latest',
+    q: page.q,
+  };
+  const optionOverrides = option.overrides || {};
+  const overrides = {
+    ...baseOverrides,
+    ...optionOverrides,
+  };
+
+  if (paramKey) overrides[paramKey] = option.value || option.label;
+  if (option.q) overrides.q = option.q;
+  if (option.priceMin || option.priceMax) {
+    overrides.filter = 'price';
+    overrides.facet = '';
+    overrides.priceMin = option.priceMin || '';
+    overrides.priceMax = option.priceMax || '';
+  }
+
+  return buildCategoryControlPath(page, overrides);
+};
+
+const isDetailedOptionActive = (page, group = {}, option = {}) => {
+  if (option.priceMin || option.priceMax) {
+    return String(page.priceMin || '') === String(option.priceMin || '')
+      && String(page.priceMax || '') === String(option.priceMax || '');
+  }
+
+  const paramKey = group.param;
+  if (!paramKey) {
+    return Object.entries(option.overrides || {}).some(([key, value]) => String(page[key] || '') === String(value || ''));
+  }
+
+  return String(page[paramKey] || '') === String(option.value || option.label || '');
+};
+
+const clearDetailedFilterPath = (page, item = {}) => {
+  const paramKey = filterParamByFacet[item.facet || item.id];
+  const itemFilterKeys = [item.id, item.filter, item.facet].filter(Boolean);
+  const shouldClearFilter = item.id === 'all' || itemFilterKeys.includes(page.filter);
+  const shouldClearFacet = item.id === 'all' || item.id === 'price' || itemFilterKeys.includes(page.facet);
+
+  return buildCategoryControlPath(page, {
+    filter: shouldClearFilter ? '' : page.filter,
+    facet: shouldClearFacet ? '' : page.facet,
+    inStock: item.id === 'all' || item.id === 'in-stock' ? '' : page.inStock,
+    priceMin: item.id === 'all' || item.id === 'price' ? '' : page.priceMin,
+    priceMax: item.id === 'all' || item.id === 'price' ? '' : page.priceMax,
+    ram: item.id === 'all' || paramKey === 'ram' ? '' : page.ram,
+    storage: item.id === 'all' || paramKey === 'storage' ? '' : page.storage,
+    screenSize: item.id === 'all' || paramKey === 'screenSize' ? '' : page.screenSize,
+    usage: item.id === 'all' || paramKey === 'usage' ? '' : page.usage,
+    display: item.id === 'all' || paramKey === 'display' ? '' : page.display,
+    camera: item.id === 'all' || paramKey === 'camera' ? '' : page.camera,
+    refreshRate: item.id === 'all' || paramKey === 'refreshRate' ? '' : page.refreshRate,
+    special: item.id === 'all' || paramKey === 'special' ? '' : page.special,
+  });
+};
 
 const buildCategoryControlPath = (page, overrides = {}) => {
   const category = overrides.category || getApiCategory(page) || page.keyword || 'Sản phẩm';
@@ -433,6 +878,14 @@ const buildCategoryControlPath = (page, overrides = {}) => {
     inStock: getOverrideValue(overrides, page, 'inStock'),
     priceMin: getOverrideValue(overrides, page, 'priceMin'),
     priceMax: getOverrideValue(overrides, page, 'priceMax'),
+    ram: getOverrideValue(overrides, page, 'ram'),
+    storage: getOverrideValue(overrides, page, 'storage'),
+    screenSize: getOverrideValue(overrides, page, 'screenSize'),
+    usage: getOverrideValue(overrides, page, 'usage'),
+    display: getOverrideValue(overrides, page, 'display'),
+    camera: getOverrideValue(overrides, page, 'camera'),
+    refreshRate: getOverrideValue(overrides, page, 'refreshRate'),
+    special: getOverrideValue(overrides, page, 'special'),
   });
 };
 
@@ -586,7 +1039,6 @@ function InfoForm({ form }) {
           )}
         </label>
       ))}
-      {form.helper && <p>{form.helper}</p>}
       <button type="submit">{form.button || 'Gửi thông tin'}</button>
     </form>
   );
@@ -724,6 +1176,51 @@ function InfoContent({ page }) {
 function FooterLandingPage({ page, profile }) {
   const currentPart = page.params?.get?.('part') || '';
   const currentHref = currentPart ? `${page.path}?part=${currentPart}` : page.path;
+  const isSupportPage = page.path === '/support';
+  const [supportForm, setSupportForm] = useState(emptySupportForm);
+  const [supportSubmitting, setSupportSubmitting] = useState(false);
+  const [supportMessage, setSupportMessage] = useState('');
+  const [supportError, setSupportError] = useState('');
+
+  const updateSupportField = (name, value) => {
+    setSupportForm((previous) => ({ ...previous, [name]: value }));
+  };
+
+  const handleSupportFileChange = async (event) => {
+    const file = event.target.files?.[0];
+    setSupportMessage('');
+    setSupportError('');
+
+    try {
+      const attachment = await readSupportImageAsDataUrl(file);
+      updateSupportField('attachment', attachment);
+    } catch (error) {
+      event.target.value = '';
+      updateSupportField('attachment', null);
+      setSupportError(error.message || 'Không thể chọn ảnh đính kèm.');
+    }
+  };
+
+  const handleLandingFormSubmit = async (event) => {
+    event.preventDefault();
+    if (!isSupportPage) return;
+
+    const formElement = event.currentTarget;
+    setSupportSubmitting(true);
+    setSupportMessage('');
+    setSupportError('');
+
+    try {
+      const payload = await createSupportRequest(supportForm);
+      setSupportMessage(payload.message || 'Đã gửi yêu cầu hỗ trợ.');
+      setSupportForm(emptySupportForm);
+      formElement.reset();
+    } catch (error) {
+      setSupportError(error.message || 'Không thể gửi yêu cầu hỗ trợ.');
+    } finally {
+      setSupportSubmitting(false);
+    }
+  };
 
   return (
     <section className={`footer-landing-page footer-landing-${profile.tone || 'red'}`}>
@@ -812,14 +1309,68 @@ function FooterLandingPage({ page, profile }) {
             {profile.form && (
               <section className="footer-landing-card footer-landing-form-card">
                 <h2>{profile.form.title}</h2>
-                <form onSubmit={(event) => event.preventDefault()}>
-                  {profile.form.fields.map((field) => (
-                    <label key={field}>
-                      <span>{field}</span>
-                      <input placeholder={field} />
-                    </label>
-                  ))}
-                  <button type="submit">{profile.form.button || 'Gửi thông tin'}</button>
+                <form onSubmit={handleLandingFormSubmit}>
+                  {profile.form.fields.map((field) => {
+                    const config = typeof field === 'string' ? { label: field } : field;
+                    const fieldKey = config.name || config.label;
+                    const controlledValue = isSupportPage && config.name
+                      ? (supportForm[config.name] || '')
+                      : undefined;
+
+                    return (
+                      <label className={config.full ? 'full' : ''} key={fieldKey}>
+                        <span>{config.label}</span>
+                        {config.type === 'textarea' ? (
+                          <textarea
+                            rows="5"
+                            name={config.name}
+                            required={Boolean(config.required)}
+                            value={controlledValue}
+                            placeholder={config.placeholder || config.label}
+                            onChange={isSupportPage && config.name
+                              ? (event) => updateSupportField(config.name, event.target.value)
+                              : undefined}
+                          />
+                        ) : config.type === 'select' ? (
+                          <select
+                            name={config.name}
+                            required={Boolean(config.required)}
+                            value={controlledValue}
+                            onChange={isSupportPage && config.name
+                              ? (event) => updateSupportField(config.name, event.target.value)
+                              : undefined}
+                          >
+                            <option value="" disabled>Chọn {String(config.label || '').toLowerCase()}</option>
+                            {(config.options || []).map((option) => (
+                              <option value={option} key={option}>{option}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            name={config.name}
+                            type={config.type || 'text'}
+                            required={Boolean(config.required)}
+                            accept={config.accept}
+                            value={config.type === 'file' ? undefined : controlledValue}
+                            placeholder={config.type === 'file' ? undefined : (config.placeholder || config.label)}
+                            onChange={config.type === 'file'
+                              ? (isSupportPage ? handleSupportFileChange : undefined)
+                              : (isSupportPage && config.name
+                                ? (event) => updateSupportField(config.name, event.target.value)
+                                : undefined)}
+                          />
+                        )}
+                        {isSupportPage && config.type === 'file' && supportForm.attachment?.name && (
+                          <small className="footer-form-file-name">Đã chọn: {supportForm.attachment.name}</small>
+                        )}
+                      </label>
+                    );
+                  })}
+                  {supportError && <div className="footer-form-alert error">{supportError}</div>}
+                  {supportMessage && <div className="footer-form-alert success">{supportMessage}</div>}
+                  <button type="submit" disabled={supportSubmitting}>
+                    {supportSubmitting ? 'Đang gửi...' : (profile.form.button || 'Gửi thông tin')}
+                  </button>
                 </form>
               </section>
             )}
@@ -1004,50 +1555,126 @@ function InstallmentLandingPage() {
 function ListingContent({ page }) {
   const apiCategory = getApiCategory(page);
   const isCategoryPage = page.root === 'category';
+  const isPhoneCategory = normalizeLabel(apiCategory) === 'dien thoai';
   const brandFromText = getBrandFromText(page.brand || page.keyword || page.title || page.slug);
   const effectiveBrand = page.brand || (isCategoryPage ? brandFromText : '');
   const activeFilter = page.facet || page.filter || (page.inStock === 'true' ? 'in-stock' : 'all');
-  const isIphonePage = isCategoryPage && (
+  const listingCriteria = getCategoryCriteriaForPage(page, apiCategory);
+  const isIphonePage = isCategoryPage && isPhoneCategory && (
     effectiveBrand === 'apple' ||
     normalizeLabel(page.title).includes('iphone') ||
     normalizeLabel(page.keyword).includes('iphone')
   );
+  const [visibleLimit, setVisibleLimit] = useState(CATEGORY_INITIAL_LIMIT);
+  const [openFilterId, setOpenFilterId] = useState('');
+  const openDropdownRef = useRef(null);
 
-  const query = useMemo(() => {
-    const nextQuery = {
-      include: 'details',
-      displayLimit: 30,
-      fetchLimit: 90,
-      sort: page.sort || 'latest',
-      inStock: page.inStock || true,
+  useLayoutEffect(() => {
+    const dropdown = openDropdownRef.current;
+    if (!dropdown || !openFilterId) return undefined;
+
+    const keepDropdownInsideViewport = () => {
+      dropdown.style.setProperty('--category-dropdown-shift-x', '0px');
+
+      const viewportPadding = 16;
+      const initialRect = dropdown.getBoundingClientRect();
+      let shiftX = 0;
+
+      if (initialRect.right > window.innerWidth - viewportPadding) {
+        shiftX -= initialRect.right - (window.innerWidth - viewportPadding);
+      }
+      if (initialRect.left + shiftX < viewportPadding) {
+        shiftX += viewportPadding - (initialRect.left + shiftX);
+      }
+
+      dropdown.style.setProperty('--category-dropdown-shift-x', `${Math.round(shiftX)}px`);
+
+      const trigger = dropdown.previousElementSibling;
+      if (trigger) {
+        const triggerRect = trigger.getBoundingClientRect();
+        const dropdownLeft = initialRect.left + shiftX;
+        const caretLeft = Math.min(
+          Math.max(triggerRect.left + triggerRect.width / 2 - dropdownLeft - 7, 18),
+          Math.max(18, dropdown.offsetWidth - 32),
+        );
+        dropdown.style.setProperty('--category-dropdown-caret-left', `${Math.round(caretLeft)}px`);
+      }
     };
 
-    if (isCategoryPage && apiCategory) nextQuery.category = apiCategory;
-    if (isCategoryPage && effectiveBrand) nextQuery.brand = effectiveBrand;
-    if (page.q) nextQuery.q = page.q;
-    if (!isCategoryPage && page.keyword) nextQuery.q = page.keyword;
-    if (page.segment) nextQuery.segment = page.segment;
-    if (page.filter) nextQuery.filter = page.filter;
-    if (page.facet) nextQuery.facet = page.facet;
-    if (page.priceMin) nextQuery.priceMin = page.priceMin;
-    if (page.priceMax) nextQuery.priceMax = page.priceMax;
+    keepDropdownInsideViewport();
+    window.addEventListener('resize', keepDropdownInsideViewport);
+    return () => window.removeEventListener('resize', keepDropdownInsideViewport);
+  }, [openFilterId]);
 
-    return nextQuery;
-  }, [
-    apiCategory,
-    effectiveBrand,
-    isCategoryPage,
-    page.facet,
-    page.filter,
-    page.inStock,
-    page.keyword,
-    page.priceMax,
-    page.priceMin,
-    page.q,
-    page.segment,
-    page.sort,
+  const query = {
+    include: 'details',
+    source: 'all',
+    displayLimit: visibleLimit,
+    fetchLimit: Math.min(CATEGORY_MAX_LIMIT, Math.max(visibleLimit + CATEGORY_LOAD_MORE_STEP, visibleLimit * 2)),
+    sort: page.sort || 'latest',
+  };
+
+  if (page.inStock === 'true' || page.inStock === true) query.inStock = true;
+  if (page.inStock === 'false' || page.inStock === false) query.inStock = false;
+
+  const normalizedApiCategory = normalizeLabel(apiCategory);
+  const flexibleTopicCategories = new Set([
+    'phu kien',
+    'thiet bi mang',
+    'camera',
+    'do gia dung',
+    'linh kien may tinh',
+    'gaming gear',
+    'thiet bi van phong',
   ]);
+  const isFlexibleTopicSearch = flexibleTopicCategories.has(normalizedApiCategory) && Boolean(page.q);
+
+  // Các nhóm trên được lưu bằng nhiều danh mục con khác nhau. Khi người dùng
+  // chọn một mục cụ thể, ưu tiên tìm theo từ khóa thay vì ép category tuyệt đối.
+  if (isCategoryPage && apiCategory && !isFlexibleTopicSearch) query.category = apiCategory;
+  if (isCategoryPage && effectiveBrand) query.brand = effectiveBrand;
+  if (page.q) query.q = page.q;
+  if (!isCategoryPage && page.keyword) query.q = page.keyword;
+  if (
+    isCategoryPage
+    && page.keyword
+    && !page.q
+    && !page.segment
+    && !effectiveBrand
+    && !page.filter
+    && !page.facet
+    && !page.priceMin
+    && !page.priceMax
+    && !page.ram
+    && !page.storage
+    && !page.screenSize
+    && !page.usage
+    && !page.display
+    && !page.camera
+    && !page.refreshRate
+    && !page.special
+    && normalizeLabel(page.keyword) !== normalizeLabel(apiCategory)
+  ) {
+    query.q = page.keyword;
+  }
+  if (page.segment) query.segment = page.segment;
+  if (page.filter) query.filter = page.filter;
+  if (page.facet) query.facet = page.facet;
+  if (page.priceMin) query.priceMin = page.priceMin;
+  if (page.priceMax) query.priceMax = page.priceMax;
+  if (page.ram) query.ram = page.ram;
+  if (page.storage) query.storage = page.storage;
+  if (page.screenSize) query.screenSize = page.screenSize;
+  if (page.usage) query.usage = page.usage;
+  if (page.display) query.display = page.display;
+  if (page.camera) query.camera = page.camera;
+  if (page.refreshRate) query.refreshRate = page.refreshRate;
+  if (page.special) query.special = page.special;
   const { products, loading } = useApiProducts(query, []);
+  const canLoadMore = !loading && products.length >= visibleLimit && visibleLimit < CATEGORY_MAX_LIMIT;
+  const handleLoadMoreProducts = () => {
+    setVisibleLimit((value) => Math.min(value + CATEGORY_LOAD_MORE_STEP, CATEGORY_MAX_LIMIT));
+  };
 
   return (
     <section className={`info-listing-panel ${isCategoryPage ? 'category-listing-panel' : ''}`}>
@@ -1089,10 +1716,18 @@ function ListingContent({ page }) {
           <div className="category-filter-row" aria-label="Chọn theo tiêu chí">
             <h2>Chọn theo tiêu chí</h2>
             <div className="category-filter-chips">
-              {categoryCriteria.map((item) => {
+              {listingCriteria.map((item) => {
+                const detailedValue = getActiveDetailedValue(page, item);
+                const hasAnyDetailedFilter = Boolean(
+                  page.priceMin || page.priceMax || page.ram || page.storage || page.screenSize ||
+                  page.usage || page.display || page.camera || page.refreshRate || page.special
+                );
+                const isDetailedDropdown = item.id === 'price' || Boolean(item.facet);
                 const isActive = item.id === 'all'
-                  ? activeFilter === 'all'
-                  : activeFilter === (item.facet || item.filter || item.id);
+                  ? activeFilter === 'all' && !hasAnyDetailedFilter
+                  : isDetailedDropdown
+                    ? Boolean(detailedValue)
+                    : activeFilter === (item.filter || item.id);
                 const href = item.id === 'all'
                   ? buildCategoryControlPath(page, {
                     filter: '',
@@ -1100,6 +1735,14 @@ function ListingContent({ page }) {
                     inStock: '',
                     priceMin: '',
                     priceMax: '',
+                    ram: '',
+                    storage: '',
+                    screenSize: '',
+                    usage: '',
+                    display: '',
+                    camera: '',
+                    refreshRate: '',
+                    special: '',
                     q: '',
                     sort: 'latest',
                   })
@@ -1110,17 +1753,60 @@ function ListingContent({ page }) {
                     sort: item.sort || page.sort || 'latest',
                     q: page.q,
                   });
+                const groups = getDetailedFilterGroups(item, page, apiCategory);
+                const hasDropdown = item.dropdown && groups.length > 0;
+
+                if (!hasDropdown) {
+                  return (
+                    <a
+                      href={href}
+                      className={isActive ? 'active' : ''}
+                      key={item.id}
+                    >
+                      <span className="category-chip-icon"><ChipIcon name={item.icon} /></span>
+                      {item.label}
+                    </a>
+                  );
+                }
 
                 return (
-                  <a
-                    href={href}
-                    className={isActive ? 'active' : ''}
-                    key={item.id}
-                  >
-                    <span className="category-chip-icon"><ChipIcon name={item.icon} /></span>
-                    {item.label}
-                    {item.facet && <span className="category-chip-caret">⌄</span>}
-                  </a>
+                  <div className="category-filter-chip-wrap" key={item.id}>
+                    <button
+                      type="button"
+                      className={`category-filter-trigger ${isActive ? 'active' : ''}`}
+                      aria-expanded={openFilterId === item.id}
+                      onClick={() => setOpenFilterId((value) => (value === item.id ? '' : item.id))}
+                    >
+                      <span className="category-chip-icon"><ChipIcon name={item.icon} /></span>
+                      <span>{detailedValue || item.label}</span>
+                      <span className="category-chip-caret">⌄</span>
+                    </button>
+
+                    {openFilterId === item.id && (
+                      <div className="category-filter-dropdown" ref={openDropdownRef}>
+                        <div className="category-filter-dropdown-head">
+                          <strong>{item.label}</strong>
+                          <a href={clearDetailedFilterPath(page, item)}>Xóa lọc</a>
+                        </div>
+                        {groups.map((group) => (
+                          <section key={group.title}>
+                            <h3>{group.title}</h3>
+                            <div className="category-filter-option-grid">
+                              {group.options.map((option) => (
+                                <a
+                                  key={`${group.title}-${option.label}`}
+                                  href={buildDetailedFilterPath(page, item, group, option)}
+                                  className={isDetailedOptionActive(page, group, option) ? 'active' : ''}
+                                >
+                                  {option.label}
+                                </a>
+                              ))}
+                            </div>
+                          </section>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>
@@ -1156,6 +1842,17 @@ function ListingContent({ page }) {
           filter: '',
           facet: '',
           q: '',
+          inStock: '',
+          priceMin: '',
+          priceMax: '',
+          ram: '',
+          storage: '',
+          screenSize: '',
+          usage: '',
+          display: '',
+          camera: '',
+          refreshRate: '',
+          special: '',
           sort: 'latest',
         }) : buildSearchPath(page.keyword)}>
           Làm mới kết quả
@@ -1175,6 +1872,21 @@ function ListingContent({ page }) {
           </div>
         )}
       </div>
+
+      {!loading && products.length > 0 && (
+        <div className="info-load-more-wrap">
+          <span>Đang hiển thị {products.length} sản phẩm</span>
+          {canLoadMore ? (
+            <button type="button" onClick={handleLoadMoreProducts}>
+              Xem thêm {CATEGORY_LOAD_MORE_STEP} sản phẩm
+            </button>
+          ) : visibleLimit >= CATEGORY_MAX_LIMIT ? (
+            <small>Đã đạt giới hạn hiển thị {CATEGORY_MAX_LIMIT} sản phẩm.</small>
+          ) : (
+            <small>Đã hiển thị hết sản phẩm phù hợp.</small>
+          )}
+        </div>
+      )}
     </section>
   );
 }
@@ -1213,7 +1925,9 @@ export default function InfoPage({ pathname = window.location.pathname, search =
           {page.root !== 'category' && <p>{page.description}</p>}
         </header>
 
-        {page.isListing ? <ListingContent page={page} /> : <InfoContent page={page} />}
+        {page.isListing
+          ? <ListingContent key={`${pathname}${search}`} page={page} />
+          : <InfoContent page={page} />}
 
         <div className="info-support-grid">
           {supportCards.map((card) => (

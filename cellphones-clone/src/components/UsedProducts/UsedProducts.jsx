@@ -2,13 +2,30 @@ import './UsedProducts.css';
 import { usedProductCategories } from '../../data/mockData';
 import { buildCategoryPath } from '../../utils/linkRoutes';
 
-const getUsedProductPath = (name = '') => (
-  buildCategoryPath('Hàng cũ', {
+const usedProductSegmentById = {
+  'used-phone': 'used-phone',
+  'used-tablet': 'used-tablet',
+  'used-macbook': 'used-macbook',
+  'used-laptop': 'used-laptop',
+  'used-headphones': 'used-headphones',
+  'used-speaker': 'used-speaker',
+  'used-watch': 'used-watch',
+  'used-appliance': 'used-appliance',
+  'used-accessories': 'used-accessories',
+  'used-monitor': 'used-monitor',
+  'used-tv': 'used-tv',
+  'used-charger': 'used-charger',
+};
+
+const getUsedProductPath = (category) => {
+  const name = category?.name || '';
+  return buildCategoryPath('Hàng cũ', {
     keyword: name,
     title: name,
-    q: name,
-  })
-);
+    category: 'Hàng cũ',
+    segment: usedProductSegmentById[category?.id] || category?.id || '',
+  });
+};
 
 export default function UsedProducts() {
   return (
@@ -28,7 +45,7 @@ export default function UsedProducts() {
         <div className="used-products-shell">
           <div className="used-products-grid">
             {usedProductCategories.map((category) => (
-              <a className="used-product-item" href={getUsedProductPath(category.name)} key={category.id}>
+              <a className="used-product-item" href={getUsedProductPath(category)} key={category.id}>
                 <img src={category.image} alt={category.name} width="72" height="72" loading="lazy" />
                 <span>{category.name}</span>
               </a>

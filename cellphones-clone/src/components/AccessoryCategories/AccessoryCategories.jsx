@@ -2,23 +2,39 @@ import './AccessoryCategories.css';
 import { accessoryCategories } from '../../data/mockData';
 import { buildCategoryPath } from '../../utils/linkRoutes';
 
+const accessoryCategoryRouteById = {
+  'apple-accessories': { category: 'Phụ kiện', segment: 'apple-accessories' },
+  'cables-chargers': { category: 'Phụ kiện', segment: 'cables-chargers' },
+  'power-banks': { category: 'Phụ kiện', segment: 'power-banks' },
+  cases: { category: 'Phụ kiện', segment: 'cases' },
+  'screen-protectors': { category: 'Phụ kiện', segment: 'screen-protectors' },
+  'memory-usb': { category: 'Phụ kiện', segment: 'memory-usb' },
+  'gaming-gear': { category: 'Gaming Gear', segment: 'gaming-gear' },
+  sim: { category: 'Sim 4G', segment: 'sim' },
+  network: { category: 'Thiết bị mạng', segment: 'network' },
+  camera: { category: 'Camera', segment: 'camera' },
+  gimbal: { category: 'Camera', segment: 'gimbal' },
+  flycam: { category: 'Flycam', segment: 'flycam' },
+  cameras: { category: 'Máy ảnh', segment: 'cameras' },
+  'mouse-keyboard': { category: 'Phụ kiện', segment: 'mouse-keyboard' },
+  bags: { category: 'Phụ kiện', segment: 'bags' },
+  hubs: { category: 'Phụ kiện', segment: 'hubs' },
+  'phone-accessories': { category: 'Phụ kiện', segment: 'phone-accessories' },
+  'laptop-accessories': { category: 'Phụ kiện', segment: 'laptop-accessories' },
+};
+
 const getAccessoryCategoryPath = (category) => {
   const name = category?.name || '';
-  const directCategoryById = {
-    network: 'Thiết bị mạng',
-    camera: 'Camera',
-    gimbal: 'Camera',
-    flycam: 'Camera',
-    cameras: 'Máy ảnh',
-    sim: 'Sim 4G',
-    'gaming-gear': 'Gaming Gear',
+  const route = accessoryCategoryRouteById[category?.id] || {
+    category: 'Phụ kiện',
+    segment: category?.id || '',
   };
-  const apiCategory = directCategoryById[category?.id] || 'Phụ kiện';
 
-  return buildCategoryPath(apiCategory, {
+  return buildCategoryPath(route.category, {
     keyword: name,
     title: name,
-    q: name,
+    category: route.category,
+    segment: route.segment,
   });
 };
 

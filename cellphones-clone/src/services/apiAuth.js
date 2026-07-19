@@ -85,6 +85,12 @@ export async function loginSmember({ identifier, phone, email, password }) {
   return payload;
 }
 
+export async function loginWithGoogle(credential) {
+  const payload = await postAuthJson('/api/auth/google', { credential });
+  saveAuthSession(payload);
+  return payload;
+}
+
 export async function fetchCurrentSmember() {
   const token = getAuthToken();
 
@@ -131,6 +137,35 @@ export async function changeSmemberPassword({ currentPassword, newPassword }) {
     includeToken: true,
   });
   return payload.data;
+}
+
+export async function requestEducationVerificationOtp({ email, type, schoolName, studentCode }) {
+  const payload = await authJson('/api/auth/education/request-otp', {
+    method: 'POST',
+    body: { email, type, schoolName, studentCode },
+    includeToken: true,
+  });
+  return payload.data;
+}
+
+export async function verifyEducationVerificationOtp({ email, otp }) {
+  const payload = await authJson('/api/auth/education/verify-otp', {
+    method: 'POST',
+    body: { email, otp },
+    includeToken: true,
+  });
+  saveAuthSession(payload);
+  return payload.data?.user || null;
+}
+
+export async function submitBusinessVerification(businessPayload) {
+  const payload = await authJson('/api/auth/business/submit', {
+    method: 'POST',
+    body: businessPayload,
+    includeToken: true,
+  });
+  saveAuthSession(payload);
+  return payload.data?.user || null;
 }
 
 export async function requestForgotPasswordOtp(identifier) {

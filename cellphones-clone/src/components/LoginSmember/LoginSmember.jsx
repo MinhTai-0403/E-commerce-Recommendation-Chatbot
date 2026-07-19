@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { loginSmember, requestForgotPasswordOtp, resetForgotPassword } from "../../services/apiAuth";
+import GoogleAuthButton from "../GoogleAuthButton/GoogleAuthButton";
 import "./LoginSmember.css";
 
 const benefits = [
@@ -46,6 +47,13 @@ export default function LoginSmember({ onBackToHome, onGoRegister, onAuthSuccess
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleGoogleSuccess = (payload) => {
+    setErrorMessage("");
+    const user = payload.data?.user || payload.user || null;
+    if (onAuthSuccess) onAuthSuccess(user);
+    else onBackToHome();
   };
 
   const handleForgotOtpSubmit = async (event) => {
@@ -269,18 +277,16 @@ export default function LoginSmember({ onBackToHome, onGoRegister, onAuthSuccess
           </div>
 
           <div className="social-login-grid">
-            <button
-              type="button"
-              className="social-login-btn btn-google"
-              onClick={() => setErrorMessage("Đăng nhập Google chưa cấu hình OAuth. Vui lòng dùng email/số điện thoại trước.")}
-            >
-              <img src="https://developers.google.com/identity/images/g-logo.png" alt="Google" />
-              <span>Google</span>
-            </button>
+            <GoogleAuthButton
+              mode="login"
+              onSuccess={handleGoogleSuccess}
+              onError={setErrorMessage}
+              onLoadingChange={setIsLoading}
+            />
             <button
               type="button"
               className="social-login-btn btn-zalo"
-              onClick={() => setErrorMessage("Đăng nhập Zalo chưa cấu hình OAuth. Vui lòng dùng email/số điện thoại trước.")}
+              onClick={() => setErrorMessage("Đăng nhập Zalo hiện chưa khả dụng.")}
             >
               <img src="https://cdn-static.smember.com.vn/_next/static/media/logo-zalo.120d889f.svg" alt="Zalo" />
               <span>Zalo</span>

@@ -513,7 +513,6 @@ export default function ProductDetail({ product, currentUser, onGoLogin, onAddTo
 
   useEffect(() => {
     if (!isInteractionLoggedIn || !productIdentifier) {
-      setIsFavorite(false);
       return undefined;
     }
 

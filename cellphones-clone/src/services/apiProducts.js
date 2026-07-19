@@ -172,10 +172,7 @@ const buildHighlights = (product, specifications) => {
       .slice(0, 4);
   }
 
-  return [
-    'Dữ liệu sản phẩm được lấy trực tiếp từ MongoDB.',
-    'Sẵn sàng cho admin thêm, sửa, xóa giá, ảnh, thông số và mô tả.',
-  ];
+  return [];
 };
 
 const buildArticleSections = (product) => {
@@ -234,9 +231,9 @@ const buildPolicies = (product) => {
   }
 
   return [
-    { id: 'official', title: 'Sản phẩm chính hãng', description: 'Nguồn dữ liệu từ catalog CellphoneS trong MongoDB.' },
-    { id: 'warranty', title: 'Bảo hành rõ ràng', description: 'Thông tin bảo hành có thể cập nhật từ admin theo từng sản phẩm.' },
-    { id: 'api-managed', title: 'Quản lý bằng API', description: 'Admin có thể thêm, sửa, xóa ảnh, giá, mô tả và thông số.' },
+    { id: 'official', title: 'Sản phẩm chính hãng', description: 'Thông tin sản phẩm được kiểm tra trước khi bán.' },
+    { id: 'warranty', title: 'Bảo hành rõ ràng', description: 'Áp dụng theo chính sách của từng sản phẩm và thương hiệu.' },
+    { id: 'support', title: 'Hỗ trợ khách hàng', description: 'Hỗ trợ mua hàng, giao nhận và bảo hành khi cần.' },
   ];
 };
 

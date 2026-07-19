@@ -228,29 +228,46 @@ function BriefcaseIcon() {
   );
 }
 
-export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
+export default function HeroSection({
+  currentUser,
+  onGoLogin,
+  onGoRegister,
+  categoryMenuOnly = false,
+  onCategoryNavigate,
+}) {
   const [currentSlide, setCurrentSlide] = useState(0);
-  const [hoveredCategory, setHoveredCategory] = useState(null);
+  const [hoveredCategory, setHoveredCategory] = useState(
+    categoryMenuOnly ? "phone" : null,
+  );
   const displayName =
     currentUser?.fullName || currentUser?.username || currentUser?.email;
 
   useEffect(() => {
+    if (categoryMenuOnly) return undefined;
+
     const timer = setInterval(() => {
       setCurrentSlide((prev) => (prev + 1) % heroSlides.length);
     }, 4000);
     return () => clearInterval(timer);
-  }, []);
+  }, [categoryMenuOnly]);
 
   return (
-    <section className="hero-section section-gap">
-      {hoveredCategory !== null && (
+    <section
+      className={`hero-section section-gap ${categoryMenuOnly ? "hero-category-menu-only" : ""}`}
+    >
+      {!categoryMenuOnly && hoveredCategory !== null && (
         <div className="hero-category-hover-backdrop" />
       )}
 
       <div className="container">
         <div
           className="hero-inner"
-          onMouseLeave={() => setHoveredCategory(null)}
+          onMouseLeave={() => setHoveredCategory(categoryMenuOnly ? "phone" : null)}
+          onClick={(event) => {
+            if (categoryMenuOnly && event.target.closest("a")) {
+              onCategoryNavigate?.();
+            }
+          }}
         >
           {/* ================= THÀNH PHẦN 1: SIDEBAR TRÁI ================= */}
           <div className="hero-sidebar">
@@ -528,7 +545,9 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {micTypesSquare.map((item, i) => (
                       <a
                         key={i}
-                        href={getCategoryTopicPath("Âm thanh", item.name)}
+                        href={getCategoryTopicPath("Âm thanh", item.name, {
+                          q: item.query || item.name,
+                        })}
                         className="mega-laptop-need-card"
                       >
                         <img
@@ -566,19 +585,23 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                   <div className="mega-section-title">Chọn theo giá</div>
                   <div className="mega-grid-pills-flexible">
                     {[
-                      "Tai nghe dưới 200K",
-                      "Tai nghe dưới 500K",
-                      "Tai nghe dưới 1 triệu",
-                      "Tai nghe dưới 2 triệu",
-                      "Tai nghe dưới 5 triệu",
-                    ].map((p, i) => (
+                      { label: "Tai nghe dưới 200K", priceMax: 200000 },
+                      { label: "Tai nghe dưới 500K", priceMax: 500000 },
+                      { label: "Tai nghe dưới 1 triệu", priceMax: 1000000 },
+                      { label: "Tai nghe dưới 2 triệu", priceMax: 2000000 },
+                      { label: "Tai nghe dưới 5 triệu", priceMax: 5000000 },
+                    ].map((priceRange) => (
                       <a
-                        key={i}
-                        href={getCategoryTopicPath("Tai nghe", p)}
+                        key={priceRange.priceMax}
+                        href={buildCategoryPath("Tai nghe", {
+                          title: priceRange.label,
+                          priceMax: priceRange.priceMax,
+                          sort: "price_asc",
+                        })}
                         className="mega-pill-item"
                         style={{ gridColumn: "span 3" }}
                       >
-                        {p}
+                        {priceRange.label}
                       </a>
                     ))}
                   </div>
@@ -634,7 +657,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {hotAudioProducts.map((prod, i) => (
                       <a
                         key={i}
-                        href={getCategoryTopicPath("Âm thanh", prod.name)}
+                        href={getCategoryTopicPath(prod.category, prod.name)}
                         className="mega-pill-item relative-pill"
                         style={{ gridColumn: `span ${prod.span}` }}
                       >
@@ -667,7 +690,11 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     {watchRowsData.map((item, i) => (
                       <a
                         key={i}
-                        href={getCategoryTopicPath("Đồng hồ thông minh", item.name)}
+                        href={getCategoryTopicPath(
+                          item.category || "Đồng hồ thông minh",
+                          item.name,
+                          item.searchOptions || {},
+                        )}
                         className="mega-laptop-need-card grid-wide-row"
                       >
                         <img
@@ -1554,10 +1581,17 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     className="slide"
                     style={{ backgroundColor: slide.bgColor }}
                   >
-                    <img
-                      src={slide.image}
-                      alt={heroSliderTabs[index]?.line1 || `Slide ${index + 1}`}
-                    />
+                    <a
+                      href={slide.href || buildCategoryPath("Khuyến mãi")}
+                      className="slide-link"
+                      title={slide.title || heroSliderTabs[index]?.line1 || `Slide ${index + 1}`}
+                      aria-label={slide.title || heroSliderTabs[index]?.line1 || `Xem banner ${index + 1}`}
+                    >
+                      <img
+                        src={slide.image}
+                        alt={heroSliderTabs[index]?.line1 || `Slide ${index + 1}`}
+                      />
+                    </a>
                   </div>
                 ))}
               </div>
@@ -1613,9 +1647,11 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
             <div className="mini-banners">
               {subBanners.map((banner) => (
                 <a
-                  href={getCategoryTopicPath("Khuyến mãi", banner.title || banner.alt || "Khuyến mãi CellphoneS")}
+                  href={banner.href || getCategoryTopicPath("Khuyến mãi", banner.title || banner.alt || "Khuyến mãi CellphoneS")}
                   key={banner.id}
                   className="mini-banner-item"
+                  title={banner.alt || banner.title || "Xem sản phẩm"}
+                  aria-label={banner.alt || banner.title || "Xem sản phẩm từ banner"}
                 >
                   <img src={banner.image} alt={banner.alt} />
                 </a>
@@ -1626,7 +1662,11 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
           {/* ================= THÀNH PHẦN 4: TIỆN ÍCH SIDEBAR PHẢI ================= */}
           <div className="hero-right">
             <div className="welcome-card">
-              <div className="welcome-top-info">
+              <a
+                href={currentUser ? "/smember?tab=profile" : "/smember/login"}
+                className="welcome-top-info welcome-profile-link"
+                aria-label={currentUser ? "Mở thông tin tài khoản" : "Đăng nhập Smember"}
+              >
                 <div className="mascot-pink-circle">
                   <img
                     src="https://cellphones.com.vn/media/wysiwyg/ant-smile.png"
@@ -1638,7 +1678,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                     ? `Xin chào, ${displayName}`
                     : "Chào mừng bạn đến với CellphoneS"}
                 </div>
-              </div>
+              </a>
               {currentUser ? (
                 <>
                   <p className="welcome-desc-text">
@@ -1675,7 +1715,7 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                   </div>
                 </>
               )}
-              <a href="/smember/uu-dai" className="welcome-footer-perks-btn">
+              <a href="/smember?tab=rank" className="welcome-footer-perks-btn">
                 <div className="footer-perks-left">
                   <GiftRedIcon />
                   <span
@@ -1710,22 +1750,28 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                 </div>
                 <ul className="benefit-scroller-list-items">
                   <li>
-                    <GraduationCapIcon />
-                    <span>
-                      Đăng ký <b>nhận ưu đãi</b>
-                    </span>
+                    <a href="/smember?tab=education">
+                      <GraduationCapIcon />
+                      <span>
+                        Đăng ký <b>nhận ưu đãi</b>
+                      </span>
+                    </a>
                   </li>
                   <li>
-                    <GraduationCapIcon />
-                    <span>
-                      Deal hot <b>học sinh sinh viên</b>
-                    </span>
+                    <a href="/smember?tab=education">
+                      <GraduationCapIcon />
+                      <span>
+                        Deal hot <b>học sinh sinh viên</b>
+                      </span>
+                    </a>
                   </li>
                   <li>
-                    <GraduationCapIcon />
-                    <span>
-                      Laptop <b>ưu đãi khủng</b>
-                    </span>
+                    <a href="/smember?tab=education">
+                      <GraduationCapIcon />
+                      <span>
+                        Laptop <b>ưu đãi khủng</b>
+                      </span>
+                    </a>
                   </li>
                 </ul>
               </div>
@@ -1737,16 +1783,20 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                 </div>
                 <ul className="benefit-scroller-list-items">
                   <li>
-                    <RefreshIcon />
-                    <span>
-                      iPhone trợ giá <b>đến 3 triệu</b>
-                    </span>
+                    <a href="/smember?tab=tradein">
+                      <RefreshIcon />
+                      <span>
+                        iPhone trợ giá <b>đến 3 triệu</b>
+                      </span>
+                    </a>
                   </li>
                   <li>
-                    <RefreshIcon />
-                    <span>
-                      Samsung trợ giá <b>đến 4 triệu</b>
-                    </span>
+                    <a href="/smember?tab=tradein">
+                      <RefreshIcon />
+                      <span>
+                        Samsung trợ giá <b>đến 4 triệu</b>
+                      </span>
+                    </a>
                   </li>
                 </ul>
               </div>
@@ -1758,16 +1808,20 @@ export default function HeroSection({ currentUser, onGoLogin, onGoRegister }) {
                 </div>
                 <ul className="benefit-scroller-list-items">
                   <li>
-                    <BriefcaseIcon />
-                    <span>
-                      Đăng ký <b>S-Business</b>
-                    </span>
+                    <a href="/smember?tab=business">
+                      <BriefcaseIcon />
+                      <span>
+                        Đăng ký <b>S-Business</b>
+                      </span>
+                    </a>
                   </li>
                   <li>
-                    <BriefcaseIcon />
-                    <span>
-                      Chính sách <b>ưu đãi</b>
-                    </span>
+                    <a href="/smember?tab=business">
+                      <BriefcaseIcon />
+                      <span>
+                        Chính sách <b>ưu đãi</b>
+                      </span>
+                    </a>
                   </li>
                 </ul>
               </div>
@@ -1923,18 +1977,22 @@ const audioTypesSquare = [
 const micTypesSquare = [
   {
     name: "Mic cài áo",
+    query: "Microphone không dây",
     img: "https://cdn2.cellphones.com.vn/insecure/rs:fill:150:0/q:70/plain/https://cellphones.com.vn/media/wysiwyg/kep.png",
   },
   {
     name: "Mic phòng thu, podcast",
+    query: "Podcast",
     img: "https://cdn2.cellphones.com.vn/insecure/rs:fill:150:0/q:70/plain/https://cellphones.com.vn/media/wysiwyg/phongthu.png",
   },
   {
     name: "Mic livestream",
+    query: "Livestream",
     img: "https://cdn2.cellphones.com.vn/insecure/rs:fill:150:0/q:70/plain/https://cellphones.com.vn/media/wysiwyg/micthu.png",
   },
   {
     name: "Micro không dây",
+    query: "Microphone không dây",
     img: "https://cdn2.cellphones.com.vn/insecure/rs:fill:150:150/q:100/plain/https://cellphones.com.vn/media/wysiwyg/image_2__4.png",
   },
 ];
@@ -1963,25 +2021,26 @@ const speakerTypesSquare = [
 ];
 
 const hotAudioProducts = [
-  { name: "AirPods Pro 3", badge: "Hot", span: 3 },
-  { name: "AirPods 4", span: 3 },
-  { name: "AirPods Max 2", badge: "Mới", span: 6 },
-  { name: "Soundcore Liberty 5 Pro", span: 6 },
-  { name: "Soundcore Liberty 5 Pro Max", span: 6 },
-  { name: "Sony WF-1000XM6", badge: "Mới", span: 3 },
-  { name: "Redmi Buds 8 Active", span: 3 },
-  { name: "Huawei Freebuds Pro 5 (ANC)", badge: "Hot", span: 6 },
-  { name: "Loa Bose Soundlink Flex 2", span: 6 },
-  { name: "Loa Samsung MX-T40", span: 3 },
-  { name: "Loa JBL Charge 6", span: 3 },
-  { name: "Loa Marshall Middleton", badge: "Hot", span: 3 },
-  { name: "Loa Sony ULT Field 1", span: 3 },
+  { name: "AirPods Pro 3", category: "Tai nghe", badge: "Hot", span: 3 },
+  { name: "AirPods 4", category: "Tai nghe", span: 3 },
+  { name: "AirPods Max 2", category: "Tai nghe", badge: "Mới", span: 6 },
+  { name: "Soundcore Liberty 5 Pro", category: "Tai nghe", span: 6 },
+  { name: "Soundcore Liberty 5 Pro Max", category: "Tai nghe", span: 6 },
+  { name: "Sony WF-1000XM6", category: "Tai nghe", badge: "Mới", span: 3 },
+  { name: "Redmi Buds 8 Active", category: "Tai nghe", span: 3 },
+  { name: "Huawei Freebuds Pro 5 (ANC)", category: "Tai nghe", badge: "Hot", span: 6 },
+  { name: "Loa Bose Soundlink Flex 2", category: "Loa", span: 6 },
+  { name: "Loa Samsung MX-T40", category: "Loa", span: 3 },
+  { name: "Loa JBL Charge 6", category: "Loa", span: 3 },
+  { name: "Loa Marshall Middleton", category: "Loa", badge: "Hot", span: 3 },
+  { name: "Loa Sony ULT Field 1", category: "Loa", span: 3 },
 ];
 
 /* --- 4. DANH MỤC: ĐỒNG HỒ, CAMERA --- */
 const watchRowsData = [
   {
     name: "Đồng hồ thông minh",
+    searchOptions: { q: "" },
     img: "https://cdn2.cellphones.com.vn/insecure/rs:fill:150:150/q:100/plain/https://cellphones.com.vn/media/wysiwyg/nghe-goii.png",
   },
   {
@@ -1994,6 +2053,8 @@ const watchRowsData = [
   },
   {
     name: "Dây đồng hồ thông minh",
+    category: "Dây đeo đồng hồ",
+    searchOptions: { q: "" },
     img: "https://cdn2.cellphones.com.vn/insecure/rs:fill:50:50/q:90/plain/https://cellphones.com.vn/media/catalog/product/d/h/dhnn_11.png",
   },
 ];
@@ -2179,7 +2240,7 @@ const beautyDevices = [
   },
   {
     name: "Tông đơ cắt tóc",
-    img: "https://cdn2.cellphones.com.vn/insecure/rs:fill:50:50/q:90/plain/https://cellphones.com.vn/media/catalog/product/t/o/tong-do-cat-toc-echen-beardo2-2_1.png",
+    img: "https://cdn2.cellphones.com.vn/insecure/rs:fill:150:150/q:50/plain/https://media-asset.cellphones.com.vn/page_configs/01KRJVMDJ12CKYC7GHY4HYCKHK.png",
   },
   {
     name: "Máy tỉa lông mũi",
@@ -2212,9 +2273,8 @@ const hotApplianceProducts = [
   { name: "Máy lọc không khí Xiaomi Air Purifier Max", span: 6 },
   { name: "Robot hút bụi Roborock Q Revo 5AE", span: 6 },
   { name: "Robot hút bụi Dreame X50 Ultra", span: 6 },
-  { name: "Máy chiếu hiệu Wanbo X50 Pro", span: 6 },
+  { name: "Máy chiếu hiệu Wanbo X5 Pro", span: 6 },
   { name: "Quạt thông minh Xiaomi", span: 6 },
-  { name: "Máy chơi game Sony PS5 Slim", span: 6 },
 ];
 
 /* --- 6. DANH MỤC: PHỤ KIỆN --- */

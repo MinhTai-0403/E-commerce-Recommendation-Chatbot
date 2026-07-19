@@ -34,15 +34,20 @@ export default function CategoryBlock({
   const [activeSubCategory, setActiveSubCategory] = useState('');
   const fallbackProducts = Array.isArray(products) ? products : [];
   const selectedSubCategory = subCategories?.find((subcat) => subcat.id === activeSubCategory);
+  const selectedSubCategorySegment = selectedSubCategory
+    ? (Object.prototype.hasOwnProperty.call(selectedSubCategory, 'segment')
+      ? selectedSubCategory.segment
+      : selectedSubCategory.id)
+    : '';
   const shouldShowSubCategories = Boolean(subCategories?.length) && activeTab === subCategoryTabIndex;
   const activeCategoryName = tabs?.[activeTab] || title;
   const activeCategoryPath = useMemo(() => buildCategoryPath(activeCategoryName, {
     ...(selectedSubCategory?.query || {}),
     keyword: selectedSubCategory?.name || activeCategoryName,
     title: selectedSubCategory?.name || activeCategoryName,
-    segment: selectedSubCategory?.segment || selectedSubCategory?.id || '',
+    segment: selectedSubCategorySegment,
     brand: activeFilter && activeFilter !== 'all' ? activeFilter : '',
-  }), [activeCategoryName, activeFilter, selectedSubCategory]);
+  }), [activeCategoryName, activeFilter, selectedSubCategory, selectedSubCategorySegment]);
   const effectiveQuery = useMemo(() => {
     if (!productQuery) return null;
 
@@ -52,8 +57,12 @@ export default function CategoryBlock({
       ...(selectedSubCategory?.query || {}),
     };
 
-    if (selectedSubCategory?.segment || selectedSubCategory?.id) {
-      nextQuery.segment = selectedSubCategory.segment || selectedSubCategory.id;
+    if (selectedSubCategory) {
+      if (selectedSubCategorySegment) {
+        nextQuery.segment = selectedSubCategorySegment;
+      } else {
+        delete nextQuery.segment;
+      }
     }
 
     if (activeFilter && activeFilter !== 'all') {
@@ -63,7 +72,7 @@ export default function CategoryBlock({
     }
 
     return nextQuery;
-  }, [activeFilter, activeTab, productQuery, selectedSubCategory, tabQueries, tabs]);
+  }, [activeFilter, activeTab, productQuery, selectedSubCategory, selectedSubCategorySegment, tabQueries, tabs]);
   const apiState = useApiProducts(effectiveQuery, fallbackProducts);
   const productItems = productQuery ? apiState.products : fallbackProducts;
   const shouldShowProductSkeletons = Boolean(productQuery && apiState.loading);

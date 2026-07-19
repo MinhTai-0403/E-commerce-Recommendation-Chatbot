@@ -53,6 +53,15 @@ const questionCreateSchema = z
   })
   .passthrough();
 
+const couponAudienceSchema = z.enum([
+  "all",
+  "smember",
+  "student",
+  "teacher",
+  "education",
+  "business",
+]);
+
 const couponSchema = z
   .object({
     code: z.string().trim().min(2).max(80),
@@ -64,6 +73,8 @@ const couponSchema = z
     minSubtotal: z.coerce.number().min(0).default(0),
     usageLimit: z.coerce.number().int().min(0).optional(),
     userLimit: z.coerce.number().int().min(0).optional(),
+    audiences: z.array(couponAudienceSchema).min(1).max(6).default(["all"]),
+    allowWithEducationOffer: z.coerce.boolean().optional().default(true),
     startsAt: z.coerce.date().optional(),
     expiresAt: z.coerce.date().optional(),
     status: z.enum(["active", "inactive", "expired"]).default("active"),
@@ -81,6 +92,8 @@ const couponUpdateSchema = z
     minSubtotal: z.coerce.number().min(0).optional(),
     usageLimit: z.coerce.number().int().min(0).optional(),
     userLimit: z.coerce.number().int().min(0).optional(),
+    audiences: z.array(couponAudienceSchema).min(1).max(6).optional(),
+    allowWithEducationOffer: z.coerce.boolean().optional(),
     startsAt: z.coerce.date().optional(),
     expiresAt: z.coerce.date().optional(),
     status: z.enum(["active", "inactive", "expired"]).optional(),
@@ -160,6 +173,15 @@ const invoiceUpdateSchema = z
   })
   .passthrough();
 
+const returnImageSchema = z
+  .string()
+  .trim()
+  .max(300000)
+  .refine(
+    (value) => /^data:image\/(?:jpeg|png|webp);base64,[a-z0-9+/=]+$/i.test(value),
+    "Ảnh đổi trả phải là file JPG, PNG hoặc WEBP hợp lệ."
+  );
+
 const returnRequestSchema = z
   .object({
     orderCode: z.string().trim().min(4).max(80),
@@ -168,7 +190,7 @@ const returnRequestSchema = z
     productName: safeString(500),
     reason: z.string().trim().min(3).max(1000),
     customerPhone: safeString(24),
-    images: z.array(z.string().trim().max(1000)).optional().default([]),
+    images: z.array(returnImageSchema).max(6).optional().default([]),
     note: safeString(1000),
   })
   .passthrough();

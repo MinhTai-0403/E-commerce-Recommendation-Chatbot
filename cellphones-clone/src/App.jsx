@@ -1,23 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import './App.css';
 import { TopBar, MainHeader } from './components/Header/Header';
-import HeroSection from './components/HeroSection/HeroSection';
-import HotTrend from './components/HotTrend/HotTrend';
-import CategoryBlock from './components/CategoryBlock/CategoryBlock';
-import AccessoryCategories from './components/AccessoryCategories/AccessoryCategories';
-import HomeApplianceCategories from './components/HomeApplianceCategories/HomeApplianceCategories';
-import UsedProducts from './components/UsedProducts/UsedProducts';
-import TechNews from './components/TechNews/TechNews';
-import Footer from './components/Footer/Footer';
 import ChatbotWidget from './components/ChatbotWidget/ChatbotWidget';
-import ProductDetail from './components/ProductDetail/ProductDetail';
-import LoginSmember from './components/LoginSmember/LoginSmember';
-import RegisterSmember from './components/RegisterSmember/RegisterSmember';
-import AdminDashboard from './components/AdminDashboard/AdminDashboard';
-import CartPage from './components/CartPage/CartPage';
-import CheckoutPage from './components/CheckoutPage/CheckoutPage';
-import SmemberAccount from './components/SmemberAccount/SmemberAccount';
-import InfoPage from './components/InfoPage/InfoPage';
+import { FloatingActions, HeaderPopups } from './components/AppChrome/AppChrome';
 import { extractProductSlug, findProductDetailByPathname } from './data/productCatalog';
 import { getInfoRouteKind, getRouteForDeadAnchor } from './utils/linkRoutes';
 import {
@@ -32,6 +17,23 @@ import {
 import { useApiProductDetail, useApiProducts } from './hooks/useApiProducts';
 import useCart from './hooks/useCart';
 import { clearAuthSession, fetchCurrentSmember, getStoredUser, logoutSmember } from './services/apiAuth';
+
+const ProductDetail = lazy(() => import('./components/ProductDetail/ProductDetail'));
+const HeroSection = lazy(() => import('./components/HeroSection/HeroSection'));
+const HotTrend = lazy(() => import('./components/HotTrend/HotTrend'));
+const CategoryBlock = lazy(() => import('./components/CategoryBlock/CategoryBlock'));
+const AccessoryCategories = lazy(() => import('./components/AccessoryCategories/AccessoryCategories'));
+const HomeApplianceCategories = lazy(() => import('./components/HomeApplianceCategories/HomeApplianceCategories'));
+const UsedProducts = lazy(() => import('./components/UsedProducts/UsedProducts'));
+const TechNews = lazy(() => import('./components/TechNews/TechNews'));
+const Footer = lazy(() => import('./components/Footer/Footer'));
+const LoginSmember = lazy(() => import('./components/LoginSmember/LoginSmember'));
+const RegisterSmember = lazy(() => import('./components/RegisterSmember/RegisterSmember'));
+const AdminDashboard = lazy(() => import('./components/AdminDashboard/AdminDashboard'));
+const CartPage = lazy(() => import('./components/CartPage/CartPage'));
+const CheckoutPage = lazy(() => import('./components/CheckoutPage/CheckoutPage'));
+const SmemberAccount = lazy(() => import('./components/SmemberAccount/SmemberAccount'));
+const InfoPage = lazy(() => import('./components/InfoPage/InfoPage'));
 
 const homeProductQueries = {
   hotTrend: { category: 'Phụ kiện', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
@@ -163,53 +165,6 @@ const CELLPHONES_47_PROVINCES = [
   'Vĩnh Phúc',
 ].sort((a, b) => a.localeCompare(b, 'vi'));
 
-function FloatingActions() {
-  const [visible, setVisible] = useState(false);
-  const [showApp, setShowApp] = useState(true);
-
-  useEffect(() => {
-    const handleScroll = () => setVisible(window.scrollY > 400);
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
-
-  const scrollToTop = () => {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  return (
-    <aside className="floating-actions" aria-label="Liên kết hỗ trợ nhanh">
-      {showApp && (
-        <div className="floating-app">
-          <button type="button" onClick={() => setShowApp(false)} aria-label="Đóng quảng cáo tải ứng dụng">×</button>
-          <a href="/download-app" aria-label="Tải ứng dụng CellphoneS">
-            <img src="https://cdn2.cellphones.com.vn/insecure/rs:fill:100:100/q:100/plain/https://cellphones.com.vn/media/wysiwyg/icon_downloadapp.png" alt="Tải ứng dụng CellphoneS" width="100" height="100" />
-          </a>
-        </div>
-      )}
-      <button
-        className={`floating-action-button back-to-top ${visible ? 'visible' : ''}`}
-        onClick={scrollToTop}
-        type="button"
-      >
-        <span>Lên đầu</span>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
-          <polyline points="18 15 12 9 6 15" />
-          <polyline points="18 20 12 14 6 20" />
-        </svg>
-      </button>
-      <a className="floating-action-button floating-contact" href="/lien-he">
-        <span>Liên hệ</span>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-          <path d="M4 14v-2a8 8 0 0 1 16 0v2" />
-          <path d="M18 19h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2h-1zM6 19H5a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h1z" />
-          <path d="M18 19c0 1.1-.9 2-2 2h-3" />
-        </svg>
-      </a>
-    </aside>
-  );
-}
-
 function ProductRoute({ slug, pathname = window.location.pathname, currentUser, onGoLogin, onAddToCart, onGoCart }) {
   const fallbackProduct = useMemo(() => (
     findProductDetailByPathname(pathname)
@@ -229,16 +184,36 @@ function ProductRoute({ slug, pathname = window.location.pathname, currentUser, 
     );
   }
 
+  if (loading) {
+    return (
+      <section className="route-state-card" aria-label="Đang tải sản phẩm">
+        <div className="container">
+          <div className="route-detail-skeleton" aria-hidden="true">
+            <div className="route-detail-skeleton-title" />
+            <div className="route-detail-skeleton-grid">
+              <div className="route-detail-skeleton-media" />
+              <div className="route-detail-skeleton-panel">
+                <span />
+                <span />
+                <span />
+                <span />
+              </div>
+              <div className="route-detail-skeleton-side" />
+            </div>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="route-state-card">
       <div className="container">
         <div className="route-state-box">
-          <h1>{loading ? 'Đang tải sản phẩm từ MongoDB...' : 'Không tìm thấy sản phẩm'}</h1>
-          <p>
-            {error
-              ? 'API chưa trả về sản phẩm này. Kiểm tra lại backend hoặc slug sản phẩm trong MongoDB.'
-              : 'Frontend đang kết nối API backend để lấy chi tiết sản phẩm.'}
-          </p>
+          <h1>Không tìm thấy sản phẩm</h1>
+          {error && (
+            <p>Sản phẩm hiện chưa khả dụng. Vui lòng thử lại sau.</p>
+          )}
           <a href="/">Quay lại trang chủ</a>
         </div>
       </div>
@@ -510,6 +485,21 @@ function App() {
     goHome();
   };
 
+  const headerPopupProps = {
+    activePopup,
+    currentUser,
+    filteredProvinces,
+    goAccount,
+    goLogin,
+    goRegister,
+    handleCloseAllPopups,
+    handleLogout,
+    locationSearch,
+    selectedLocation,
+    setLocationSearch,
+    setSelectedLocation,
+  };
+
   if (currentPage === 'login') {
     return (
       <LoginSmember
@@ -560,10 +550,13 @@ function App() {
             onGoHome={goHome}
             onLogout={handleLogout}
             onUserUpdate={setCurrentUser}
+            onNavigate={navigateToPath}
+            search={currentLocation.search}
           />
         </main>
         <Footer />
         <FloatingActions />
+        <HeaderPopups {...headerPopupProps} />
       </div>
     );
   }
@@ -596,6 +589,7 @@ function App() {
         </main>
         <Footer />
         <FloatingActions />
+        <HeaderPopups {...headerPopupProps} />
       </div>
     );
   }
@@ -625,6 +619,7 @@ function App() {
         </main>
         <Footer />
         <FloatingActions />
+        <HeaderPopups {...headerPopupProps} />
       </div>
     );
   }
@@ -650,6 +645,7 @@ function App() {
         </main>
         <Footer />
         <FloatingActions />
+        <HeaderPopups {...headerPopupProps} />
         <ChatbotWidget
           userName={
             currentUser?.fullName
@@ -665,22 +661,6 @@ function App() {
 
   return (
     <div className="app">
-      {activePopup === 'category' && (
-        <div
-          className="global-backdrop-overlay"
-          onClick={handleCloseAllPopups}
-          role="presentation"
-        />
-      )}
-
-      {(activePopup === 'location' || activePopup === 'auth') && (
-        <div
-          className="location-global-overlay"
-          onClick={handleCloseAllPopups}
-          role="presentation"
-        />
-      )}
-
       <TopBar />
       <MainHeader
         activePopup={activePopup}
@@ -713,6 +693,8 @@ function App() {
       <Footer />
 
       <FloatingActions />
+
+      <HeaderPopups {...headerPopupProps} />
 
       <ChatbotWidget
         userName={
@@ -808,7 +790,7 @@ function App() {
               <div className="auth-modal-user-meta">
                 <span>{currentUser.email}</span>
                 <span>{currentUser.phone}</span>
-                <span>Role: {currentUser.role || 'customer'}</span>
+                <span>{currentUser.role === 'admin' ? 'Quản trị viên' : 'Thành viên Smember'}</span>
               </div>
               <div className="auth-modal-actions stacked">
                 <button

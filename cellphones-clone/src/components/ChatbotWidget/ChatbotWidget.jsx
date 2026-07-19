@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+
+import { getAuthToken } from '../../services/apiAuth';
 import './ChatbotWidget.css';
 
 const CHATBOT_API_URL = (
@@ -7,6 +9,7 @@ const CHATBOT_API_URL = (
 
 const CHATBOT_IMAGE = 'https://cellphones.com.vn/media/wysiwyg/ant-smile.png';
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
+const TEXT_BATCH_DELAY_MS = 6000;
 
 const DIRECT_NAME_KEYS = [
   'userName',
@@ -17,6 +20,7 @@ const DIRECT_NAME_KEYS = [
 ];
 
 const USER_OBJECT_KEYS = [
+  'smember_user',
   'currentUser',
   'user',
   'authUser',
@@ -37,14 +41,16 @@ const extractNameFromObject = (value) => {
 
   return normalizeUserName(
     value.fullName
-      || value.displayName
-      || value.name
-      || value.username
-      || value.userName
-      || value.user?.fullName
-      || value.user?.displayName
-      || value.user?.name
-      || value.user?.username,
+    || value.full_name
+    || value.displayName
+    || value.name
+    || value.username
+    || value.userName
+    || value.user?.fullName
+    || value.user?.full_name
+    || value.user?.displayName
+    || value.user?.name
+    || value.user?.username,
   );
 };
 
@@ -66,11 +72,11 @@ const readStoredUserName = () => {
         const name = extractNameFromObject(parsedValue);
         if (name) return name;
       } catch {
-        // Bỏ qua nếu giá trị trong localStorage không phải JSON hợp lệ.
+        // Bỏ qua giá trị localStorage không phải JSON hợp lệ.
       }
     }
   } catch {
-    // Trình duyệt có thể chặn localStorage trong một số chế độ riêng tư.
+    // Một số chế độ riêng tư có thể chặn localStorage.
   }
 
   return '';
@@ -83,8 +89,16 @@ const createWelcomeMessage = (userName = '') => {
     id: 'welcome',
     role: 'bot',
     html: safeUserName
-      ? `Xin chào <strong>${safeUserName}</strong> 👋 Mình là Mochi. Bạn cần mình giúp tìm sản phẩm công nghệ nào không?`
-      : 'Xin chào 👋 Mình là Mochi. Bạn cần mình giúp tìm sản phẩm công nghệ nào không?',
+      ? (
+        `Xin chào <strong>${safeUserName}</strong> 👋<br>`
+        + 'Mình là Mochi, trợ lý mua sắm của bạn. '
+        + 'Bạn đang muốn tìm sản phẩm công nghệ nào?'
+      )
+      : (
+        'Xin chào 👋<br>'
+        + 'Mình là Mochi, trợ lý mua sắm của bạn. '
+        + 'Bạn đang muốn tìm sản phẩm công nghệ nào?'
+      ),
   };
 };
 
@@ -97,18 +111,38 @@ function ChatbotWidget({ userName = '' }) {
   const [message, setMessage] = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
   const [imagePreview, setImagePreview] = useState('');
+  const [isDraggingImage, setIsDraggingImage] = useState(false);
   const [storedUserName, setStoredUserName] = useState(() => readStoredUserName());
-  const activeUserName = normalizeUserName(userName) || storedUserName;
-  const welcomeMessage = createWelcomeMessage(activeUserName);
-  const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [isWaitingForMoreText, setIsWaitingForMoreText] = useState(false);
+
+  const activeUserName = normalizeUserName(userName) || storedUserName;
+
+  const [messages, setMessages] = useState(() => [
+    createWelcomeMessage(normalizeUserName(userName) || readStoredUserName()),
+  ]);
+
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
   const textareaRef = useRef(null);
+  const dragDepthRef = useRef(0);
+  const activeUserNameRef = useRef(activeUserName);
+  const textBatchTimerRef = useRef(null);
+  const textBatchRef = useRef([]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, loading, isOpen]);
+  }, [messages, loading, isWaitingForMoreText, isOpen]);
+
+  useEffect(() => {
+    activeUserNameRef.current = activeUserName;
+  }, [activeUserName]);
+
+  useEffect(() => () => {
+    if (textBatchTimerRef.current) {
+      window.clearTimeout(textBatchTimerRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     const syncStoredUserName = () => {
@@ -142,31 +176,146 @@ function ChatbotWidget({ userName = '' }) {
     }
   };
 
-  const addBotMessage = (html) => {
+  const addBotMessage = (html, metadata = {}) => {
+    const suggestionKeys = new Set();
+    const suggestions = (
+      Array.isArray(metadata.suggestions) ? metadata.suggestions : []
+    ).map((item) => {
+      if (item && typeof item === 'object') {
+        const label = String(item.label || item.message || '').trim();
+        const value = String(item.message || item.value || label).trim();
+        return { label, value };
+      }
+
+      const value = String(item || '').trim();
+      return { label: value, value };
+    }).filter((item) => {
+      const key = `${item.label}\u0000${item.value}`;
+      if (!item.label || !item.value || suggestionKeys.has(key)) return false;
+      suggestionKeys.add(key);
+      return true;
+    }).slice(0, 10);
+
     setMessages((current) => [
       ...current,
       {
         id: createMessageId(),
         role: 'bot',
         html,
+        responseType: String(metadata.responseType || ''),
+        suggestions,
       },
     ]);
   };
 
-  const handleFileChange = (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const buildBatchedTextMessage = (items) => {
+    const texts = items
+      .map((item) => String(item || '').trim())
+      .filter(Boolean);
+
+    if (texts.length <= 1) return texts[0] || '';
+
+    return texts.join('\n');
+  };
+
+  const clearTextBatchTimer = () => {
+    if (!textBatchTimerRef.current) return;
+
+    window.clearTimeout(textBatchTimerRef.current);
+    textBatchTimerRef.current = null;
+  };
+
+  const showChatbotConnectionError = () => {
+    addBotMessage('Chatbot hiện chưa thể phản hồi. Vui lòng thử lại sau.');
+  };
+
+  const sendTextToChatbot = async (text) => {
+    const authToken = getAuthToken();
+
+    const response = await fetch(`${CHATBOT_API_URL}/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authToken
+          ? { Authorization: `Bearer ${authToken}` }
+          : {}),
+      },
+      body: JSON.stringify({
+        message: text,
+        user_name: activeUserNameRef.current || null,
+      }),
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(
+        data.reply
+        || data.error
+        || `May chu phan hoi loi HTTP ${response.status}`,
+      );
+    }
+
+    addBotMessage(
+      data.reply || 'Minh chua nhan duoc noi dung phan hoi.',
+      {
+        responseType: data.response_type,
+        suggestions: data.suggestions,
+      },
+    );
+  };
+
+  const flushTextBatch = async () => {
+    const batchedText = buildBatchedTextMessage(textBatchRef.current);
+
+    clearTextBatchTimer();
+    textBatchRef.current = [];
+    setIsWaitingForMoreText(false);
+
+    if (!batchedText) return;
+
+    setLoading(true);
+
+    try {
+      await sendTextToChatbot(batchedText);
+    } catch (error) {
+      showChatbotConnectionError(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const queueTextMessage = (text) => {
+    const userMessage = {
+      id: createMessageId(),
+      role: 'user',
+      text,
+      image: '',
+    };
+
+    textBatchRef.current = [...textBatchRef.current, text];
+
+    setMessages((current) => [...current, userMessage]);
+    setMessage('');
+    setIsWaitingForMoreText(true);
+
+    clearTextBatchTimer();
+    textBatchTimerRef.current = window.setTimeout(() => {
+      flushTextBatch();
+    }, TEXT_BATCH_DELAY_MS);
+  };
+
+  const selectImageFile = (file) => {
+    if (!file) return false;
 
     if (!file.type.startsWith('image/')) {
-      addBotMessage('Vui lòng chọn một file ảnh hợp lệ.');
-      event.target.value = '';
-      return;
+      addBotMessage('Bạn hãy chọn một file ảnh hợp lệ nhé.');
+      return false;
     }
 
     if (file.size > MAX_IMAGE_SIZE) {
       addBotMessage('Ảnh không được lớn hơn 5 MB.');
-      event.target.value = '';
-      return;
+      return false;
     }
 
     const reader = new FileReader();
@@ -174,22 +323,109 @@ function ChatbotWidget({ userName = '' }) {
     reader.onload = () => {
       setSelectedFile(file);
       setImagePreview(String(reader.result || ''));
+      textareaRef.current?.focus();
     };
 
     reader.onerror = () => {
-      addBotMessage('Không thể đọc file ảnh này. Vui lòng chọn ảnh khác.');
-      event.target.value = '';
+      addBotMessage('Mình không thể đọc ảnh này. Bạn thử chọn ảnh khác nhé.');
     };
 
     reader.readAsDataURL(file);
+    return true;
+  };
+
+  const handleFileChange = (event) => {
+    const file = event.target.files?.[0];
+    const accepted = selectImageFile(file);
+
+    if (!accepted) {
+      event.target.value = '';
+    }
+  };
+
+  const hasDraggedFiles = (event) => (
+    Array.from(event.dataTransfer?.types || []).includes('Files')
+  );
+
+  const handleDragEnter = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!hasDraggedFiles(event)) return;
+
+    dragDepthRef.current += 1;
+    setIsDraggingImage(true);
+  };
+
+  const handleDragOver = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy';
+    }
+
+    if (hasDraggedFiles(event)) {
+      setIsDraggingImage(true);
+    }
+  };
+
+  const handleDragLeave = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) {
+      setIsDraggingImage(false);
+    }
+  };
+
+  const handleDrop = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    dragDepthRef.current = 0;
+    setIsDraggingImage(false);
+
+    const file = event.dataTransfer?.files?.[0];
+    selectImageFile(file);
+  };
+
+  const handlePaste = (event) => {
+    const imageFile = Array.from(event.clipboardData?.files || [])
+      .find((file) => file.type.startsWith('image/'));
+
+    if (imageFile) {
+      event.preventDefault();
+      selectImageFile(imageFile);
+    }
   };
 
   const sendMessage = async (presetMessage = '') => {
     const text = String(presetMessage || message).trim();
+
     if ((!text && !selectedFile) || loading) return;
 
     const fileToSend = selectedFile;
     const previewToKeep = imagePreview;
+    const authToken = getAuthToken();
+    const uploadMessage = buildBatchedTextMessage([
+      ...textBatchRef.current,
+      text || (
+        fileToSend
+          ? 'Tim giup toi san pham tuong tu nhu anh nay'
+          : ''
+      ),
+    ]);
+
+    if (!fileToSend) {
+      queueTextMessage(text);
+      return;
+    }
+
+    clearTextBatchTimer();
+    textBatchRef.current = [];
+    setIsWaitingForMoreText(false);
 
     const userMessage = {
       id: createMessageId(),
@@ -200,6 +436,7 @@ function ChatbotWidget({ userName = '' }) {
 
     setMessages((current) => [...current, userMessage]);
     setMessage('');
+    clearSelectedFile();
     setLoading(true);
 
     try {
@@ -213,43 +450,82 @@ function ChatbotWidget({ userName = '' }) {
           text || 'Tìm giúp tôi sản phẩm tương tự như ảnh này',
         );
 
+        formData.set('message', uploadMessage);
+
         if (activeUserName) {
           formData.append('user_name', activeUserName);
         }
 
         response = await fetch(`${CHATBOT_API_URL}/upload`, {
           method: 'POST',
+          headers: authToken
+            ? { Authorization: `Bearer ${authToken}` }
+            : {},
           body: formData,
-        });
-      } else {
-        response = await fetch(`${CHATBOT_API_URL}/chat`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: text,
-            user_name: activeUserName || null,
-          }),
         });
       }
 
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        throw new Error(data.reply || data.error || `HTTP ${response.status}`);
+        throw new Error(
+          data.reply
+          || data.error
+          || `Máy chủ phản hồi lỗi HTTP ${response.status}`,
+        );
       }
 
-      addBotMessage(data.reply || 'Mình chưa nhận được nội dung phản hồi.');
+      addBotMessage(
+        data.reply || 'Mình chưa nhận được nội dung phản hồi.',
+        {
+          responseType: data.response_type,
+          suggestions: data.suggestions,
+        },
+      );
     } catch (error) {
       const errorMessage = error instanceof Error
         ? error.message
         : 'Đã xảy ra lỗi không xác định.';
 
       addBotMessage(
-        `Không thể kết nối chatbot. Hãy kiểm tra Flask đang chạy ở cổng 5000.`
+        'Mình chưa thể kết nối tới máy chủ chatbot. '
+        + 'Bạn kiểm tra Flask đang chạy ở cổng 5000 nhé.'
         + `<br><small>${escapeHtml(errorMessage)}</small>`,
       );
     } finally {
-      clearSelectedFile();
+      setLoading(false);
+    }
+  };
+
+  const sendSuggestionMessage = async (suggestionValue) => {
+    const text = String(suggestionValue || '').trim();
+    if (!text || loading) return;
+
+    const requestText = buildBatchedTextMessage([
+      ...textBatchRef.current,
+      text,
+    ]);
+
+    clearTextBatchTimer();
+    textBatchRef.current = [];
+    setIsWaitingForMoreText(false);
+    setMessage('');
+    setMessages((current) => [
+      ...current,
+      {
+        id: createMessageId(),
+        role: 'user',
+        text,
+        image: '',
+      },
+    ]);
+    setLoading(true);
+
+    try {
+      await sendTextToChatbot(requestText);
+    } catch (error) {
+      showChatbotConnectionError(error);
+    } finally {
       setLoading(false);
     }
   };
@@ -266,15 +542,48 @@ function ChatbotWidget({ userName = '' }) {
     setIsOpen((current) => !current);
   };
 
+  const visibleMessages = messages.map((item) => (
+    item.id === 'welcome' ? createWelcomeMessage(activeUserName) : item
+  ));
+
   return (
     <div className="chatbot-widget">
       {isOpen && (
-        <section className="chatbot-panel" aria-label="Trợ lý mua sắm AI">
+        <section
+          className={`chatbot-panel ${isDraggingImage ? 'is-dragging' : ''}`}
+          aria-label="Trợ lý mua sắm AI"
+          onDragEnter={handleDragEnter}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          {isDraggingImage && (
+            <div className="chatbot-drop-overlay" aria-hidden="true">
+              <div className="chatbot-drop-card">
+                <svg
+                  width="42"
+                  height="42"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                >
+                  <rect x="3" y="3" width="18" height="18" rx="3" />
+                  <circle cx="8.5" cy="8.5" r="1.5" />
+                  <path d="m21 15-5-5L5 21" />
+                </svg>
+                <strong>Thả ảnh vào đây</strong>
+                <span>Ảnh sẽ được xem trước trước khi gửi</span>
+              </div>
+            </div>
+          )}
+
           <header className="chatbot-header">
             <div className="chatbot-header-identity">
               <span className="chatbot-avatar chatbot-avatar-header">
                 <img src={CHATBOT_IMAGE} alt="Chatbot Mochi" />
               </span>
+
               <div>
                 <strong>Mochi - Trợ lý mua sắm AI</strong>
                 <span><i /> Đang trực tuyến</span>
@@ -287,25 +596,16 @@ function ChatbotWidget({ userName = '' }) {
               onClick={() => setIsOpen(false)}
               aria-label="Đóng chatbot"
             >
-              
+              ×
             </button>
           </header>
 
           <div className="chatbot-messages">
-            <div
-              key={welcomeMessage.id}
-              className={`chatbot-message-row ${welcomeMessage.role}`}
-            >
-              <span className="chatbot-avatar chatbot-avatar-message">
-                <img src={CHATBOT_IMAGE} alt="" />
-              </span>
-              <div className={`chatbot-message ${welcomeMessage.role}`}>
-                <div dangerouslySetInnerHTML={{ __html: welcomeMessage.html }} />
-              </div>
-            </div>
-
-            {messages.map((item) => (
-              <div key={item.id} className={`chatbot-message-row ${item.role}`}>
+            {visibleMessages.map((item) => (
+              <div
+                key={item.id}
+                className={`chatbot-message-row ${item.role}`}
+              >
                 {item.role === 'bot' && (
                   <span className="chatbot-avatar chatbot-avatar-message">
                     <img src={CHATBOT_IMAGE} alt="" />
@@ -322,7 +622,27 @@ function ChatbotWidget({ userName = '' }) {
                   )}
 
                   {item.role === 'bot' ? (
-                    <div dangerouslySetInnerHTML={{ __html: item.html }} />
+                    <>
+                      <div dangerouslySetInnerHTML={{ __html: item.html }} />
+
+                      {item.suggestions?.length > 0 && (
+                        <div
+                          className="chatbot-inline-suggestions"
+                          aria-label="Tiêu chí gợi ý"
+                        >
+                          {item.suggestions.map((suggestion) => (
+                            <button
+                              type="button"
+                              key={`${suggestion.label}-${suggestion.value}`}
+                              onClick={() => sendSuggestionMessage(suggestion.value)}
+                              disabled={loading}
+                            >
+                              {suggestion.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </>
                   ) : (
                     <p>{item.text}</p>
                   )}
@@ -330,11 +650,12 @@ function ChatbotWidget({ userName = '' }) {
               </div>
             ))}
 
-            {loading && (
+            {(loading || isWaitingForMoreText) && (
               <div className="chatbot-message-row bot">
                 <span className="chatbot-avatar chatbot-avatar-message">
                   <img src={CHATBOT_IMAGE} alt="" />
                 </span>
+
                 <div
                   className="chatbot-message bot chatbot-typing"
                   aria-label="Chatbot đang trả lời"
@@ -349,7 +670,7 @@ function ChatbotWidget({ userName = '' }) {
             <div ref={messagesEndRef} />
           </div>
 
-          {messages.length === 0 && (
+          {messages.length === 1 && (
             <div className="chatbot-suggestions">
               {[
                 'Tìm laptop học tập',
@@ -359,7 +680,7 @@ function ChatbotWidget({ userName = '' }) {
                 <button
                   type="button"
                   key={suggestion}
-                  onClick={() => sendMessage(suggestion)}
+                  onClick={() => sendSuggestionMessage(suggestion)}
                 >
                   {suggestion}
                 </button>
@@ -367,82 +688,96 @@ function ChatbotWidget({ userName = '' }) {
             </div>
           )}
 
-          {imagePreview && (
-            <div className="chatbot-image-preview">
-              <img src={imagePreview} alt="Ảnh chuẩn bị gửi" />
-              <span>{selectedFile?.name}</span>
+          <div className="chatbot-input-area">
+            {imagePreview && (
+              <div className="chatbot-image-preview">
+                <img src={imagePreview} alt="Ảnh chuẩn bị gửi" />
+
+                <div className="chatbot-image-preview-info">
+                  <strong>Ảnh đã sẵn sàng</strong>
+                  <span>{selectedFile?.name}</span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={clearSelectedFile}
+                  aria-label="Xóa ảnh"
+                  disabled={loading}
+                >
+                  ×
+                </button>
+              </div>
+            )}
+
+            <footer className="chatbot-composer">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleFileChange}
+                hidden
+              />
+
               <button
                 type="button"
-                onClick={clearSelectedFile}
-                aria-label="Xóa ảnh"
+                className="chatbot-attach"
+                onClick={() => fileInputRef.current?.click()}
+                aria-label="Chọn ảnh sản phẩm"
+                title="Chọn hoặc kéo thả ảnh"
+                disabled={loading}
               >
-                ×
+                <svg
+                  width="21"
+                  height="21"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden="true"
+                >
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <circle cx="8.5" cy="8.5" r="1.5" />
+                  <path d="m21 15-5-5L5 21" />
+                </svg>
               </button>
-            </div>
-          )}
 
-          <footer className="chatbot-composer">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleFileChange}
-              hidden
-            />
+              <textarea
+                ref={textareaRef}
+                value={message}
+                onChange={(event) => setMessage(event.target.value)}
+                onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
+                placeholder={
+                  imagePreview
+                    ? 'Nhập thêm yêu cầu cho ảnh...'
+                    : 'Nhập nhu cầu hoặc kéo ảnh vào đây...'
+                }
+                rows="1"
+                disabled={loading}
+              />
 
-            <button
-              type="button"
-              className="chatbot-attach"
-              onClick={() => fileInputRef.current?.click()}
-              aria-label="Gửi ảnh sản phẩm"
-              disabled={loading}
-            >
-              <svg
-                width="21"
-                height="21"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                aria-hidden="true"
+              <button
+                type="button"
+                className="chatbot-send"
+                onClick={() => sendMessage()}
+                disabled={loading || (!message.trim() && !selectedFile)}
+                aria-label="Gửi tin nhắn"
               >
-                <rect x="3" y="3" width="18" height="18" rx="2" />
-                <circle cx="8.5" cy="8.5" r="1.5" />
-                <path d="m21 15-5-5L5 21" />
-              </svg>
-            </button>
-
-            <textarea
-              ref={textareaRef}
-              value={message}
-              onChange={(event) => setMessage(event.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Nhập nhu cầu sản phẩm..."
-              rows="1"
-              disabled={loading}
-            />
-
-            <button
-              type="button"
-              className="chatbot-send"
-              onClick={() => sendMessage()}
-              disabled={loading || (!message.trim() && !selectedFile)}
-              aria-label="Gửi tin nhắn"
-            >
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                aria-hidden="true"
-              >
-                <path d="m22 2-7 20-4-9-9-4Z" />
-                <path d="M22 2 11 13" />
-              </svg>
-            </button>
-          </footer>
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  aria-hidden="true"
+                >
+                  <path d="m22 2-7 20-4-9-9-4Z" />
+                  <path d="M22 2 11 13" />
+                </svg>
+              </button>
+            </footer>
+          </div>
         </section>
       )}
 

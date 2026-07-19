@@ -10,6 +10,7 @@ import {
 } from '../services/apiProducts';
 
 const DEFAULT_FETCH_MULTIPLIER = 4;
+const MAX_FETCH_LIMIT = 300;
 
 const normalizeProductList = (items, displayLimit) => {
   const normalized = items
@@ -129,10 +130,11 @@ export function useApiProducts(query, fallbackProducts = []) {
       .join('|')
   ), [fallback]);
   const [state, setState] = useState({
-    products: fallback,
-    loading: false,
+    products: queryEnabled ? [] : fallback,
+    loading: queryEnabled,
     error: null,
-    source: 'fallback',
+    source: queryEnabled ? 'api' : 'fallback',
+    queryKey: queryEnabled ? queryKey : '',
   });
 
   useEffect(() => {
@@ -150,15 +152,24 @@ export function useApiProducts(query, fallbackProducts = []) {
     const displayLimit = Number(parsedQuery.displayLimit || parsedQuery.limit || 10);
     const fetchLimit = Math.min(
       Number(parsedQuery.fetchLimit || displayLimit * DEFAULT_FETCH_MULTIPLIER),
-      100,
+      MAX_FETCH_LIMIT,
     );
     const requestQuery = {
       sort: 'latest',
-      inStock: true,
       ...parsedQuery,
       limit: fetchLimit,
     };
-    const canUseFallback = !parsedQuery.brand && !parsedQuery.segment && !parsedQuery.q;
+    // A generic fallback must never be shown for a strict product-type filter.
+    // Otherwise, changing from "Tất cả" to e.g. "Camera" briefly renders the
+    // previous accessory list (cases, screen protectors, ...), and may keep it
+    // permanently when the API returns an empty result.
+    const canUseFallback = (
+      !parsedQuery.brand &&
+      !parsedQuery.segment &&
+      !parsedQuery.q &&
+      !parsedQuery.category &&
+      !parsedQuery.productType
+    );
 
     delete requestQuery.displayLimit;
     delete requestQuery.fetchLimit;
@@ -170,6 +181,7 @@ export function useApiProducts(query, fallbackProducts = []) {
         loading: true,
         error: null,
         source: canUseFallback ? 'fallback' : 'api',
+        queryKey,
       });
     });
 
@@ -181,6 +193,7 @@ export function useApiProducts(query, fallbackProducts = []) {
           loading: false,
           error: null,
           source: products.length ? 'api' : (canUseFallback ? 'fallback' : 'api'),
+          queryKey,
         });
       })
       .catch((error) => {
@@ -190,11 +203,24 @@ export function useApiProducts(query, fallbackProducts = []) {
           loading: false,
           error,
           source: canUseFallback ? 'fallback' : 'api',
+          queryKey,
         });
       });
 
     return () => controller.abort();
   }, [fallbackKey, queryEnabled, queryKey]);
+
+  // Effects run after render. Hide results belonging to the previous query in
+  // that one render so a selected filter can never display stale products.
+  if (queryEnabled && state.queryKey !== queryKey) {
+    return {
+      ...state,
+      products: [],
+      loading: true,
+      error: null,
+      source: 'api',
+    };
+  }
 
   return state;
 }

@@ -1,3 +1,5 @@
+import argparse
+import gzip
 import os
 import json
 import hashlib
@@ -7,6 +9,8 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import faiss
 import numpy as np
+
+from utils.faiss_io import read_faiss_index, write_faiss_index
 import open_clip
 import requests
 import torch
@@ -20,6 +24,9 @@ from pymongo.errors import (
     PyMongoError,
     ServerSelectionTimeoutError,
 )
+
+from catalog_store import CatalogSearchWriter
+from product_details import enrich_product_document, runtime_product_document
 
 # ==========================================================
 # CẤU HÌNH
@@ -44,11 +51,26 @@ os.makedirs(FAISS_DIR, exist_ok=True)
 INDEX_PATH = os.path.join(FAISS_DIR, "faiss_index.index")
 EMB_PATH = os.path.join(FAISS_DIR, "embeddings.npy")
 META_PATH = os.path.join(FAISS_DIR, "products.json")
+CATALOG_PATH = os.path.join(FAISS_DIR, "catalog.jsonl.gz")
+CATALOG_SEARCH_PATH = os.path.join(FAISS_DIR, "catalog_search.sqlite3")
 FAILED_PRODUCTS_PATH = os.path.join(FAISS_DIR, "failed_products.json")
 
 PARTIAL_EMB_PATH = os.path.join(FAISS_DIR, "embeddings_partial.npy")
 PARTIAL_META_PATH = os.path.join(FAISS_DIR, "products_partial.json")
 PROGRESS_PATH = os.path.join(FAISS_DIR, "progress.json")
+
+# products.json stays aligned 1:1 with FAISS rows. The complete searchable
+# MongoDB catalog is stored separately in catalog.jsonl.gz.
+FAISS_METADATA_FIELDS = (
+    "_id", "productKey", "id", "productId", "product_id", "sku", "slug",
+    "name", "title", "productName", "product_name", "brand", "manufacturer",
+    "category", "category_name", "categories", "trainingLabels",
+    "training_labels", "labels", "tags", "keywords", "description", "price",
+    "currentPrice", "originalPrice", "statusLabel", "stockNote", "colors",
+    "variants", "primaryImage", "images", "image", "image_path", "thumbnail",
+    "thumbnailUrl", "imageUrl", "image_url", "gallery", "url", "sourceUrl",
+    "sourceUrls",
+)
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Thiết bị đang dùng: {DEVICE}")
@@ -83,11 +105,8 @@ load_environment()
 
 MONGODB_URI = os.getenv("MONGODB_URI", "").strip()
 MONGODB_DB = os.getenv("MONGODB_DB", "").strip()
-MONGODB_PRODUCTS_COLLECTION = (
-    os.getenv("MONGODB_PRODUCTS_COLLECTION")
-    or os.getenv("MONGODB_PRODUCTS_COLLECTION_NAME")
-    or os.getenv("MONGODB_PRODUCTS")
-    or ""
+MONGODB_PRODUCTS_COLLECTION = os.getenv(
+    "MONGODB_PRODUCTS_COLLECTION", ""
 ).strip()
 
 if not MONGODB_URI or not MONGODB_DB or not MONGODB_PRODUCTS_COLLECTION:
@@ -123,18 +142,27 @@ FORCE_REBUILD_INDEX = os.getenv(
 model = None
 preprocess = None
 
-print(f"Đang tải mô hình CLIP ({CLIP_MODEL_NAME}, {DEVICE})...")
-try:
-    model, _, preprocess = open_clip.create_model_and_transforms(
-        CLIP_MODEL_NAME,
-        pretrained=CLIP_PRETRAINED,
-    )
-    model.to(DEVICE).eval()
-    print("Mô hình OpenCLIP đã tải thành công.")
-except Exception as exc:
-    print(f"Lỗi tải mô hình OpenCLIP: {exc}")
-    model = None
-    preprocess = None
+
+def load_clip_model() -> bool:
+    global model, preprocess
+
+    if model is not None and preprocess is not None:
+        return True
+
+    print(f"Đang tải mô hình CLIP ({CLIP_MODEL_NAME}, {DEVICE})...")
+    try:
+        model, _, preprocess = open_clip.create_model_and_transforms(
+            CLIP_MODEL_NAME,
+            pretrained=CLIP_PRETRAINED,
+        )
+        model.to(DEVICE).eval()
+        print("Mô hình OpenCLIP đã tải thành công.")
+        return True
+    except Exception as exc:
+        print(f"Lỗi tải mô hình OpenCLIP: {exc}")
+        model = None
+        preprocess = None
+        return False
 
 
 # ==========================================================
@@ -200,6 +228,14 @@ def save_json_atomic(path: str, data: Any) -> None:
     with open(temp_path, "w", encoding="utf-8") as file:
         json.dump(data, file, ensure_ascii=False, indent=2, default=str)
     os.replace(temp_path, path)
+
+
+def compact_faiss_metadata(product: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        key: product[key]
+        for key in FAISS_METADATA_FIELDS
+        if key in product
+    }
 
 
 def save_npy_atomic(path: str, array: np.ndarray) -> None:
@@ -522,37 +558,27 @@ def _run_mongodb_with_retry(operation, operation_name: str):
     )
 
 
-def load_products_from_mongodb() -> List[Dict[str, Any]]:
+def load_products_from_mongodb(
+    collect_products: bool = True,
+) -> List[Dict[str, Any]]:
     """
     Đọc MongoDB theo từng trang dựa trên _id.
 
     Không giữ một cursor cho toàn bộ collection, nhờ vậy giảm lỗi
     "operation cancelled". Nếu một batch lỗi, chương trình thử lại batch đó.
     """
-    projection = {
-        "_id": 1,
-        "productKey": 1,
-        "id": 1,
-        "productId": 1,
-        "product_id": 1,
-        "sku": 1,
-        "slug": 1,
-        "name": 1,
-        "title": 1,
-        "brand": 1,
-        "primaryImage": 1,
-        "images": 1,
-        "image": 1,
-        "image_path": 1,
-        "thumbnail": 1,
-        "thumbnailUrl": 1,
-        "imageUrl": 1,
-        "image_url": 1,
-        "gallery": 1,
-        "media": 1,
-        "url": 1,
-        "sourceUrl": 1,
-    }
+    # Metadata này được lưu nguyên thứ tự vào index/products.json.
+    # Flask sẽ dùng file đó làm catalog cục bộ, nên cần đủ trường để
+    # hiển thị, tìm kiếm và lọc mà không đọc lại collection MongoDB.
+    # Fetch the complete document because the rich product data is stored in
+    # the compressed detailBlob and new source fields may be added over time.
+    projection = None
+
+    catalog_temp_path = f"{CATALOG_PATH}.tmp"
+    catalog_file = None
+    catalog_committed = False
+    catalog_search_writer = None
+    catalog_search_committed = False
 
     client = MongoClient(
         MONGODB_URI,
@@ -588,7 +614,19 @@ def load_products_from_mongodb() -> List[Dict[str, Any]]:
         )
 
         products: List[Dict[str, Any]] = []
+        seen_product_ids: Set[str] = set()
+        detail_blob_count = 0
+        detail_blob_errors = 0
+        loaded_documents = 0
+        first_runtime_product: Optional[Dict[str, Any]] = None
         last_raw_id: Any = None
+        catalog_file = gzip.open(
+            catalog_temp_path,
+            "wt",
+            encoding="utf-8",
+            compresslevel=6,
+        )
+        catalog_search_writer = CatalogSearchWriter(CATALOG_SEARCH_PATH)
 
         while True:
             query: Dict[str, Any] = {}
@@ -627,16 +665,50 @@ def load_products_from_mongodb() -> List[Dict[str, Any]]:
                 )
 
             for product in batch:
+                loaded_documents += 1
                 if "_id" in product:
                     product["_id"] = str(product["_id"])
 
-                products.append(product)
+                enriched_product, detail_error = enrich_product_document(product)
+                detail_info = enriched_product.get("detailBlobInfo", {})
+                if detail_info.get("decoded"):
+                    detail_blob_count += 1
+                if detail_error:
+                    detail_blob_errors += 1
+                    if detail_blob_errors <= 10:
+                        print(
+                            f"\nKhông giải mã được detailBlob của "
+                            f"{get_product_id(product)}: {detail_error}"
+                        )
+
+                product_id = get_product_id(enriched_product)
+                if not product_id or product_id in seen_product_ids:
+                    continue
+
+                seen_product_ids.add(product_id)
+                json.dump(
+                    enriched_product,
+                    catalog_file,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    default=str,
+                )
+                catalog_file.write("\n")
+                catalog_search_writer.add(enriched_product)
+                runtime_product = runtime_product_document(
+                    enriched_product,
+                    include_build_fields=True,
+                )
+                if first_runtime_product is None:
+                    first_runtime_product = runtime_product
+                if collect_products:
+                    products.append(runtime_product)
 
             last_raw_id = next_last_raw_id
 
             print(
                 f"\rĐang tải MongoDB: "
-                f"{len(products)}/{total_documents}",
+                f"{loaded_documents}/{total_documents}",
                 end="",
                 flush=True,
             )
@@ -644,20 +716,35 @@ def load_products_from_mongodb() -> List[Dict[str, Any]]:
             if len(batch) < MONGODB_FETCH_BATCH_SIZE:
                 break
 
-        print()
-        print(f"Đã tải {len(products)} sản phẩm từ MongoDB.")
+        catalog_file.close()
+        catalog_file = None
+        os.replace(catalog_temp_path, CATALOG_PATH)
+        catalog_committed = True
+        catalog_search_writer.finish()
+        catalog_search_writer = None
+        catalog_search_committed = True
 
-        if len(products) != total_documents:
+        print()
+        print(f"Đã tải {loaded_documents} document từ MongoDB.")
+        print(f"Catalog sau lọc trùng có {len(seen_product_ids)} sản phẩm.")
+        print(f"Đã lưu catalog chi tiết: {CATALOG_PATH}")
+        print(f"Đã lưu catalog tìm kiếm SQLite: {CATALOG_SEARCH_PATH}")
+        print(
+            f"Đã giải mã detailBlob: {detail_blob_count}/{loaded_documents}; "
+            f"lỗi: {detail_blob_errors}."
+        )
+
+        if loaded_documents != total_documents:
             print(
                 "Cảnh báo: số document tải được khác số đã đếm: "
-                f"{len(products)} != {total_documents}. "
+                f"{loaded_documents} != {total_documents}. "
                 "Collection có thể đã thay đổi trong lúc build."
             )
 
-        if products:
+        if first_runtime_product:
             print(
                 "Các field của sản phẩm đầu tiên: "
-                + ", ".join(sorted(products[0].keys()))
+                + ", ".join(sorted(first_runtime_product.keys()))
             )
 
         return products
@@ -672,6 +759,12 @@ def load_products_from_mongodb() -> List[Dict[str, Any]]:
         raise
 
     finally:
+        if catalog_file is not None:
+            catalog_file.close()
+        if catalog_search_writer is not None and not catalog_search_committed:
+            catalog_search_writer.abort()
+        if not catalog_committed and os.path.exists(catalog_temp_path):
+            os.remove(catalog_temp_path)
         client.close()
 
 def deduplicate_products(
@@ -945,7 +1038,7 @@ def load_existing_data():
     print("Phát hiện dữ liệu cũ → đang nạp index hiện có...")
 
     try:
-        old_index = faiss.read_index(INDEX_PATH)
+        old_index = read_faiss_index(INDEX_PATH)
         old_embeddings = np.load(EMB_PATH, allow_pickle=False)
 
         if old_embeddings.ndim == 1:
@@ -1231,30 +1324,31 @@ def build_or_update_index(
 # ==========================================================
 def save_all(index, embeddings: np.ndarray, products) -> None:
     index = index_to_cpu(index)
+    faiss_metadata = [compact_faiss_metadata(product) for product in products]
 
     if index is None:
         raise ValueError("FAISS index chưa được tạo.")
 
     if (
         index.ntotal != embeddings.shape[0]
-        or index.ntotal != len(products)
+        or index.ntotal != len(faiss_metadata)
         or embeddings.shape[1] != EMBEDDING_DIM
     ):
         raise ValueError(
             "Không thể lưu vì FAISS/embeddings/products không khớp: "
             f"FAISS={index.ntotal}, embeddings={embeddings.shape}, "
-            f"products={len(products)}"
+            f"products={len(faiss_metadata)}"
         )
 
     temp_index_path = f"{INDEX_PATH}.tmp"
     temp_emb_path = f"{EMB_PATH}.tmp"
     temp_meta_path = f"{META_PATH}.tmp"
 
-    faiss.write_index(index, temp_index_path)
+    write_faiss_index(index, temp_index_path)
     with open(temp_emb_path, "wb") as file:
         np.save(file, embeddings.astype("float32"))
     with open(temp_meta_path, "w", encoding="utf-8") as file:
-        json.dump(products, file, ensure_ascii=False, indent=2, default=str)
+        json.dump(faiss_metadata, file, ensure_ascii=False, indent=2, default=str)
 
     os.replace(temp_index_path, INDEX_PATH)
     os.replace(temp_emb_path, EMB_PATH)
@@ -1263,22 +1357,28 @@ def save_all(index, embeddings: np.ndarray, products) -> None:
     print("\nĐã lưu thành công:")
     print(f"- FAISS index: {INDEX_PATH}")
     print(f"- Embeddings: {EMB_PATH}")
-    print(f"- Metadata: {META_PATH}")
+    print(f"- Metadata catalog cục bộ: {META_PATH}")
     print(f"- Tổng vectors: {index.ntotal}")
 
 
 # ==========================================================
 # MAIN
 # ==========================================================
-def main() -> None:
-    if model is None or preprocess is None:
-        print("Lỗi: Dừng vì không thể tải mô hình CLIP.")
-        return
-
+def main(metadata_only: bool = False) -> None:
     print("-" * 60)
     print("Đang tải dữ liệu sản phẩm từ MongoDB...")
 
-    raw_products = load_products_from_mongodb()
+    raw_products = load_products_from_mongodb(
+        collect_products=not metadata_only,
+    )
+
+    if metadata_only:
+        print(
+            "Đã đồng bộ catalog, detailBlob và SQLite FTS. "
+            "Bỏ qua tải ảnh/xây lại FAISS theo tùy chọn --metadata-only."
+        )
+        return
+
     all_products = deduplicate_products(raw_products)
 
     if not all_products:
@@ -1286,7 +1386,6 @@ def main() -> None:
         return
 
     print(f"Tổng sản phẩm MongoDB sau lọc trùng: {len(all_products)}")
-
     if FORCE_REBUILD_INDEX:
         print(
             "FORCE_REBUILD_INDEX=true: bỏ qua index cuối hiện có "
@@ -1321,14 +1420,21 @@ def main() -> None:
     print(f"Sản phẩm cần trích xuất mới: {len(products_to_process)}")
 
     if not products_to_process:
-        if existing_changed:
-            print("Index cũ đã được làm sạch theo MongoDB. Đang lưu lại...")
-            save_all(old_index, old_embeddings, old_products)
-        else:
-            print("Không có sản phẩm mới. Index hiện tại đã đồng bộ MongoDB.")
+        # old_products đã được thay bằng document MongoDB mới nhất trong
+        # reconcile_existing_with_mongodb(). Luôn lưu lại để products.json
+        # có đầy đủ tên, giá, category, specs... cho Flask dùng offline.
+        print(
+            "Không có embedding mới. Đang làm mới metadata products.json "
+            "từ MongoDB mà không trích xuất lại vector..."
+        )
+        save_all(old_index, old_embeddings, old_products)
 
         if checkpoint_files_exist():
             clear_checkpoint()
+        return
+
+    if not load_clip_model():
+        print("Lỗi: Dừng vì không thể tải mô hình CLIP.")
         return
 
     new_embeddings, valid_products, failures = extract_embeddings(
@@ -1365,9 +1471,25 @@ def main() -> None:
         print(f"Danh sách lỗi được lưu tại: {FAILED_PRODUCTS_PATH}")
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Đồng bộ catalog MongoDB và xây image-embedding FAISS."
+    )
+    parser.add_argument(
+        "--metadata-only",
+        action="store_true",
+        help=(
+            "Chỉ tải, giải nén detailBlob, ghi catalog JSONL/SQLite; "
+            "không tải ảnh hoặc thay đổi FAISS hiện tại."
+        ),
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
     try:
-        main()
+        arguments = parse_args()
+        main(metadata_only=arguments.metadata_only)
     except KeyboardInterrupt:
         print("\nĐã dừng chương trình an toàn. Checkpoint đã được giữ lại.")
     except Exception as exc:

@@ -1,5 +1,6 @@
 const { ObjectId } = require("mongodb");
 const { getAuthConfig, getAuthToken, publicUser, verifyJwt } = require("./auth-service");
+const { getCorsOriginForRequest } = require("../server/http-response");
 const {
   couponSchema,
   couponUpdateSchema,
@@ -31,6 +32,29 @@ const PAYMENT_STATUS_LABELS = {
   paid: "Đã thanh toán",
   refunded: "Đã hoàn tiền",
   failed: "Thanh toán lỗi",
+};
+
+const SUPPORT_STATUS_LABELS = {
+  new: "Mới tiếp nhận",
+  in_progress: "Đang xử lý",
+  waiting_customer: "Chờ khách phản hồi",
+  resolved: "Đã giải quyết",
+  closed: "Đã đóng",
+};
+
+const BUSINESS_VERIFICATION_STATUS_LABELS = {
+  pending: "Chờ duyệt",
+  verified: "Đã duyệt",
+  rejected: "Từ chối",
+};
+
+const RETURN_STATUS_LABELS = {
+  pending: "Chờ tiếp nhận",
+  received: "Đã tiếp nhận",
+  approved: "Đã duyệt",
+  rejected: "Từ chối",
+  completed: "Hoàn trả thành công",
+  cancelled: "Đã hủy",
 };
 
 function toPositiveInt(value, fallback, max = Number.MAX_SAFE_INTEGER) {
@@ -74,6 +98,7 @@ function isAdminAuthorized(req) {
 
 async function getCollections(getDb) {
   const {
+    client,
     db,
     productDetails,
     productReviews,
@@ -93,6 +118,7 @@ async function getCollections(getDb) {
   const { usersCollection, otpCollection } = getAuthConfig();
 
   return {
+    client,
     db,
     products: productDetails,
     reviews: productReviews,
@@ -107,6 +133,7 @@ async function getCollections(getDb) {
     addresses,
     returns,
     warranties,
+    supportRequests: db.collection(process.env.SUPPORT_REQUESTS_COLLECTION || "support_requests"),
     auditLogs: adminAuditLogs,
     users: db.collection(usersCollection),
     otps: db.collection(otpCollection),
@@ -152,7 +179,7 @@ async function handleAdminSummary({ req, res, sendJson, sendError, getDb }) {
     return;
   }
 
-  const { products, users, otps, reviews, questions, orders } = await getCollections(getDb);
+  const { products, users, otps, reviews, questions, orders, returns } = await getCollections(getDb);
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -163,9 +190,11 @@ async function handleAdminSummary({ req, res, sendJson, sendError, getDb }) {
     activeUsers,
     blockedUsers,
     pendingOtps,
+    pendingBusinessVerifications,
     totalReviews,
     pendingReviews,
     pendingQuestions,
+    pendingReturns,
     totalOrders,
     pendingOrders,
     shippingOrders,
@@ -182,9 +211,11 @@ async function handleAdminSummary({ req, res, sendJson, sendError, getDb }) {
     users.countDocuments({ status: { $in: [null, "active"] } }),
     users.countDocuments({ status: "blocked" }),
     otps.countDocuments({ expiresAt: { $gt: now } }),
+    users.countDocuments({ "businessVerification.status": "pending" }),
     reviews.estimatedDocumentCount(),
     reviews.countDocuments({ status: "pending" }),
     questions.countDocuments({ status: "pending" }),
+    returns.countDocuments({ status: { $in: ["pending", "received", "approved"] } }),
     orders.estimatedDocumentCount(),
     orders.countDocuments({ status: { $in: ["pending", "confirmed", "packing", "ready_for_pickup"] } }),
     orders.countDocuments({ status: "shipping" }),
@@ -242,9 +273,11 @@ async function handleAdminSummary({ req, res, sendJson, sendError, getDb }) {
         activeUsers,
         blockedUsers,
         pendingOtps,
+        pendingBusinessVerifications,
         totalReviews,
         pendingReviews,
         pendingQuestions,
+        pendingReturns,
         totalOrders,
         pendingOrders,
         shippingOrders,
@@ -975,6 +1008,195 @@ async function handleDeleteQuestion({ req, res, pathParts, sendJson, sendError, 
   });
 }
 
+function normalizeAdminBusinessVerification(doc = {}) {
+  const business = doc.businessVerification || {};
+  const status = business.status || "pending";
+
+  return {
+    userId: String(doc._id || doc.id || ""),
+    fullName: doc.fullName || doc.username || "",
+    accountEmail: doc.email || "",
+    accountPhone: doc.phone || "",
+    customerType: doc.customerType || "normal",
+    status,
+    statusLabel: BUSINESS_VERIFICATION_STATUS_LABELS[status] || status,
+    companyName: business.companyName || "",
+    taxCode: business.taxCode || "",
+    companyAddress: business.companyAddress || "",
+    representativeName: business.representativeName || "",
+    position: business.position || "",
+    email: business.email || "",
+    phone: business.phone || "",
+    registrationDocument: business.registrationDocument || "",
+    submittedAt: business.submittedAt || null,
+    reviewedAt: business.reviewedAt || null,
+    reviewedBy: business.reviewedBy || null,
+    reviewNote: business.reviewNote || "",
+  };
+}
+
+function buildBusinessVerificationQuery(searchParams) {
+  const q = searchParams.get("q");
+  const status = searchParams.get("status");
+  const query = {
+    "businessVerification.status": { $exists: true },
+  };
+
+  if (q) {
+    const regex = new RegExp(escapeRegex(q), "i");
+    query.$or = [
+      { fullName: regex },
+      { email: regex },
+      { phone: regex },
+      { "businessVerification.companyName": regex },
+      { "businessVerification.taxCode": regex },
+      { "businessVerification.companyAddress": regex },
+      { "businessVerification.representativeName": regex },
+      { "businessVerification.email": regex },
+      { "businessVerification.phone": regex },
+    ];
+  }
+
+  if (status && status !== "all" && BUSINESS_VERIFICATION_STATUS_LABELS[status]) {
+    query["businessVerification.status"] = status;
+  }
+
+  return query;
+}
+
+async function handleListBusinessVerifications({ req, res, sendJson, sendError, getDb }) {
+  if (!isAdminAuthorized(req)) {
+    sendUnauthorized(res, sendError);
+    return;
+  }
+
+  const { users } = await getCollections(getDb);
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const page = toPositiveInt(url.searchParams.get("page"), 1);
+  const limit = toPositiveInt(url.searchParams.get("limit"), 30, MAX_ADMIN_LIMIT);
+  const skip = (page - 1) * limit;
+  const query = buildBusinessVerificationQuery(url.searchParams);
+
+  const countQuery = { ...query };
+  delete countQuery["businessVerification.status"];
+  countQuery["businessVerification.status"] = { $exists: true };
+
+  const [total, docs, statusCounts] = await Promise.all([
+    users.countDocuments(query),
+    users
+      .find(query, { projection: { passwordHash: 0 } })
+      .sort({ "businessVerification.submittedAt": -1, _id: -1 })
+      .skip(skip)
+      .limit(limit)
+      .toArray(),
+    users.aggregate([
+      { $match: countQuery },
+      { $group: { _id: "$businessVerification.status", count: { $sum: 1 } } },
+    ]).toArray(),
+  ]);
+
+  sendJson(res, 200, {
+    ok: true,
+    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    statusOptions: Object.entries(BUSINESS_VERIFICATION_STATUS_LABELS).map(([value, label]) => ({ value, label })),
+    statusCounts: Object.fromEntries(statusCounts.map((item) => [item._id || "pending", item.count])),
+    data: docs.map(normalizeAdminBusinessVerification),
+  });
+}
+
+async function handleUpdateBusinessVerification({ req, res, pathParts, parseJsonBody, sendJson, sendError, getDb }) {
+  if (!isAdminAuthorized(req)) {
+    sendUnauthorized(res, sendError);
+    return;
+  }
+
+  const userId = decodeURIComponent(pathParts[3] || "");
+  if (!ObjectId.isValid(userId)) {
+    sendError(res, 400, "User id không hợp lệ.");
+    return;
+  }
+
+  const body = await parseJsonBody(req);
+  const status = cleanLimitedText(body.status, 32);
+  const reviewNote = cleanLimitedText(body.reviewNote || body.note, 1500);
+
+  if (!["verified", "rejected"].includes(status)) {
+    sendError(res, 400, "Trạng thái duyệt doanh nghiệp không hợp lệ.");
+    return;
+  }
+  if (status === "rejected" && !reviewNote) {
+    sendError(res, 400, "Vui lòng nhập lý do từ chối hồ sơ.");
+    return;
+  }
+
+  const { users, auditLogs } = await getCollections(getDb);
+  const objectId = new ObjectId(userId);
+  const before = await users.findOne({ _id: objectId }, { projection: { passwordHash: 0 } });
+
+  if (!before?.businessVerification) {
+    sendError(res, 404, "Không tìm thấy hồ sơ doanh nghiệp.");
+    return;
+  }
+
+  const actor = getAdminPayload(req);
+  const now = new Date();
+  const set = {
+    "businessVerification.status": status,
+    "businessVerification.reviewedAt": now,
+    "businessVerification.reviewedBy": {
+      id: actor?.sub || "",
+      email: actor?.email || "",
+      role: actor?.role || "admin",
+    },
+    "businessVerification.reviewNote": reviewNote,
+    updatedAt: now,
+  };
+  const update = { $set: set };
+
+  if (status === "verified") {
+    const expiresAt = new Date(now);
+    expiresAt.setFullYear(expiresAt.getFullYear() + 1);
+    set.customerType = "business";
+    set["businessVerification.verifiedAt"] = now;
+    set["businessVerification.expiresAt"] = expiresAt;
+    update.$addToSet = { memberTags: "S-Business" };
+  } else {
+    if (before.customerType === "business") set.customerType = "normal";
+    update.$pull = { memberTags: "S-Business" };
+    update.$unset = {
+      "businessVerification.verifiedAt": "",
+      "businessVerification.expiresAt": "",
+    };
+  }
+
+  const result = await users.findOneAndUpdate(
+    { _id: objectId },
+    update,
+    { returnDocument: "after", projection: { passwordHash: 0 } }
+  );
+  const updated = unwrapMongoWriteResult(result);
+
+  if (!updated) {
+    sendError(res, 404, "Không tìm thấy người dùng cần duyệt.");
+    return;
+  }
+
+  await writeAdminAuditLog(
+    auditLogs,
+    req,
+    status === "verified" ? "approve_business" : "reject_business",
+    "business_verification",
+    userId,
+    { before, after: updated }
+  );
+
+  sendJson(res, 200, {
+    ok: true,
+    message: status === "verified" ? "Đã duyệt hồ sơ S-Business." : "Đã từ chối hồ sơ S-Business.",
+    data: normalizeAdminBusinessVerification(updated),
+  });
+}
+
 function buildUserQuery(searchParams) {
   const q = searchParams.get("q");
   const role = searchParams.get("role");
@@ -1143,6 +1365,8 @@ function normalizeCoupon(doc = {}) {
     minSubtotal: Number(doc.minSubtotal || 0),
     usageLimit: doc.usageLimit ?? null,
     userLimit: doc.userLimit ?? null,
+    audiences: Array.isArray(doc.audiences) && doc.audiences.length ? doc.audiences : ["all"],
+    allowWithEducationOffer: doc.allowWithEducationOffer !== false,
     usedCount: Number(doc.usedCount || 0),
     status: doc.status || "active",
     startsAt: doc.startsAt || null,
@@ -1569,7 +1793,7 @@ async function handleUpdatePayment({ req, res, pathParts, parseJsonBody, sendJso
   }
   update.updatedAt = new Date();
 
-  const { payments, auditLogs } = await getCollections(getDb);
+  const { payments, orders, auditLogs } = await getCollections(getDb);
   const query = {
     $or: [
       { transactionId: identifier },
@@ -1584,6 +1808,26 @@ async function handleUpdatePayment({ req, res, pathParts, parseJsonBody, sendJso
   if (!updated) {
     sendError(res, 404, "Không tìm thấy thanh toán.");
     return;
+  }
+
+  if (updated.orderCode) {
+    const orderPaymentSet = {
+      "payment.status": updated.status || "pending",
+      "payment.statusLabel": PAYMENT_STATUS_LABELS[updated.status] || updated.status || "pending",
+      "payment.bankReference": updated.bankReference || "",
+      "payment.transactionId": updated.transactionId || "",
+      "payment.adminNote": updated.note || "",
+      updatedAt: new Date(),
+    };
+
+    if (updated.status === "paid") {
+      orderPaymentSet["payment.paidAt"] = updated.updatedAt || new Date();
+    }
+
+    await orders.updateOne(
+      { orderCode: updated.orderCode },
+      { $set: orderPaymentSet }
+    );
   }
 
   await writeAdminAuditLog(auditLogs, req, "update", "payment", updated._id || identifier, { before, after: updated });
@@ -1842,7 +2086,7 @@ function sendCsv(req, res, filename, rows, columns) {
   res.writeHead(200, {
     "Content-Type": "text/csv; charset=utf-8",
     "Content-Disposition": `attachment; filename="${filename}"`,
-    "Access-Control-Allow-Origin": process.env.CORS_ORIGIN || req.headers.origin || "http://localhost:5173",
+    "Access-Control-Allow-Origin": getCorsOriginForRequest(req),
     "Access-Control-Allow-Credentials": "true",
     "Vary": "Origin",
   });
@@ -1952,14 +2196,21 @@ function normalizeAdminReturn(doc = {}) {
     userId: doc.userId || "",
     productId: doc.productId || "",
     productSlug: doc.productSlug || "",
+    productSku: doc.productSku || "",
     productName: doc.productName || "",
+    productImage: doc.productImage || "",
     reason: doc.reason || "",
     status: doc.status || "pending",
-    statusLabel: doc.statusLabel || "Chờ tiếp nhận",
+    statusLabel: RETURN_STATUS_LABELS[doc.status] || doc.statusLabel || "Chờ tiếp nhận",
     customerPhone: doc.customerPhone || "",
     images: Array.isArray(doc.images) ? doc.images : [],
     note: doc.note || "",
     adminNote: doc.adminNote || "",
+    quantity: Number(doc.quantity || 1),
+    unitPrice: Number(doc.unitPrice || 0),
+    refundAmount: Number(doc.refundAmount || 0),
+    refundedAt: doc.refundedAt || null,
+    statusHistory: Array.isArray(doc.statusHistory) ? doc.statusHistory : [],
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
   };
@@ -2001,12 +2252,14 @@ async function handleListReturns({ req, res, sendJson, sendError, getDb }) {
   const limit = toPositiveInt(url.searchParams.get("limit"), 30, MAX_ADMIN_LIMIT);
   const skip = (page - 1) * limit;
   const query = buildReturnAdminQuery(url.searchParams);
+  const countQuery = { ...query };
+  delete countQuery.status;
 
   const [total, docs, statusCounts] = await Promise.all([
     returns.countDocuments(query),
     returns.find(query).sort({ createdAt: -1, _id: -1 }).skip(skip).limit(limit).toArray(),
     returns.aggregate([
-      { $match: query },
+      { $match: countQuery },
       { $group: { _id: "$status", count: { $sum: 1 } } },
     ]).toArray(),
   ]);
@@ -2024,23 +2277,116 @@ async function handleListReturns({ req, res, sendJson, sendError, getDb }) {
   });
 }
 
+function isReturnItemMatch(item = {}, returnItem = {}) {
+  const itemIds = [item.productId, item.mongoId, item.id].filter(Boolean).map(String);
+  const itemSlugs = [item.slug, item.productSlug].filter(Boolean).map(String);
+  const itemName = String(item.name || item.productName || '');
+
+  if (returnItem.productId && itemIds.includes(String(returnItem.productId))) return true;
+  if (returnItem.productSlug && itemSlugs.includes(String(returnItem.productSlug))) return true;
+  return Boolean(returnItem.productName && itemName === String(returnItem.productName));
+}
+
+function getReturnItemPaidAmount(item = {}, returnItem = {}) {
+  const quantity = Math.max(1, Number(item.quantity || returnItem.quantity || 1));
+  const lineTotal = Number(item.lineTotal || item.total || item.subtotal || 0);
+  const unitPrice = Number(
+    item.currentPrice
+    || item.price
+    || item.unitPrice
+    || returnItem.unitPrice
+    || 0
+  );
+  return Math.max(0, lineTotal > 0 ? lineTotal : unitPrice * quantity);
+}
+
+async function applyCompletedReturnRefund({ orders, returnItem, session = null }) {
+  if (!orders || !returnItem?.orderCode) {
+    throw new Error('Yêu cầu đổi trả chưa có mã đơn hàng hợp lệ.');
+  }
+
+  const operationOptions = session ? { session } : {};
+  const order = await orders.findOne({ orderCode: returnItem.orderCode }, operationOptions);
+  if (!order) throw new Error(`Không tìm thấy đơn hàng #${returnItem.orderCode} để hoàn trả.`);
+
+  const items = Array.isArray(order.items) ? order.items.map((item) => ({ ...item })) : [];
+  const itemIndex = items.findIndex((item) => isReturnItemMatch(item, returnItem));
+  if (itemIndex < 0) throw new Error('Không tìm thấy sản phẩm đổi trả trong đơn hàng.');
+
+  const matchedItem = items[itemIndex];
+  if (matchedItem.returnStatus === 'completed' && matchedItem.returnCode === returnItem.returnCode) {
+    return {
+      refundAmount: Number(matchedItem.refundAmount || returnItem.refundAmount || 0),
+      refundedAt: matchedItem.returnedAt || returnItem.refundedAt || new Date(),
+      netTotal: Number(order.totals?.netTotal ?? order.totals?.total ?? 0),
+    };
+  }
+
+  const originalTotal = Math.max(0, Number(order.totals?.total || order.totals?.roundedTotal || 0));
+  const refundedBefore = Math.max(0, Number(order.totals?.refundedAmount || order.payment?.refundedAmount || 0));
+  const remainingAmount = Math.max(0, originalTotal - refundedBefore);
+  const requestedAmount = getReturnItemPaidAmount(matchedItem, returnItem);
+  const refundAmount = Math.min(remainingAmount, requestedAmount);
+
+  if (refundAmount <= 0) {
+    throw new Error('Đơn hàng không còn số tiền có thể hoàn cho sản phẩm này.');
+  }
+
+  const refundedAt = new Date();
+  const refundedAmount = refundedBefore + refundAmount;
+  const netTotal = Math.max(0, originalTotal - refundedAmount);
+
+  items[itemIndex] = {
+    ...matchedItem,
+    returnStatus: 'completed',
+    returnStatusLabel: RETURN_STATUS_LABELS.completed,
+    returnCode: returnItem.returnCode || '',
+    refundAmount,
+    returnedAt: refundedAt,
+  };
+
+  const orderSet = {
+    items,
+    'totals.refundedAmount': refundedAmount,
+    'totals.netTotal': netTotal,
+    'payment.refundedAmount': refundedAmount,
+    updatedAt: refundedAt,
+  };
+
+  if (netTotal === 0) {
+    orderSet['payment.status'] = 'refunded';
+    orderSet['payment.statusLabel'] = PAYMENT_STATUS_LABELS.refunded;
+    orderSet['payment.refundedAt'] = refundedAt;
+  }
+
+  await orders.updateOne(
+    { _id: order._id },
+    {
+      $set: orderSet,
+      $push: {
+        statusHistory: {
+          status: 'return_completed',
+          label: RETURN_STATUS_LABELS.completed,
+          note: `Đã hoàn ${refundAmount.toLocaleString('vi-VN')}đ cho sản phẩm ${returnItem.productName || matchedItem.name || ''}.`,
+          changedBy: 'admin',
+          changedByRole: 'admin',
+          changedAt: refundedAt,
+        },
+      },
+    },
+    operationOptions
+  );
+
+  return { refundAmount, refundedAt, netTotal };
+}
+
 function sanitizeReturnUpdate(input = {}) {
   const update = {};
   const status = cleanLimitedText(input.status, 40);
 
-  if (["pending", "received", "approved", "rejected", "completed", "cancelled"].includes(status)) {
+  if (RETURN_STATUS_LABELS[status]) {
     update.status = status;
-
-    const labels = {
-      pending: "Chờ tiếp nhận",
-      received: "Đã tiếp nhận",
-      approved: "Đã duyệt",
-      rejected: "Từ chối",
-      completed: "Hoàn tất",
-      cancelled: "Đã hủy",
-    };
-
-    update.statusLabel = labels[status] || status;
+    update.statusLabel = RETURN_STATUS_LABELS[status];
   }
 
   if (Object.prototype.hasOwnProperty.call(input, "adminNote")) {
@@ -2067,9 +2413,14 @@ async function handleUpdateReturn({ req, res, pathParts, parseJsonBody, sendJson
     return;
   }
 
-  const { returns, auditLogs } = await getCollections(getDb);
+  const { client, returns, orders, auditLogs, notifications } = await getCollections(getDb);
   const body = await parseJsonBody(req);
   const update = sanitizeReturnUpdate(body);
+
+  if (update.status === "rejected" && !String(update.adminNote || "").trim()) {
+    sendError(res, 400, "Vui lòng nhập lý do từ chối yêu cầu đổi trả.");
+    return;
+  }
 
   const query = {
     $or: [
@@ -2079,23 +2430,91 @@ async function handleUpdateReturn({ req, res, pathParts, parseJsonBody, sendJson
   };
 
   const before = await returns.findOne(query);
-  const result = await returns.findOneAndUpdate(
-    query,
-    { $set: update },
-    { returnDocument: "after" }
-  );
-
-  const updated = unwrapMongoWriteResult(result);
-
-  if (!updated) {
+  if (!before) {
     sendError(res, 404, "Không tìm thấy yêu cầu đổi trả.");
     return;
+  }
+
+  const shouldApplyRefund = update.status === "completed" && before.status !== "completed";
+  const actor = getAdminPayload(req);
+
+  const executeUpdate = async (session = null) => {
+    const operationOptions = {
+      returnDocument: "after",
+      ...(session ? { session } : {}),
+    };
+
+    if (shouldApplyRefund) {
+      const refund = await applyCompletedReturnRefund({
+        orders,
+        returnItem: before,
+        session,
+      });
+      update.refundAmount = refund.refundAmount;
+      update.refundedAt = refund.refundedAt;
+      update.refundAppliedAt = refund.refundedAt;
+      update.netOrderTotal = refund.netTotal;
+    }
+
+    const mongoUpdate = { $set: update };
+    if (update.status && update.status !== before.status) {
+      mongoUpdate.$push = {
+        statusHistory: {
+          status: update.status,
+          label: update.statusLabel || RETURN_STATUS_LABELS[update.status] || update.status,
+          note: shouldApplyRefund
+            ? `Đã hoàn ${Number(update.refundAmount || 0).toLocaleString("vi-VN")}đ cho khách hàng.`
+            : update.adminNote || "Quản trị viên đã cập nhật yêu cầu đổi trả.",
+          changedBy: actor?.sub || "admin",
+          changedByRole: actor?.role || "admin",
+          changedAt: update.updatedAt || new Date(),
+        },
+      };
+    }
+
+    const result = await returns.findOneAndUpdate(query, mongoUpdate, operationOptions);
+    const updatedReturn = unwrapMongoWriteResult(result);
+    if (!updatedReturn) throw new Error("Không tìm thấy yêu cầu đổi trả.");
+    return updatedReturn;
+  };
+
+  let updated;
+  if (shouldApplyRefund && client?.withSession) {
+    updated = await client.withSession((session) => session.withTransaction(
+      () => executeUpdate(session),
+      {
+        readPreference: "primary",
+        readConcern: { level: "local" },
+        writeConcern: { w: "majority" },
+      }
+    ));
+  } else {
+    updated = await executeUpdate();
   }
 
   await writeAdminAuditLog(auditLogs, req, "update", "return", updated._id || returnId, {
     before,
     after: updated,
   });
+
+  if (before?.status !== updated.status && updated.userId && notifications) {
+    await notifications.insertOne({
+      userId: String(updated.userId),
+      type: "return_status_changed",
+      title: `Yêu cầu đổi trả ${updated.statusLabel || RETURN_STATUS_LABELS[updated.status] || updated.status}`,
+      message: updated.adminNote
+        ? `Yêu cầu ${updated.returnCode}: ${updated.adminNote}`
+        : `Yêu cầu ${updated.returnCode} đã chuyển sang trạng thái ${updated.statusLabel || updated.status}.`,
+      orderCode: updated.orderCode || "",
+      productId: updated.productId || "",
+      metadata: {
+        returnCode: updated.returnCode || "",
+        returnStatus: updated.status || "",
+      },
+      readAt: null,
+      createdAt: new Date(),
+    });
+  }
 
   sendJson(res, 200, {
     ok: true,
@@ -2137,6 +2556,196 @@ async function handleDeleteReturn({ req, res, pathParts, sendJson, sendError, ge
   });
 }
 
+function normalizeAdminSupportRequest(doc = {}) {
+  const status = doc.status || "new";
+
+  return {
+    id: String(doc._id || ""),
+    requestCode: doc.requestCode || "",
+    issueType: doc.issueType || "",
+    fullName: doc.fullName || "",
+    phone: doc.phone || "",
+    email: doc.email || "",
+    orderCode: doc.orderCode || "",
+    content: doc.content || "",
+    attachment: doc.attachment || null,
+    status,
+    statusLabel: doc.statusLabel || SUPPORT_STATUS_LABELS[status] || status,
+    adminNote: doc.adminNote || "",
+    response: doc.response || "",
+    userId: doc.userId || "",
+    userRole: doc.userRole || "guest",
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
+  };
+}
+
+function buildSupportAdminQuery(searchParams) {
+  const q = searchParams.get("q");
+  const status = searchParams.get("status");
+  const query = {};
+
+  if (q) {
+    const regex = new RegExp(escapeRegex(q), "i");
+    query.$or = [
+      { requestCode: regex },
+      { issueType: regex },
+      { fullName: regex },
+      { phone: regex },
+      { email: regex },
+      { orderCode: regex },
+      { content: regex },
+      { adminNote: regex },
+      { response: regex },
+    ];
+  }
+
+  if (status && status !== "all") query.status = status;
+  return query;
+}
+
+async function handleListSupportRequests({ req, res, sendJson, sendError, getDb }) {
+  if (!isAdminAuthorized(req)) {
+    sendUnauthorized(res, sendError);
+    return;
+  }
+
+  const { supportRequests } = await getCollections(getDb);
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const page = toPositiveInt(url.searchParams.get("page"), 1);
+  const limit = toPositiveInt(url.searchParams.get("limit"), 30, MAX_ADMIN_LIMIT);
+  const skip = (page - 1) * limit;
+  const query = buildSupportAdminQuery(url.searchParams);
+
+  const [total, docs, statusCounts] = await Promise.all([
+    supportRequests.countDocuments(query),
+    supportRequests
+      .find(query)
+      .sort({ createdAt: -1, _id: -1 })
+      .skip(skip)
+      .limit(limit)
+      .toArray(),
+    supportRequests.aggregate([
+      { $match: query },
+      { $group: { _id: "$status", count: { $sum: 1 } } },
+    ]).toArray(),
+  ]);
+
+  sendJson(res, 200, {
+    ok: true,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+    },
+    statusOptions: Object.entries(SUPPORT_STATUS_LABELS).map(([value, label]) => ({ value, label })),
+    statusCounts: Object.fromEntries(statusCounts.map((item) => [item._id || "new", item.count])),
+    data: docs.map(normalizeAdminSupportRequest),
+  });
+}
+
+function sanitizeSupportUpdate(input = {}) {
+  const update = {};
+  const status = cleanLimitedText(input.status, 40);
+
+  if (SUPPORT_STATUS_LABELS[status]) {
+    update.status = status;
+    update.statusLabel = SUPPORT_STATUS_LABELS[status];
+  }
+
+  if (Object.prototype.hasOwnProperty.call(input, "adminNote")) {
+    update.adminNote = cleanLimitedText(input.adminNote, 2000);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(input, "response")) {
+    update.response = cleanLimitedText(input.response, 4000);
+  }
+
+  update.updatedAt = new Date();
+  return update;
+}
+
+async function handleUpdateSupportRequest({ req, res, pathParts, parseJsonBody, sendJson, sendError, getDb }) {
+  if (!isAdminAuthorized(req)) {
+    sendUnauthorized(res, sendError);
+    return;
+  }
+
+  const identifier = decodeURIComponent(pathParts[3] || "");
+  if (!identifier) {
+    sendError(res, 400, "Mã yêu cầu hỗ trợ không hợp lệ.");
+    return;
+  }
+
+  const body = await parseJsonBody(req);
+  const update = sanitizeSupportUpdate(body);
+  const query = {
+    $or: [
+      { requestCode: identifier },
+      ...(ObjectId.isValid(identifier) ? [{ _id: new ObjectId(identifier) }] : []),
+    ],
+  };
+
+  const { supportRequests, auditLogs } = await getCollections(getDb);
+  const before = await supportRequests.findOne(query);
+  const result = await supportRequests.findOneAndUpdate(
+    query,
+    { $set: update },
+    { returnDocument: "after" }
+  );
+  const updated = unwrapMongoWriteResult(result);
+
+  if (!updated) {
+    sendError(res, 404, "Không tìm thấy yêu cầu hỗ trợ.");
+    return;
+  }
+
+  await writeAdminAuditLog(auditLogs, req, "update", "support_request", updated._id || identifier, {
+    before,
+    after: updated,
+  });
+
+  sendJson(res, 200, {
+    ok: true,
+    message: "Đã cập nhật yêu cầu hỗ trợ.",
+    data: normalizeAdminSupportRequest(updated),
+  });
+}
+
+async function handleDeleteSupportRequest({ req, res, pathParts, sendJson, sendError, getDb }) {
+  if (!isAdminAuthorized(req)) {
+    sendUnauthorized(res, sendError);
+    return;
+  }
+
+  const identifier = decodeURIComponent(pathParts[3] || "");
+  const query = {
+    $or: [
+      { requestCode: identifier },
+      ...(ObjectId.isValid(identifier) ? [{ _id: new ObjectId(identifier) }] : []),
+    ],
+  };
+
+  const { supportRequests, auditLogs } = await getCollections(getDb);
+  const result = await supportRequests.findOneAndDelete(query);
+  const deleted = unwrapMongoWriteResult(result);
+
+  if (!deleted) {
+    sendError(res, 404, "Không tìm thấy yêu cầu hỗ trợ.");
+    return;
+  }
+
+  await writeAdminAuditLog(auditLogs, req, "delete", "support_request", deleted._id || identifier, {
+    before: deleted,
+  });
+
+  sendJson(res, 200, {
+    ok: true,
+    deleted: normalizeAdminSupportRequest(deleted),
+  });
+}
+
 async function handleAdminRequest(context) {
   const { req, res, pathParts, sendError } = context;
   const resource = pathParts[2];
@@ -2149,6 +2758,16 @@ async function handleAdminRequest(context) {
 
   if (resource === "summary" && req.method === "GET") {
     await handleAdminSummary(context);
+    return;
+  }
+
+  if (resource === "business-verifications" && !identifier && req.method === "GET") {
+    await handleListBusinessVerifications(context);
+    return;
+  }
+
+  if (resource === "business-verifications" && identifier && ["PATCH", "PUT"].includes(req.method)) {
+    await handleUpdateBusinessVerification(context);
     return;
   }
 
@@ -2304,6 +2923,21 @@ async function handleAdminRequest(context) {
 
   if (resource === "coupons" && identifier && req.method === "DELETE") {
     await handleDeleteCoupon(context);
+    return;
+  }
+
+  if (resource === "support-requests" && !identifier && req.method === "GET") {
+    await handleListSupportRequests(context);
+    return;
+  }
+
+  if (resource === "support-requests" && identifier && ["PATCH", "PUT"].includes(req.method)) {
+    await handleUpdateSupportRequest(context);
+    return;
+  }
+
+  if (resource === "support-requests" && identifier && req.method === "DELETE") {
+    await handleDeleteSupportRequest(context);
     return;
   }
 

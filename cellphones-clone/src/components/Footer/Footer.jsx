@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import './Footer.css';
 import {
   footerLinks,
@@ -6,8 +7,61 @@ import {
   paymentPartners,
 } from '../../data/mockData';
 import { externalLinks, getRouteForLabel } from '../../utils/linkRoutes';
+import { buildApiUrl } from '../../services/apiProducts';
 
 export default function Footer() {
+  const [newsletterForm, setNewsletterForm] = useState({
+    email: '',
+    phone: '',
+    accepted: true,
+  });
+  const [newsletterStatus, setNewsletterStatus] = useState({
+    type: '',
+    message: '',
+  });
+  const [isNewsletterSubmitting, setIsNewsletterSubmitting] = useState(false);
+
+  const updateNewsletterForm = (field, value) => {
+    setNewsletterForm((previous) => ({ ...previous, [field]: value }));
+    setNewsletterStatus({ type: '', message: '' });
+  };
+
+  const handleNewsletterSubmit = async (event) => {
+    event.preventDefault();
+
+    setIsNewsletterSubmitting(true);
+    setNewsletterStatus({ type: '', message: '' });
+
+    try {
+      const response = await fetch(buildApiUrl('/api/newsletter/subscribe'), {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(newsletterForm),
+      });
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.message || payload.error || 'Không thể đăng ký nhận khuyến mãi.');
+      }
+
+      setNewsletterStatus({
+        type: 'success',
+        message: payload.message || 'Đăng ký thành công. Mã giảm giá đã được gửi về email của bạn.',
+      });
+      setNewsletterForm({ email: '', phone: '', accepted: true });
+    } catch (error) {
+      setNewsletterStatus({
+        type: 'error',
+        message: error.message || 'Không thể đăng ký nhận khuyến mãi.',
+      });
+    } finally {
+      setIsNewsletterSubmitting(false);
+    }
+  };
+
   return (
     <footer className="footer" id="footer">
       <div className="footer-primary">
@@ -30,22 +84,47 @@ export default function Footer() {
               </div>
             </section>
 
-            <section className="footer-newsletter">
+            <form className="footer-newsletter" onSubmit={handleNewsletterSubmit}>
               <h2 className="footer-heading footer-newsletter-heading">Đăng ký nhận tin khuyến mãi</h2>
               <div className="footer-voucher">
                 <strong>Nhận ngay voucher 10%</strong>
-                <span>Voucher sẽ được gửi sau 24h, chỉ áp dụng cho khách hàng mới</span>
+                <span>Mã khuyenmai10 sẽ được gửi về email sau khi đăng ký thành công</span>
               </div>
               <label htmlFor="footer-email">Email</label>
-              <input id="footer-email" type="email" placeholder="Nhập email của bạn" />
+              <input
+                id="footer-email"
+                type="email"
+                placeholder="Nhập email của bạn"
+                value={newsletterForm.email}
+                onChange={(event) => updateNewsletterForm('email', event.target.value)}
+                required
+              />
               <label htmlFor="footer-phone">Số điện thoại</label>
-              <input id="footer-phone" type="tel" placeholder="Nhập số điện thoại của bạn" />
+              <input
+                id="footer-phone"
+                type="tel"
+                placeholder="Nhập số điện thoại của bạn"
+                value={newsletterForm.phone}
+                onChange={(event) => updateNewsletterForm('phone', event.target.value)}
+                maxLength={10}
+              />
               <label className="footer-consent">
-                <input type="checkbox" defaultChecked />
+                <input
+                  type="checkbox"
+                  checked={newsletterForm.accepted}
+                  onChange={(event) => updateNewsletterForm('accepted', event.target.checked)}
+                />
                 <span>Tôi đồng ý với điều khoản của CellphoneS</span>
               </label>
-              <button type="button" onClick={() => window.location.assign('/khuyen-mai/dang-ky-nhan-tin')}>Đăng ký ngay</button>
-            </section>
+              {newsletterStatus.message && (
+                <p className={`footer-newsletter-status ${newsletterStatus.type}`}>
+                  {newsletterStatus.message}
+                </p>
+              )}
+              <button type="submit" disabled={isNewsletterSubmitting}>
+                {isNewsletterSubmitting ? 'Đang gửi...' : 'Đăng ký ngay'}
+              </button>
+            </form>
           </div>
 
           <nav className="footer-column" aria-label="Thông tin về chính sách">

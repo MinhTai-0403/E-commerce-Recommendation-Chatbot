@@ -63,26 +63,6 @@ function isWeakManifest(manifest, minTargetJsonBytes) {
   return { weak: false, reason: "" };
 }
 
-function detailLookupForVariant(variant = {}) {
-  const url = normalizeCellphonesUrl(variant.url || variant.href || variant.sourceUrl || "");
-  const slug = variant.slug || getSlugFromUrl(url);
-  const or = [];
-
-  if (slug) {
-    or.push({ slug });
-    or.push({ sku: slug });
-  }
-
-  if (url) {
-    or.push({ url });
-    or.push({ inputUrl: url });
-    or.push({ sourceUrl: url });
-    or.push({ sourceUrls: url });
-  }
-
-  return or.length ? { $or: or } : null;
-}
-
 function rememberVariantManifest(index, manifest) {
   const remember = (key) => {
     if (key && !index.has(key)) index.set(key, manifest);

@@ -297,7 +297,7 @@ function returnValidator() {
       required: ["orderCode", "status", "reason", "createdAt"],
       properties: {
         orderCode: { bsonType: "string" },
-        status: { enum: ["pending", "approved", "rejected", "received", "refunded", "cancelled"] },
+        status: { enum: ["pending", "approved", "rejected", "received", "completed", "refunded", "cancelled"] },
         reason: { bsonType: "string" },
         userId: { bsonType: ["string", "null"] },
         productId: { bsonType: ["string", "null"] },
@@ -360,6 +360,7 @@ async function ensureCommerceDatabase({
     createIndexSafe(productDetails, { createdAt: -1 }, { name: "product_details_created" }),
     createIndexSafe(productDetails, { updatedAt: -1 }, { name: "product_details_updated" }),
     createIndexSafe(productDetails, { statusLabel: 1 }, { name: "product_details_status_label" }),
+    createIndexSafe(productDetails, { category: 1, "facets.batteryCapacityMah": -1 }, { name: "product_details_category_battery" }),
     ...(products
       ? [
           createIndexSafe(products, { slug: 1 }, { sparse: true, name: "products_slug" }),

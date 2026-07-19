@@ -2,11 +2,39 @@ const http = require("http");
 const { ObjectId } = require("mongodb");
 const { ProxyAgent } = require("undici");
 const { handleAdminRequest, isAdminAuthorized } = require("../services/admin-service");
-const { handleAuthRequest, getAuthToken, verifyJwt } = require("../services/auth-service");
+const {
+  handleAuthRequest,
+  getAuthToken,
+  sendNewsletterCouponEmail,
+  sendOrderInvoiceEmail,
+  verifyJwt,
+} = require("../services/auth-service");
 const { ensureCommerceDatabase } = require("../services/db-maintenance");
 const { extractCellphonesDetails } = require("../cellphones/cellphones-detail-extractor");
 const { createMongoClient, getMongoConfig } = require("../config/mongodb");
 const { rateLimitOrSend } = require("../middlewares/rate-limit");
+const {
+  parseJsonBody,
+  prepareCorsResponse,
+  sendError,
+  sendJson,
+} = require("./http-response");
+const {
+  computeCouponDiscount,
+  getCouponAvailabilityInvalidReason,
+  getCouponInvalidReason,
+  getEligibleCouponAudiences,
+  normalizeCouponForPublic,
+} = require("../services/coupon-service");
+const {
+  buildOrderPayment,
+  sanitizePaymentMethod,
+} = require("../services/payment-service");
+const {
+  buildOrderTracking,
+  generateOrderCode,
+  ORDER_TRACKING_LABELS,
+} = require("../services/order-tracking-service");
 const {
   addressSchema,
   addressUpdateSchema,
@@ -24,10 +52,10 @@ const {
   hydrateProductDetail,
   writeProductDetailFile,
 } = require("../storage/product-detail-storage");
+const { LONG_BATTERY_PHONE_MIN_MAH } = require("../utils/product-spec-facets");
 
 const API_PORT = Number(process.env.API_PORT || 5050);
-const CORS_ORIGIN = process.env.CORS_ORIGIN || "http://localhost:5173";
-const MAX_LIMIT = 100;
+const MAX_LIMIT = 300;
 const DEFAULT_LIMIT = 20;
 const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
@@ -50,58 +78,8 @@ let orderIndexesReady = false;
 let inventoryIndexesReady = false;
 let couponIndexesReady = false;
 let userEventIndexesReady = false;
-
-function sendJson(res, statusCode, payload) {
-  res.writeHead(statusCode, {
-    "Content-Type": "application/json; charset=utf-8",
-    "Access-Control-Allow-Origin": CORS_ORIGIN,
-    "Access-Control-Allow-Credentials": "true",
-    "Vary": "Origin",
-    "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Admin-Api-Key, X-Bank-Webhook-Secret",
-  });
-  res.end(JSON.stringify(payload, null, 2));
-}
-
-function sendError(res, statusCode, message, details) {
-  sendJson(res, statusCode, {
-    ok: false,
-    message,
-    error: {
-      message,
-      ...(details ? { details } : {}),
-    },
-  });
-}
-
-function parseJsonBody(req) {
-  return new Promise((resolve, reject) => {
-    let body = "";
-
-    req.on("data", (chunk) => {
-      body += chunk;
-      if (body.length > 2_000_000) {
-        reject(new Error("Request body is too large."));
-        req.destroy();
-      }
-    });
-
-    req.on("end", () => {
-      if (!body.trim()) {
-        resolve({});
-        return;
-      }
-
-      try {
-        resolve(JSON.parse(body));
-      } catch {
-        reject(new Error("Invalid JSON body."));
-      }
-    });
-
-    req.on("error", reject);
-  });
-}
+let supportRequestIndexesReady = false;
+let returnRequestIndexesReady = false;
 
 function escapeRegex(value = "") {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -508,6 +486,7 @@ function normalizeProduct(product) {
     installment: product.installment,
     stock: Number.isFinite(Number(product.stock)) ? Number(product.stock) : null,
     inventory: Number.isFinite(Number(product.inventory)) ? Number(product.inventory) : null,
+    facets: product.facets || {},
     currentPrice: price,
     originalPrice: toPositiveNumber(product.originalPrice) || price,
     priceCurrency: product.priceCurrency || "VND",
@@ -544,229 +523,411 @@ function uniqueStrings(values = []) {
   return [...new Set(values.filter((value) => typeof value === "string" && value.trim()))];
 }
 
-function getProductLookupSlugs(product = {}) {
-  return uniqueStrings([
-    product.detailSlug,
-    product.slug,
-    product.sku,
-    getSlugFromUrl(product.url),
-    ...(product.sourceUrls || []).map(getSlugFromUrl),
+function buildProductSearchCondition(value = "") {
+  const text = String(value || "").trim();
+  if (!text) return {};
+
+  const identityFields = [
+    "name",
+    "slug",
+    "sku",
+    "trainingLabels.productName",
+    "trainingLabels.deviceLine",
+    "rawProductJsonLd.name",
+  ];
+  const fields = [
+    "name",
+    "slug",
+    "sku",
+    "brand",
+    "category",
+    "categories",
+    "categoryTrail.name",
+    "categoryTrail.label",
+    "trainingLabels.productName",
+    "trainingLabels.deviceLine",
+    "trainingLabels.deviceGroup",
+    "sourceUrls",
+    "url",
+  ];
+  const alternatives = uniqueStrings(
+    text
+      .split(/\s*(?:\||\/|,|;)\s*/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+  );
+  const phrases = alternatives.length ? alternatives : [text];
+  const stopWords = new Set([
+    "san", "pham", "phu", "kien", "thiet", "bi", "cho", "va", "cac",
+    "dong", "loai", "xem", "tat", "ca", "hot", "moi", "series",
   ]);
-}
+  const conditions = [];
 
-function getProductLookupUrls(product = {}) {
-  return uniqueStrings([
-    product.detailUrl,
-    product.url,
-    ...(product.sourceUrls || []),
-  ]);
-}
+  for (const phrase of phrases) {
+    const normalizedPhraseParts = normalizeSearchKey(phrase)
+      .split(/[^a-z0-9]+/)
+      .filter(Boolean);
+    const hasModelNumber = normalizedPhraseParts.some((part) => /\d/.test(part));
 
-function indexDetailSummaries(details = []) {
-  const bySlug = new Map();
-  const byUrl = new Map();
+    // Tên model có số phiên bản phải khớp liền mạch trong chính định danh sản
+    // phẩm. Không cho từng token khớp rải rác qua brand/category/sourceUrls vì
+    // "Apple Watch Ultra 3" khi đó có thể trả về Ultra 2 chỉ vì tài liệu chứa
+    // một con số 3 ở trường khác.
+    if (hasModelNumber && normalizedPhraseParts.length >= 2) {
+      const orderedModelPattern = normalizedPhraseParts
+        .map(escapeRegex)
+        .join("[-_\\s/()]*");
+      conditions.push(regexCondition(
+        identityFields,
+        new RegExp(`${orderedModelPattern}(?!\\d)`, "i")
+      ));
+      continue;
+    }
 
-  const remember = (map, key, detail) => {
-    if (key && !map.has(key)) map.set(key, detail);
-  };
+    conditions.push(regexCondition(fields, new RegExp(escapeRegex(phrase), "i")));
 
-  for (const detail of details) {
-    remember(bySlug, detail.slug, detail);
-    remember(bySlug, detail.sku, detail);
-    remember(bySlug, getSlugFromUrl(detail.url), detail);
-    remember(bySlug, getSlugFromUrl(detail.inputUrl), detail);
-    remember(bySlug, getSlugFromUrl(detail.sourceUrl), detail);
-    remember(byUrl, detail.url, detail);
-    remember(byUrl, detail.inputUrl, detail);
-    remember(byUrl, detail.sourceUrl, detail);
+    if (normalizedPhraseParts.length) {
+      const slugPattern = normalizedPhraseParts.map(escapeRegex).join("[-_\\s]*");
+      conditions.push(regexCondition(
+        ["slug", "sku", "url", "sourceUrls"],
+        new RegExp(slugPattern, "i")
+      ));
+    }
 
-    for (const sourceUrl of detail.sourceUrls || []) {
-      remember(byUrl, sourceUrl, detail);
-      remember(bySlug, getSlugFromUrl(sourceUrl), detail);
+    const tokens = phrase
+      .split(/\s+/)
+      .map((token) => token.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ""))
+      .filter(Boolean)
+      .filter((token) => {
+        const normalized = normalizeSearchKey(token).replace(/[^a-z0-9]+/g, "");
+        return normalized.length >= 2 && !stopWords.has(normalized);
+      })
+      .slice(0, 6);
+
+    if (tokens.length >= 2) {
+      conditions.push({
+        $and: tokens.map((token) => (
+          regexCondition(fields, new RegExp(escapeRegex(token), "i"))
+        )),
+      });
     }
   }
 
-  return { bySlug, byUrl };
+  return conditions.length === 1 ? conditions[0] : { $or: conditions };
 }
 
-function findDetailForListProduct(product, detailIndex) {
-  for (const slug of getProductLookupSlugs(product)) {
-    const detail = detailIndex.bySlug.get(slug);
-    if (detail) return detail;
-  }
-
-  for (const url of getProductLookupUrls(product)) {
-    const detail = detailIndex.byUrl.get(url);
-    if (detail) return detail;
-  }
-
-  return null;
-}
-
-function mergeProductWithDetailSummary(product, detail) {
-  if (!detail) return product;
-
-  const detailImages = uniqueStrings([
-    detail.primaryImage,
-    detail.thumbnail,
-    detail.image,
-    ...(detail.images || []),
-  ]);
-  const productImages = Array.isArray(product.images) ? product.images.filter(Boolean) : [];
-  const productCategories = Array.isArray(product.categories) ? product.categories.filter(Boolean) : [];
-  const detailCategories = uniqueStrings([
-    detail.category,
-    ...(detail.categoryTrail || []).map((item) => item?.name || item?.label),
-  ]).filter((category) => category !== "Trang chủ");
-  const sourceUrls = uniqueStrings([
-    product.url,
-    product.detailUrl,
-    detail.url,
-    detail.inputUrl,
-    detail.sourceUrl,
-    ...(product.sourceUrls || []),
-    ...(detail.sourceUrls || []),
-  ]);
-  const price = detail.currentPrice ?? product.currentPrice ?? product.price;
-
-  return {
-    ...product,
-    detailBacked: true,
-    detailSlug: detail.slug || product.detailSlug,
-    detailUrl: detail.url || product.detailUrl,
-    storageStatus: detail.storageStatus || product.storageStatus,
-    source: product.source || detail.source,
-    sku: product.sku || detail.sku,
-    name: detail.name || detail.productName || product.name,
-    brand: detail.brand || product.brand,
-    brandKey: detail.brandKey || product.brandKey,
-    category: detail.category || product.category,
-    categories: productCategories.length ? productCategories : detailCategories,
-    categoryTrail: Array.isArray(detail.categoryTrail) && detail.categoryTrail.length
-      ? detail.categoryTrail
-      : product.categoryTrail,
-    price,
-    currentPrice: price,
-    originalPrice: detail.originalPrice ?? product.originalPrice,
-    discount: detail.discount ?? product.discount,
-    rating: detail.rating ?? product.rating,
-    ratingCount: detail.ratingCount ?? product.ratingCount,
-    installment: detail.installment ?? product.installment,
-    statusLabel: detail.statusLabel || product.statusLabel,
-    city: detail.city || product.city,
-    primaryImage: detailImages[0] || product.primaryImage,
-    thumbnail: detail.thumbnail || detailImages[0] || product.thumbnail,
-    image: detail.image || detailImages[0] || product.image,
-    images: detailImages.length ? detailImages : productImages,
-    sourceUrls,
+function buildApplianceTopicCondition(value = "") {
+  const key = normalizeSearchKey(value).replace(/[^a-z0-9]+/g, "-");
+  const identityFields = [
+    "name",
+    "slug",
+    "sku",
+  ];
+  const topicRules = {
+    quat: /(?:^|[\s-])(quạt|quat)(?:$|[\s-])/i,
+    "robot-hut-bui": /robot.{0,24}(hút bụi|hut bui)|(hút bụi|hut bui).{0,24}robot/i,
+    "may-chieu": /(?:^|[\s-])(máy chiếu|may chieu|projector)(?:$|[\s-])/i,
+    "may-loc-khong-khi": /^(?:máy|may).{0,16}(?:lọc không khí|loc khong khi)|air purifier/i,
+    "may-hut-am": /^(?:máy|may).{0,16}(?:hút ẩm|hut am)|dehumidifier/i,
+    "may-hut-bui-cam-tay": /(?:máy|may).{0,28}(?:hút bụi|hut bui).{0,24}(?:cầm tay|cam tay)|(?:hút bụi|hut bui).{0,24}(?:cầm tay|cam tay)/i,
+    "tv-box": /(?:^|[\s-])(tv box|mi box|playbox|tv stick|đầu thu|dau thu)(?:$|[\s-])/i,
+    "may-suoi-quat-suoi": /(?:máy sưởi|may suoi|quạt sưởi|quat suoi|đèn sưởi|den suoi)/i,
+    "ban-ui": /^(?:bàn ủi|ban ui|bàn là|ban la)|garment steamer/i,
+    "noi-chien-khong-dau": /(?:nồi chiên không dầu|noi chien khong dau|air fryer)/i,
+    "noi-com-dien": /(?:nồi cơm|noi com).{0,18}(?:điện|dien)|rice cooker/i,
+    "may-xay-sinh-to": /(?:máy xay sinh tố|may xay sinh to|blender)/i,
+    "may-ep-trai-cay": /(?:máy ép trái cây|may ep trai cay|máy ép chậm|may ep cham|slow juicer|juicer)/i,
+    "may-lam-sua-hat": /(?:máy làm sữa hạt|may lam sua hat)/i,
+    "bep-dien": /(?:^|[\s-])(bếp điện|bep dien|bếp từ|bep tu|induction cooker)(?:$|[\s-])/i,
+    "am-sieu-toc": /(?:ấm.{0,16}siêu tốc|am.{0,16}sieu toc|ấm đun nước|am dun nuoc|kettle)/i,
+    "noi-ap-suat": /(?:nồi|noi).{0,24}(?:áp suất|ap suat|pressure cooker)/i,
+    "noi-nau-cham": /(?:nồi nấu chậm|noi nau cham|slow cooker)/i,
+    "noi-lau-dien": /(?:nồi lẩu|noi lau|nồi điện đa năng|noi dien da nang|lẩu điện|lau dien)/i,
+    "may-say-toc": /(?:máy sấy tóc|may say toc|hair dryer)/i,
+    "may-massage": /(?:máy|may|súng|sung|gối|goi|đai|dai|ghế|ghe).{0,24}massage/i,
+    "may-cao-rau": /^(?:máy|may).{0,16}(?:cạo râu|cao rau)|combo.{0,32}(?:máy|may).{0,16}(?:cạo râu|cao rau)/i,
+    "can-suc-khoe": /(?:cân sức khỏe|can suc khoe|cân điện tử thông minh|can dien tu thong minh|smart scale)/i,
+    "ban-chai-dien": /^(?:bàn chải|ban chai).{0,24}(?:điện|dien)|electric toothbrush/i,
+    "may-tam-nuoc": /(?:máy tăm nước|may tam nuoc|water flosser)/i,
+    "tong-do-cat-toc": /(?:tông đơ|tong do).{0,20}(?:cắt tóc|cat toc|hớt tóc|hot toc)|hair clipper/i,
+    "may-tia-long-mui": /^(?:máy|may).{0,16}(?:tỉa lông mũi|tia long mui)|nose hair trimmer/i,
+    "may-rua-mat": /(?:máy rửa mặt|may rua mat|facial cleansing)/i,
+    "may-tao-kieu-toc": /(?:máy|may|bộ|bo|lược|luoc).{0,28}(?:tạo kiểu|tao kieu|duỗi tóc|duoi toc|uốn tóc|uon toc)|hair styler/i,
+    "may-triet-long": /(?:máy triệt lông|may triet long|máy làm sạch lông|may lam sach long|hair removal|\bipl\b)/i,
+    "may-do-huyet-ap": /^(?:máy|may).{0,20}(?:đo huyết áp|do huyet ap)|blood pressure monitor/i,
   };
+  const rule = topicRules[key];
+  if (!rule) return null;
+
+  const topicExcludes = {
+    "may-tia-long-mui": /lint remover|máy cắt lông xù|may cat long xu/i,
+  };
+  const includeCondition = regexCondition(identityFields, rule);
+  const exclude = topicExcludes[key];
+  return exclude
+    ? { $and: [includeCondition, { $nor: [regexCondition(identityFields, exclude)] }] }
+    : includeCondition;
 }
 
-async function mergeProductListWithDetailSummaries(productDetails, docs = []) {
-  if (!docs.length) return docs;
+function buildAccessoryTopicCondition(value = "") {
+  const key = normalizeSearchKey(value).replace(/[^a-z0-9]+/g, "-");
+  const identityFields = ["name", "slug", "sku", "trainingLabels.productName"];
+  const topicRules = {
+    "phu-kien-apple": {
+      include: /^(?:airtag|apple pencil|bút cảm ứng apple|but cam ung apple|bàn phím apple|ban phim apple|magic keyboard|magic mouse|magic trackpad|ví iphone|vi iphone|phụ kiện apple|phu kien apple)|^(?:cáp|cap|sạc|sac|adapter|ốp|op|bao da|dán|dan|kính|kinh).{0,48}(?:apple|iphone|ipad|macbook)/i,
+      exclude: /^(?:airpods|tai nghe|apple watch|iphone|ipad|macbook|apple\s*care\+?|applecare\+?)(?:[\s-]|$)/i,
+    },
+    "dan-man-hinh": {
+      include: /^(?:dán|dan|miếng dán|mieng dan|kính cường lực|kinh cuong luc|cường lực|cuong luc|screen protector)(?:[\s-]|$)/i,
+      exclude: /(?:camera|ống kính|ong kinh|lens|mặt lưng|mat lung)/i,
+    },
+    "op-lung-bao-da": {
+      include: /^(?:ốp lưng|op lung|bao da|flip cover|smart cover|case (?:cho|for)|cover (?:cho|for))(?:[\s-]|$)/i,
+    },
+    "the-nho": {
+      include: /^(?:thẻ nhớ|the nho|memory card|micro ?sd|sdhc|sdxc|cfexpress)(?:[\s-]|$)/i,
+    },
+    "apple-care": {
+      include: /(?:^|[\s-])apple\s*care\+?|applecare\+?/i,
+    },
+    "samsung-care": {
+      include: /(?:^|[\s-])samsung\s*care\+?/i,
+    },
+    "sim-4g-5g": {
+      include: /^(?:e?sim)(?:[\s-]|$)/i,
+    },
+    "cap-sac": {
+      include: /^(?:(?:cáp|cap)(?:[\s-]|$)|(?:củ|cu|bộ|bo|đế|de|dock).{0,20}(?:sạc|sac)|(?:sạc|sac)(?:[\s-]|$)|adapter(?:[\s-]|$)|charger(?:[\s-]|$))/i,
+      exclude: /(?:trạm sạc dự phòng|tram sac du phong|trạm-sạc-dự-phòng|tram-sac-du-phong|pin dự phòng|pin du phong|power ?bank)/i,
+    },
+    "pin-du-phong": {
+      include: /^(?:pin dự phòng|pin du phong|power ?bank)(?:[\s-]|$)/i,
+      exclude: /(?:trạm sạc|tram sac|power station)/i,
+    },
+    "tram-sac-du-phong": {
+      include: /^(?:trạm sạc dự phòng|tram sac du phong|portable power station|power station)(?:[\s-]|$)/i,
+    },
+    "day-deo-cheo-dien-thoai": {
+      include: /^(?:dây đeo chéo|day deo cheo|dây đeo điện thoại|day deo dien thoai|dây đeo máy ảnh\/điện thoại|day deo may anh\/dien thoai)(?:[\s-]|$)/i,
+    },
+    "phu-kien-dien-thoai": {
+      include: /^(?:phụ kiện điện thoại|phu kien dien thoai|ốp lưng|op lung|bao da|dán|dan|kính cường lực|kinh cuong luc|cáp|cap|sạc|sac|pin dự phòng|pin du phong|dây đeo.*điện thoại|day deo.*dien thoai|giá đỡ điện thoại|gia do dien thoai|bút cảm ứng|but cam ung)(?:[\s-]|$)/i,
+    },
+    "chuot-ban-phim": {
+      include: /^(?:chuột|chuot|mouse|bàn phím|ban phim|keyboard|combo.{0,32}(?:chuột|chuot|mouse|bàn phím|ban phim|keyboard))(?:[\s-]|$)/i,
+    },
+    "balo-laptop-tui-chong-soc": {
+      include: /^(?:balo|ba lô|ba lo|túi chống sốc|tui chong soc|túi đựng laptop|tui dung laptop|laptop bag)(?:[\s-]|$)/i,
+    },
+    "phan-mem": {
+      include: /^(?:phần mềm|phan mem|microsoft (?:office|365|windows)|office (?:home|personal|professional)|windows 1[01]|antivirus)(?:[\s-]|$)/i,
+    },
+    webcam: {
+      include: /^(?:webcam|web camera)(?:[\s-]|$)/i,
+    },
+    "gia-do": {
+      include: /^(?:giá đỡ|gia do|đế đỡ|de do|stand)(?:[\s-]|$)/i,
+    },
+    "tham-lot-chuot": {
+      include: /^(?:thảm lót chuột|tham lot chuot|tấm lót chuột|tam lot chuot|lót chuột|lot chuot|mouse ?pad)(?:[\s-]|$)/i,
+    },
+    "sac-laptop": {
+      include: /^(?:sạc|sac|củ sạc|cu sac|bộ sạc|bo sac|adapter|charger).{0,32}(?:laptop|macbook|notebook)/i,
+    },
+    "camera-phong-hop": {
+      include: /^(?:camera phòng họp|camera phong hop|camera hội nghị|camera hoi nghi|conference camera)(?:[\s-]|$)/i,
+    },
+    "hub-chuyen-doi": {
+      include: /^(?:hub(?: chuyển đổi| chuyen doi| type-?c| usb| [0-9]+)|dock(?: chuyển đổi| chuyen doi| type-?c| usb)|bộ chuyển đổi|bo chuyen doi)(?:[\s-]|$)/i,
+      exclude: /(?:switch|chia mạng|chia mang|poe)/i,
+    },
+    usb: {
+      include: /^(?:usb(?![\s-]*(?:wifi|wi-fi|bluetooth))|ổ flash|o flash|flash drive)(?:[\s-]|$)/i,
+    },
+    "o-cung-di-dong": {
+      include: /^(?:ổ cứng di động|o cung di dong|ổ cứng gắn ngoài|o cung gan ngoai|portable (?:ssd|hdd)|external (?:ssd|hdd))(?:[\s-]|$)/i,
+    },
+    playstation: {
+      include: /(?:^|[\s-])playstation(?:[\s-]|$)|(?:^|[\s-])ps[45](?:[\s-]|$)/i,
+    },
+    "rog-ally": {
+      include: /(?:^|[\s-])rog ally(?:[\s-]|$)/i,
+    },
+    "day-deo-dong-ho": {
+      include: /^(?:(?:bộ|bo)\s*\d+\s*)?(?:dây|day|đai|dai).{0,36}(?:đồng hồ|dong ho|watch)(?:[\s-]|$)/i,
+    },
+    "but-cam-ung": {
+      include: /^(?:bút cảm ứng|but cam ung|stylus|apple pencil|s pen)(?:[\s-]|$)/i,
+    },
+    "gia-do-dien-thoai": {
+      include: /^(?:giá đỡ|gia do|đế đỡ|de do).{0,32}(?:điện thoại|dien thoai|iphone|smartphone|tablet|ipad)/i,
+    },
+    "tui-chong-nuoc": {
+      include: /^(?:túi chống nước|tui chong nuoc|waterproof (?:bag|pouch))(?:[\s-]|$)/i,
+    },
+    "phu-kien-o-to": {
+      include: /^(?:phụ kiện ô tô|phu kien o to|bơm lốp|bom lop|bơm xe|bom xe|kích bình|kich binh|sạc ô tô|sac o to|tẩu sạc|tau sac)(?:[\s-]|$)/i,
+    },
+    "thiet-bi-dinh-vi": {
+      include: /^(?:thiết bị định vị|thiet bi dinh vi|thiết bị theo dõi định vị|thiet bi theo doi dinh vi|thẻ định vị|the dinh vi|bộ định vị|bo dinh vi|ví.{0,20}định vị|vi.{0,20}dinh vi|airtag|smarttag)(?:[\s-]|$)/i,
+    },
+    "op-lung-iphone-17": {
+      include: /^(?:ốp lưng|op lung|bao da).{0,40}iphone 17/i,
+    },
+    "dan-man-hinh-iphone-17": {
+      include: /^(?:dán|dan|miếng dán|mieng dan|kính|kinh).{0,48}iphone 17/i,
+      exclude: /(?:camera|ống kính|ong kinh|lens)/i,
+    },
+    "op-lung-s26-series": {
+      include: /^(?:ốp lưng|op lung|bao da).{0,48}(?:galaxy )?s26/i,
+    },
+    "dan-man-hinh-s26-series": {
+      include: /^(?:dán|dan|miếng dán|mieng dan|kính|kinh).{0,56}(?:galaxy )?s26/i,
+      exclude: /(?:camera|ống kính|ong kinh|lens)/i,
+    },
+    "quat-cam-tay-quat-mini": {
+      include: /^(?:quạt cầm tay|quat cam tay|quạt mini|quat mini|quạt để bàn mini|quat de ban mini)(?:[\s-]|$)/i,
+    },
+    "dan-macbook-neo": {
+      include: /^(?:bộ dán|bo dan|dán màn hình|dan man hinh|miếng dán|mieng dan).{0,56}macbook neo/i,
+    },
+    "gay-chup-anh": {
+      include: /^(?:gậy chụp ảnh|gay chup anh|gậy selfie|gay selfie|selfie stick)(?:[\s-]|$)/i,
+    },
+    "kinh-thong-minh": {
+      include: /^(?:kính thông minh|kinh thong minh|smart glasses)(?:[\s-]|$)/i,
+    },
+    "tay-cam-chup-anh": {
+      include: /^(?:tay cầm (?:máy ảnh|may anh|chụp ảnh|chup anh)|camera grip|phone grip)(?:[\s-]|$)/i,
+      exclude: /(?:gimbal|chống rung|chong rung)/i,
+    },
+    "ong-kinh-camera-dien-thoai": {
+      include: /^(?:(?:ống kính|ong kinh|lens).{0,52}(?:điện thoại|dien thoai|iphone|samsung|oppo|xiaomi)|bộ lens|bo lens)(?:[\s-]|$)/i,
+    },
+  };
+  const rule = topicRules[key];
+  if (!rule) return null;
 
-  const slugs = uniqueStrings(docs.flatMap(getProductLookupSlugs));
-  const urls = uniqueStrings(docs.flatMap(getProductLookupUrls));
-  const or = [];
+  const includeCondition = regexCondition(identityFields, rule.include);
+  return rule.exclude
+    ? { $and: [includeCondition, { $nor: [regexCondition(identityFields, rule.exclude)] }] }
+    : includeCondition;
+}
 
-  if (slugs.length) {
-    or.push({ slug: { $in: slugs } });
-    or.push({ sku: { $in: slugs } });
-  }
+function buildNetworkTopicCondition(value = "") {
+  const key = normalizeSearchKey(value).replace(/[^a-z0-9]+/g, "-");
+  const identityFields = ["name", "slug", "sku", "trainingLabels.productName"];
+  const topicRules = {
+    "thiet-bi-phat-song-wifi": {
+      include: /^(?:router|thiết bị phát sóng wifi|thiet bi phat song wifi|bộ phát wifi|bo phat wifi)(?:[\s-]|$)/i,
+      exclude: /(?:di động|di dong|4g|5g|mifi)/i,
+    },
+    "bo-phat-wifi-di-dong": {
+      include: /^(?:bộ phát wifi di động|bo phat wifi di dong|router wifi di động|router wifi di dong|mifi)(?:[\s-]|$)|^(?:bộ phát wifi|bo phat wifi).{0,24}(?:4g|5g|lte)/i,
+    },
+    "bo-kich-song-wifi": {
+      include: /^(?:bộ kích sóng|bo kich song|thiết bị kích sóng|thiet bi kich song|wifi range extender|range extender|wifi repeater)(?:[\s-]|$)/i,
+    },
+    "hub-switch": {
+      include: /^(?:hub-switch|switch|bộ chia mạng|bo chia mang)(?:[\s-]|$)/i,
+    },
+    "usb-wifi": {
+      include: /^(?:usb|cổng otg|cong otg).{0,24}(?:wifi|wi-fi)(?:[\s-]|$)/i,
+    },
+    "card-mang": {
+      include: /^(?:card mạng|card mang|network card|pcie.{0,18}(?:wifi|ethernet))(?:[\s-]|$)/i,
+    },
+  };
+  const rule = topicRules[key];
+  if (!rule) return null;
 
-  if (urls.length) {
-    or.push({ url: { $in: urls } });
-    or.push({ inputUrl: { $in: urls } });
-    or.push({ sourceUrl: { $in: urls } });
-    or.push({ sourceUrls: { $in: urls } });
-  }
-
-  if (!or.length) return docs;
-
-  const details = await productDetails
-    .find(
-      { $or: or },
-      {
-        projection: {
-          source: 1,
-          sourceUrl: 1,
-          inputUrl: 1,
-          url: 1,
-          sourceUrls: 1,
-          slug: 1,
-          sku: 1,
-          productId: 1,
-          name: 1,
-          productName: 1,
-          title: 1,
-          brand: 1,
-          brandKey: 1,
-          category: 1,
-          categoryTrail: 1,
-          currentPrice: 1,
-          originalPrice: 1,
-          discount: 1,
-          rating: 1,
-          ratingCount: 1,
-          installment: 1,
-          statusLabel: 1,
-          city: 1,
-          thumbnail: 1,
-          image: 1,
-          primaryImage: 1,
-          images: { $slice: 8 },
-          storageStatus: 1,
-          updatedAt: 1,
-        },
-      }
-    )
-    .toArray();
-
-  const detailIndex = indexDetailSummaries(details);
-  return docs.map((product) => mergeProductWithDetailSummary(
-    product,
-    findDetailForListProduct(product, detailIndex)
-  ));
+  const includeCondition = regexCondition(identityFields, rule.include);
+  return rule.exclude
+    ? { $and: [includeCondition, { $nor: [regexCondition(identityFields, rule.exclude)] }] }
+    : includeCondition;
 }
 
 function buildListQuery(searchParams) {
   const query = {};
-  const source = searchParams.get("source") || "cellphones";
+  const source = searchParams.get("source") || "all";
   const q = searchParams.get("q");
   const category = searchParams.get("category");
   const brand = searchParams.get("brand");
   const segment = searchParams.get("segment");
   const inStock = searchParams.get("inStock");
   const filter = searchParams.get("filter");
+  const productType = searchParams.get("productType");
   const facet = searchParams.get("facet");
   const priceMin = toPositiveNumber(searchParams.get("priceMin") || searchParams.get("price_min") || searchParams.get("minPrice"));
   const priceMax = toPositiveNumber(searchParams.get("priceMax") || searchParams.get("price_max") || searchParams.get("maxPrice"));
   const ram = searchParams.get("ram");
   const storage = searchParams.get("storage");
   const screenSize = searchParams.get("screen_size") || searchParams.get("screenSize");
+  const usage = searchParams.get("usage");
+  const display = searchParams.get("display");
+  const camera = searchParams.get("camera");
+  const refreshRate = searchParams.get("refresh_rate") || searchParams.get("refreshRate");
+  const special = searchParams.get("special");
+  const selectedFacetValues = {
+    ram,
+    storage,
+    "screen-size": screenSize,
+    usage,
+    display,
+    camera,
+    "refresh-rate": refreshRate,
+    special,
+  };
+  const facetKey = normalizeSearchKey(facet).replace(/[^a-z0-9]+/g, "-");
 
   if (source !== "all") query.source = source;
 
   if (q) {
-    const regex = new RegExp(escapeRegex(q), "i");
-    query.$or = [
-      { name: regex },
-      { sku: regex },
-      { brand: regex },
-      { categories: regex },
-      { sourceUrls: regex },
-      { url: regex },
-    ];
+    const categoryKey = normalizeSearchKey(category);
+    const applianceTopicCondition = categoryKey === "do gia dung"
+      ? buildApplianceTopicCondition(q)
+      : null;
+    const accessoryTopicCondition = categoryKey === "phu kien"
+      ? buildAccessoryTopicCondition(q)
+      : null;
+    const networkTopicCondition = categoryKey === "thiet bi mang"
+      ? buildNetworkTopicCondition(q)
+      : null;
+    Object.assign(
+      query,
+      applianceTopicCondition
+        || accessoryTopicCondition
+        || networkTopicCondition
+        || buildProductSearchCondition(q)
+    );
   }
 
-  if (category) appendAndCondition(query, buildCategoryCondition(category));
+  if (category) {
+    const requestedCategories = category.split("|").map((item) => item.trim()).filter(Boolean);
+    appendAndCondition(query, requestedCategories.length > 1
+      ? { $or: requestedCategories.map((item) => buildCategoryCondition(item)) }
+      : buildCategoryCondition(category));
+  }
   if (brand && brand !== "all") appendAndCondition(query, buildBrandCondition(brand));
   if (segment) appendAndCondition(query, buildSegmentCondition(segment));
-  if (facet) appendAndCondition(query, buildFacetCondition(facet));
+  // `facet` identifies the filter group opened by the UI. Once an exact value
+  // is selected (for example ram=8GB RAM), the indexed `facets.*` condition
+  // below is sufficient. Applying the old broad text condition as well makes
+  // gzip-backed details impossible to match because their full specs are not
+  // duplicated on the MongoDB manifest.
+  if (facet && !selectedFacetValues[facetKey]) {
+    appendAndCondition(query, buildFacetCondition(facet));
+  }
   if (filter) appendAndCondition(query, buildFilterCondition(filter));
+  if (productType) appendAndCondition(query, buildProductTypeCondition(productType));
   if (ram) appendAndCondition(query, buildFeatureValueCondition("ram", ram));
   if (storage) appendAndCondition(query, buildFeatureValueCondition("storage", storage));
   if (screenSize) appendAndCondition(query, buildFeatureValueCondition("screen-size", screenSize));
+  if (usage) appendAndCondition(query, buildFeatureValueCondition("usage", usage));
+  if (display) appendAndCondition(query, buildFeatureValueCondition("display", display));
+  if (camera) appendAndCondition(query, buildFeatureValueCondition("camera", camera));
+  if (refreshRate) appendAndCondition(query, buildFeatureValueCondition("refresh-rate", refreshRate));
+  if (special) appendAndCondition(query, buildFeatureValueCondition("special", special));
   if (priceMin || priceMax) appendAndCondition(query, buildPriceRangeCondition(priceMin, priceMax));
 
   if (inStock === "true") appendAndCondition(query, buildStockCondition(true));
@@ -782,7 +943,19 @@ function buildStockCondition(inStock = true) {
       { availability: "InStock" },
       { stockStatus: "InStock" },
       { inStock: true },
-      { statusLabel: { $regex: "C.n h.ng|Còn hàng|Con hang|InStock", $options: "i" } },
+      { stock: { $gt: 0 } },
+      { inventory: { $gt: 0 } },
+      { statusLabel: { $regex: "C.n h.ng|Còn hàng|Con hang|InStock|Sẵn hàng", $options: "i" } },
+      // Sản phẩm admin tự thêm thường chưa có availability/statusLabel.
+      // Không loại các sản phẩm này khỏi danh mục chỉ vì thiếu cờ tồn kho.
+      {
+        $and: [
+          { availability: { $exists: false } },
+          { "availability.status": { $exists: false } },
+          { stockStatus: { $exists: false } },
+          { statusLabel: { $exists: false } },
+        ],
+      },
     ],
   };
 
@@ -792,7 +965,7 @@ function buildStockCondition(inStock = true) {
     $or: [
       { "availability.status": { $ne: "InStock" } },
       { availability: { $ne: "InStock" } },
-      { statusLabel: { $regex: "Li.n h.|H.t h.ng|OutOfStock", $options: "i" } },
+      { statusLabel: { $regex: "Li.n h.|H.t h.ng|OutOfStock|Hết hàng", $options: "i" } },
     ],
   };
 }
@@ -812,55 +985,314 @@ function buildPriceRangeCondition(min, max) {
   };
 }
 
-function buildFeatureValueCondition(kind = "", value = "") {
-  const clean = cleanLimitedText(value, 80);
-  if (!clean) return {};
+function buildSpecificationRowCondition(labelRegex, valueRegex) {
+  return {
+    $or: [
+      {
+        specifications: {
+          $elemMatch: {
+            rows: {
+              $elemMatch: {
+                label: labelRegex,
+                value: valueRegex,
+              },
+            },
+          },
+        },
+      },
+      {
+        "rawProductJsonLd.additionalProperty": {
+          $elemMatch: {
+            name: labelRegex,
+            value: valueRegex,
+          },
+        },
+      },
+      {
+        $and: [
+          regexCondition([
+            "specifications.rows.label",
+            "rawProductJsonLd.additionalProperty.name",
+          ], labelRegex),
+          regexCondition([
+            "specifications.rows.value",
+            "rawProductJsonLd.additionalProperty.value",
+          ], valueRegex),
+        ],
+      },
+    ],
+  };
+}
 
+function getFeatureLabelRegex(kind = "", normalizedValue = "") {
+  if (kind === "ram") return /ram|bộ nhớ ram|bo nho ram|dung lượng ram|dung luong ram/i;
+  if (kind === "storage") return /bộ nhớ trong|bo nho trong|dung lượng lưu trữ|dung luong luu tru|rom|storage|ổ cứng|o cung|ssd|hdd/i;
+  if (kind === "screen-size") return /kích thước màn hình|kich thuoc man hinh|đường chéo màn hình|duong cheo man hinh|screen size|display size|display diagonal/i;
+  if (kind === "display") return /công nghệ màn hình|cong nghe man hinh|loại màn hình|loai man hinh|tấm nền|tam nen|màn hình|man hinh|display/i;
+  if (kind === "camera") return /camera|camera sau|camera trước|camera truoc|tính năng camera|tinh nang camera|quay video/i;
+  if (kind === "refresh-rate") return /tần số quét|tan so quet|tốc độ làm mới|toc do lam moi|refresh|màn hình|man hinh|display|tính năng màn hình|tinh nang man hinh/i;
+  if (kind === "usage") return /nhu cầu sử dụng|nhu cau su dung|đối tượng sử dụng|doi tuong su dung|usage/i;
+
+  if (kind === "special") {
+    if (normalizedValue.includes("nfc")) return /nfc|công nghệ nfc|cong nghe nfc|kết nối|ket noi/i;
+    if (normalizedValue.includes("5g")) return /hỗ trợ mạng|ho tro mang|mạng|mang|5g|kết nối|ket noi/i;
+    if (normalizedValue.includes("sac")) return /sạc|sac|pin|battery|charging/i;
+    if (normalizedValue.includes("khang") || normalizedValue.includes("chong nuoc")) return /kháng nước|khang nuoc|chống nước|chong nuoc|chuẩn kháng|chuan khang|ip/i;
+    if (normalizedValue.includes("wifi") || normalizedValue.includes("wi-fi")) return /wifi|wi-fi|kết nối|ket noi/i;
+    if (normalizedValue.includes("bluetooth")) return /bluetooth|kết nối|ket noi/i;
+    return /nfc|5g|sạc|sac|kháng nước|khang nuoc|wifi|wi-fi|bluetooth|magsafe|ai|tính năng|tinh nang|kết nối|ket noi/i;
+  }
+
+  return /thông số|thong so|tính năng|tinh nang/i;
+}
+
+function getFeatureValueRegex(kind = "", clean = "") {
   const normalized = normalizeSearchKey(clean);
   const compact = normalized.replace(/\s+/g, "");
-  const fields = [
-    "name",
-    "slug",
-    "sku",
-    "description",
-    "category",
-    "categories",
-    "specifications.name",
-    "specifications.value",
-    "specifications.label",
-    "specifications.rows.label",
-    "specifications.rows.value",
-    "articleSections.heading",
-    "articleSections.paragraphs",
-    "rawProductJsonLd.additionalProperty.name",
-    "rawProductJsonLd.additionalProperty.value",
-    "trainingLabels.productName",
-  ];
   const escaped = escapeRegex(clean);
   const compactEscaped = escapeRegex(compact);
 
   if (kind === "ram") {
     const number = compact.match(/\d+/)?.[0];
-    const regex = number
+    return number
       ? new RegExp(`\\b${escapeRegex(number)}\\s?gb\\s?(ram)?\\b|ram\\s?${escapeRegex(number)}\\s?gb`, "i")
       : new RegExp(escaped, "i");
-    return regexCondition(fields, regex);
   }
 
   if (kind === "storage") {
-    const regex = new RegExp(`${escaped}|${compactEscaped}|\\b${compactEscaped.replace(/gb|tb/gi, "")}\\s?(gb|tb)\\b`, "i");
-    return regexCondition(fields, regex);
+    const number = compact.match(/\d+/)?.[0];
+    const unit = compact.includes("tb") ? "tb" : "gb";
+    return number
+      ? new RegExp(`\\b${escapeRegex(number)}\\s?${unit}\\b|${compactEscaped}`, "i")
+      : new RegExp(`${escaped}|${compactEscaped}`, "i");
   }
 
   if (kind === "screen-size") {
-    const number = compact.match(/\d+(?:\\.\\d+)?/)?.[0];
-    const regex = number
+    if (normalized.includes("duoi") && normalized.includes("6")) {
+      return /\b([4-5](\.\d+)?)\s?(inch|inches|"|”|in)\b/i;
+    }
+    if (normalized.includes("tren") && normalized.includes("6.8")) {
+      return /\b(6\.9|7(\.\d+)?|8(\.\d+)?|9(\.\d+)?|1[0-9](\.\d+)?|2[0-9](\.\d+)?|3[0-9](\.\d+)?)\s?(inch|inches|"|”|in)\b/i;
+    }
+    const number = compact.match(/\d+(?:\.\d+)?/)?.[0];
+    return number
       ? new RegExp(`${escapeRegex(number)}\\s?(inch|inches|\"|”|in)`, "i")
       : new RegExp(escaped, "i");
-    return regexCondition(fields, regex);
   }
 
-  return regexCondition(fields, new RegExp(escaped, "i"));
+  if (kind === "refresh-rate") {
+    const number = compact.match(/\d+/)?.[0];
+    return number ? new RegExp(`\\b${escapeRegex(number)}\\s?hz\\b`, "i") : new RegExp(escaped, "i");
+  }
+
+  if (kind === "camera") {
+    if (normalized.includes("ois") || normalized.includes("chong rung")) return /ois|chống rung|chong rung|quang học|quang hoc/i;
+    if (normalized.includes("zoom")) return /zoom|telephoto|tele|tiềm vọng|tiem vong/i;
+    if (normalized.includes("sieu rong") || normalized.includes("goc")) return /siêu rộng|sieu rong|ultra wide|góc rộng|goc rong/i;
+    if (normalized.includes("4k")) return /4k|uhd/i;
+    if (normalized.includes("ai")) return /ai|smart hdr|deep fusion|xử lý ảnh|xu ly anh/i;
+    if (normalized.includes("chup dem")) return /chụp đêm|chup dem|night/i;
+    return new RegExp(escaped, "i");
+  }
+
+  if (kind === "usage") {
+    if (normalized.includes("dung luong lon")) return /dung lượng lớn|dung luong lon|large storage/i;
+    if (normalized.includes("cau hinh cao")) return /cấu hình cao|cau hinh cao|high performance/i;
+    if (normalized.includes("choi game") || normalized.includes("gaming")) return /gaming|chơi game|choi game/i;
+    if (normalized.includes("chup anh")) return /chụp ảnh đẹp|chup anh dep|photography/i;
+    if (normalized.includes("pin trau")) return /pin trâu|pin trau|long battery/i;
+    if (normalized.includes("mong nhe")) return /mỏng nhẹ|mong nhe|thin and light/i;
+    if (normalized.includes("nho gon")) return /nhỏ gọn|nho gon|compact/i;
+    if (normalized.includes("van phong") || normalized.includes("hoc tap")) return /office|văn phòng|van phong|học tập|hoc tap/i;
+    if (normalized.includes("do hoa") || normalized.includes("thiet ke") || normalized.includes("ky thuat")) return /đồ họa|do hoa|thiết kế|thiet ke|kỹ thuật|ky thuat/i;
+    if (normalized.includes("livestream")) return /livestream|live stream/i;
+    if (normalized.includes("sang tao")) return /sáng tạo|sang tao|creator/i;
+    if (normalized.includes("giai tri")) return /giải trí|giai tri|entertainment/i;
+    if (normalized.includes("tre em")) return /trẻ em|tre em|kids/i;
+    if (normalized.includes("cao cap") || normalized.includes("sang trong")) return /cao cấp|cao cap|sang trọng|sang trong|premium/i;
+    return new RegExp(escaped, "i");
+  }
+
+  if (kind === "special") {
+    if (normalized.includes("nfc")) return /có|co|yes|nfc/i;
+    if (normalized.includes("5g")) return /5g/i;
+    if (normalized.includes("sac nhanh")) return /sạc nhanh|sac nhanh|fast charge|[0-9]{2,3}\s?w/i;
+    if (normalized.includes("sac khong day")) return /sạc không dây|sac khong day|wireless|magsafe|qi/i;
+    if (normalized.includes("ip68")) return /ip68|kháng nước|khang nuoc|chống nước|chong nuoc/i;
+    if (normalized.includes("magsafe")) return /magsafe/i;
+    if (normalized.includes("wifi") || normalized.includes("wi-fi")) return /wi-?fi\s?(6|7)|wifi\s?(6|7)/i;
+    if (normalized.includes("bluetooth")) return /bluetooth\s?5(\.\d+)?/i;
+    return new RegExp(escaped, "i");
+  }
+
+  return new RegExp(escaped, "i");
+}
+
+function getCleanFacetTag(value = "") {
+  return normalizeSearchKey(value)
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function parseFacetNumber(value = "") {
+  const match = normalizeSearchKey(value).replace(/,/g, ".").match(/\d+(?:\.\d+)?/);
+  return match ? Number(match[0]) : null;
+}
+
+function buildFacetFieldCondition(kind = "", value = "") {
+  const clean = cleanLimitedText(value, 80);
+  if (!clean) return {};
+
+  const normalized = normalizeSearchKey(clean);
+  const tagKey = getCleanFacetTag(clean);
+  const number = parseFacetNumber(clean);
+
+  if (kind === "ram" && number) {
+    return { "facets.ramGb": number };
+  }
+
+  if (kind === "storage" && number) {
+    const storageGb = /tb/i.test(clean) ? number * 1024 : number;
+    return { "facets.storageGb": storageGb };
+  }
+
+  if (kind === "screen-size") {
+    if (normalized.includes("tu 10") && normalized.includes("11")) {
+      return { "facets.screenSizeInch": { $gte: 10, $lt: 12 } };
+    }
+    if (normalized.includes("7") && normalized.includes("8") && normalized.includes("-")) {
+      return { "facets.screenSizeInch": { $gte: 7, $lt: 9 } };
+    }
+    if (normalized.includes("duoi") && number) {
+      return { "facets.screenSizeInch": { $lt: number } };
+    }
+    if ((normalized.includes("tren") || normalized.includes("tro len")) && number) {
+      return { "facets.screenSizeInch": normalized.includes("tren")
+        ? { $gt: number }
+        : { $gte: number } };
+    }
+    if (normalized.includes("khoang") && number) {
+      if (number === 13) return { "facets.screenSizeInch": { $gte: 12.5, $lt: 13.75 } };
+      if (number === 14) return { "facets.screenSizeInch": { $gte: 13.75, $lt: 15 } };
+      return { "facets.screenSizeInch": { $gte: number - 0.6, $lte: number + 0.6 } };
+    }
+    if (number) {
+      return { "facets.screenSizeInch": { $gte: number - 0.11, $lte: number + 0.11 } };
+    }
+  }
+
+  if (kind === "refresh-rate" && number) {
+    return { "facets.refreshRateHz": number };
+  }
+
+  const tagAliases = {
+    display: {
+      oled: "oled",
+      amoled: "amoled",
+      "super-amoled": "super-amoled",
+      "ips-lcd": "ips",
+      ips: "ips",
+      lcd: "lcd",
+      retina: "retina",
+      "mini-led": "mini-led",
+      qled: "qled",
+      "man-hinh-cong": "curved",
+      cong: "curved",
+    },
+    camera: {
+      "chong-rung-ois": "ois",
+      ois: "ois",
+      "zoom-xa": "zoom",
+      zoom: "zoom",
+      "goc-sieu-rong": "ultrawide",
+      "sieu-rong": "ultrawide",
+      "quay-video-4k": "4k",
+      "video-4k": "4k",
+      "camera-ai": "ai-camera",
+      "chup-dem": "night",
+      "leica-zeiss-hasselblad": "leica-zeiss-hasselblad",
+    },
+    usage: {
+      "dung-luong-lon": "large-storage",
+      "cau-hinh-cao": "high-performance",
+      "choi-game": "gaming",
+      gaming: "gaming",
+      "chup-anh-dep": "photography",
+      "chup-anh": "photography",
+      "pin-trau": "long-battery",
+      livestream: "livestream",
+      "nho-gon-de-cam-nam": "compact",
+      "nho-gon": "compact",
+      "mong-nhe": "lightweight",
+      "hoc-tap-van-phong": "office-study",
+      "van-phong": "office-study",
+      "do-hoa-thiet-ke": "design",
+      "do-hoa-ky-thuat": "design",
+      "do-hoa-sang-tao": "design",
+      "thiet-ke": "design",
+      "livestream-sang-tao-noi-dung": "creator",
+      "laptop-sang-tao-noi-dung": "creator",
+      "cao-cap-sang-trong": "premium",
+      "giai-tri": "entertainment",
+      "cho-tre-em": "kids",
+    },
+    special: {
+      "5g": "5g",
+      nfc: "nfc",
+      "sac-nhanh": "fast-charge",
+      "sac-khong-day": "wireless-charge",
+      "khang-nuoc-ip68": "ip68",
+      ip68: "ip68",
+      "ai-tich-hop": "ai",
+      ai: "ai",
+      magsafe: "magsafe",
+    },
+  };
+
+  if (["display", "camera", "usage", "special"].includes(kind)) {
+    if (kind === "special" && (tagKey.includes("wi-fi") || tagKey.includes("wifi"))) {
+      return { "facets.special": { $in: ["wifi6", "wifi7"] } };
+    }
+    if (kind === "special" && tagKey.includes("bluetooth")) {
+      return { "facets.special": "bluetooth5" };
+    }
+    const tag = tagAliases[kind]?.[tagKey] || tagKey;
+    return { [`facets.${kind}`]: tag };
+  }
+
+  return {};
+}
+
+function buildFeatureValueCondition(kind = "", value = "") {
+  const clean = cleanLimitedText(value, 80);
+  if (!clean) return {};
+
+  const normalized = normalizeSearchKey(clean);
+  const labelRegex = getFeatureLabelRegex(kind, normalized);
+  const valueRegex = getFeatureValueRegex(kind, clean);
+  const facetCondition = buildFacetFieldCondition(kind, clean);
+  const specCondition = buildSpecificationRowCondition(labelRegex, valueRegex);
+  const facetPath = {
+    ram: "facets.ramGb",
+    storage: "facets.storageGb",
+    "screen-size": "facets.screenSizeInch",
+    usage: "facets.usage",
+    display: "facets.display",
+    camera: "facets.camera",
+    "refresh-rate": "facets.refreshRateHz",
+    special: "facets.special",
+  }[kind];
+
+  return Object.keys(facetCondition).length
+    ? {
+      $or: [
+        facetCondition,
+        // Chỉ tìm trong thông số thô khi document chưa được lập facet.
+        // Nếu facet đã tồn tại nhưng không khớp, không được tìm rộng nữa.
+        { $and: [{ [facetPath]: { $exists: false } }, specCondition] },
+      ],
+    }
+    : specCondition;
 }
 
 function buildFilterCondition(filter = "") {
@@ -868,15 +1300,92 @@ function buildFilterCondition(filter = "") {
 
   if (key === "hot-deal" || key === "discount" || key === "khuyen-mai-hot") {
     return {
-      $or: [
-        { discount: { $gt: 0 } },
-        { promotions: { $exists: true, $ne: [] } },
-        { priceBenefits: { $exists: true, $ne: [] } },
+      $and: [
+        { discount: { $gte: 1, $lte: 90 } },
+        { currentPrice: { $gt: 0 } },
+        { originalPrice: { $gt: 0 } },
+        { $expr: { $gt: ["$originalPrice", "$currentPrice"] } },
       ],
     };
   }
 
   return {};
+}
+
+function buildProductTypeCondition(productType = "") {
+  const key = normalizeSearchKey(productType).replace(/[^a-z0-9]+/g, "-");
+  const identityFields = [
+    "name",
+    "slug",
+    "sku",
+  ];
+  const categoryFields = [
+    "category",
+    "categories",
+    "categoryTrail.name",
+    "categoryTrail.label",
+    "categoryTrail.href",
+    "trainingLabels.categoryLevel1",
+    "trainingLabels.categoryLevel2",
+    "trainingLabels.deviceGroup",
+  ];
+  const fields = [...identityFields, ...categoryFields];
+  const rules = {
+    "cu-cap": {
+      include: /củ sạc|cu sac|cáp sạc|cap sac|adapter|cáp type[ -]?c|cap type[ -]?c|type[ -]?c.{0,18}(cáp|cap|lightning)|lightning.{0,18}(cáp|cap)/i,
+      exclude: /dự phòng|du phong|power ?bank|flash drive|usb sandisk|ổ cứng|o cung|thẻ nhớ|the nho|microphone|mic thu âm|mic thu am/i,
+    },
+    "chuot-ban-phim": {
+      include: /chuột|chuot|mouse|bàn phím|ban phim|keyboard/i,
+    },
+    "sac-du-phong": {
+      include: /sạc dự phòng|sac du phong|pin dự phòng|pin du phong|power ?bank/i,
+      exclude: /loa bluetooth|speaker|tích hợp pin dự phòng|tich hop pin du phong/i,
+    },
+    camera: {
+      // Do not use a bare "camera" search over every field. Accessory names
+      // such as "ốp viền camera" and "thẻ nhớ chuyên camera" would match it.
+      identityInclude: /(?:^|[\s-])(camera|webcam|gimbal|flycam|dji osmo|máy quay|may quay|insta360)(?:$|[\s-])/i,
+      categoryInclude: /^(?:camera|camera an ninh|camera hành trình|camera hanh trinh|webcam|gimbal|flycam|máy quay|may quay)$/i,
+      requireIdentity: true,
+      exclude: /ốp lưng|op lung|bao da|\bcase\b|housing|vỏ bảo vệ|vo bao ve|(?:^|[- ])dán(?:$|[- ])|(?:^|[- ])dan(?:$|[- ])|miếng dán|mieng dan|kính cường lực|kinh cuong luc|bảo vệ camera|bao ve camera|viền camera|vien camera|camera control|sticker|thẻ nhớ|the nho|memory card|lens dành|lens danh|ống kính|ong kinh/i,
+    },
+    "phu-kien-apple": {
+      // MagSafe alone is not enough: many Samsung/Android cases also carry it.
+      include: /airtag|airpods|apple pencil|apple watch|magic keyboard|magic mouse|phụ kiện apple|phu kien apple|phụ kiện iphone|phu kien iphone|phụ kiện ipad|phu kien ipad|iphone|ipad|macbook/i,
+    },
+    "phu-kien-tien-ich": {
+      // Use lamp phrases instead of a bare "den" token; product slugs cannot
+      // distinguish the colour "đen" from the noun "đèn" after normalization.
+      include: /\bquạt\b|\bquat\b|đèn (led|bàn|ngủ|pin|học)|den (led|ban|ngu|pin|hoc)|giá đỡ|gia do|gậy selfie|gay selfie|\bhub\b|thiết bị mạng|thiet bi mang|kích sóng|kich song|bộ phát wifi|bo phat wifi|router|tripod|bút cảm ứng|but cam ung|tay cầm|tay cam|bộ chuyển đổi|bo chuyen doi/i,
+      exclude: /dán màn hình|dan man hinh|miếng dán|mieng dan|kính cường lực|kinh cuong luc|ốp lưng|op lung|bao da/i,
+    },
+    "op-lung": {
+      include: /ốp lưng|op lung|bao da/i,
+      exclude: /dán màn hình|dan man hinh|miếng dán|mieng dan|kính cường lực|kinh cuong luc|screen protector/i,
+    },
+  };
+  const rule = rules[key];
+  if (!rule || (!rule.include && !rule.identityInclude && !rule.categoryInclude)) return {};
+
+  const includeConditions = [];
+  if (rule.include) includeConditions.push(regexCondition(fields, rule.include));
+  if (rule.identityInclude) includeConditions.push(regexCondition(identityFields, rule.identityInclude));
+  if (rule.categoryInclude && !rule.requireIdentity) {
+    includeConditions.push(regexCondition(categoryFields, rule.categoryInclude));
+  }
+
+  const conditions = [
+    includeConditions.length === 1 ? includeConditions[0] : { $or: includeConditions },
+  ];
+  if (rule.exclude) {
+    // Reject a document when any identifying/category field carries an
+    // accessory exclusion. Checking name/slug only was not sufficient for
+    // malformed crawled category trails.
+    conditions.push({ $nor: [regexCondition(fields, rule.exclude)] });
+  }
+
+  return conditions.length === 1 ? conditions[0] : { $and: conditions };
 }
 
 function buildFacetCondition(facet = "") {
@@ -932,8 +1441,10 @@ function buildSort(sortKey) {
       return { scrapedAt: 1, name: 1 };
     case "hot_deal":
     case "promotion_hot":
-    case "popular":
       return { discount: -1, webFreshnessScore: -1, updatedAt: -1, scrapedAt: -1, name: 1 };
+    case "hot_trend":
+    case "popular":
+      return { ratingCount: -1, rating: -1, webFreshnessScore: -1, updatedAt: -1, name: 1 };
     case "latest":
     default:
       return {
@@ -946,6 +1457,65 @@ function buildSort(sortKey) {
         name: 1,
       };
   }
+}
+
+function isPriceSort(sortKey = "") {
+  const key = String(sortKey || "").trim().toLowerCase().replace(/-/g, "_");
+  return key === "price_asc" || key === "price_desc";
+}
+
+function buildEffectivePriceExpression() {
+  const toNumber = (field) => ({
+    $convert: {
+      input: field,
+      to: "double",
+      onError: 0,
+      onNull: 0,
+    },
+  });
+
+  return {
+    $let: {
+      vars: {
+        currentPrice: toNumber("$currentPrice"),
+        price: toNumber("$price"),
+        originalPrice: toNumber("$originalPrice"),
+      },
+      in: {
+        $cond: [
+          { $gt: ["$$currentPrice", 0] },
+          "$$currentPrice",
+          {
+            $cond: [
+              { $gt: ["$$price", 0] },
+              "$$price",
+              "$$originalPrice",
+            ],
+          },
+        ],
+      },
+    },
+  };
+}
+
+function buildAggregateProjection(projection) {
+  if (!projection) {
+    return {
+      __effectivePrice: 0,
+      __missingPrice: 0,
+    };
+  }
+
+  const aggregateProjection = { ...projection };
+  if (projection.images?.$slice) {
+    aggregateProjection.images = {
+      $slice: [
+        { $cond: [{ $isArray: "$images" }, "$images", []] },
+        Number(projection.images.$slice),
+      ],
+    };
+  }
+  return aggregateProjection;
 }
 
 function normalizeLookupText(value = "") {
@@ -1408,13 +1978,43 @@ function buildCategoryCondition(category = "") {
   const key = normalizeSearchKey(text);
   const escaped = escapeRegex(text);
   const aliasCategories = {
-    "do gia dung": ["Đồ gia dụng", "Nhà thông minh"],
+    "do gia dung": ["Đồ gia dụng", "Nhà thông minh", "Apple TV"],
   };
+
+  if (key === "hang cu") {
+    return regexCondition([
+      "name",
+      "slug",
+      "category",
+      "categories",
+      "categoryTrail.name",
+      "categoryTrail.label",
+      "trainingLabels.categoryLevel1",
+      "trainingLabels.categoryLevel2",
+      "trainingLabels.deviceGroup",
+      "trainingLabels.productName",
+    ], /hàng cũ|hang cu|cũ đẹp|cu dep|cũ trầy xước|cu tray xuoc|like new|like-new|đã kích hoạt|da kich hoat|trưng bày|trung bay|qua sử dụng|qua su dung|refurbished/i);
+  }
+
+  if (key === "phu kien") {
+    return regexCondition([
+      "name",
+      "slug",
+      "category",
+      "categories",
+      "categoryTrail.name",
+      "categoryTrail.label",
+      "trainingLabels.categoryLevel1",
+      "trainingLabels.categoryLevel2",
+      "trainingLabels.deviceGroup",
+      "trainingLabels.productName",
+    ], /phụ kiện|phu kien|ốp lưng|op lung|bao da|dán màn hình|dan man hinh|kính cường lực|kinh cuong luc|cáp|cap|sạc|sac|adapter|pin dự phòng|pin du phong|power ?bank|thẻ nhớ|the nho|memory card|micro ?sd|usb|ổ cứng|o cung|ssd|hdd|hub|dock|chuột|chuot|mouse|bàn phím|ban phim|keyboard|balo|túi chống sốc|tui chong soc|webcam|router|wi-?fi|card mạng|card mang|sim(?: 4g| 5g)?|gimbal|tay cầm|tay cam|dây đeo|day deo|bút cảm ứng|but cam ung|playstation|rog ally|quạt mini|quat mini|kính thông minh|kinh thong minh/i);
+  }
+
   const exactOnlyCategories = new Set([
     "dien thoai",
     "may tinh bang",
     "laptop",
-    "phu kien",
     "do gia dung",
     "am thanh",
     "tivi",
@@ -1442,7 +2042,7 @@ function buildCategoryCondition(category = "") {
           new RegExp(`^${escaped}(\\b|\\s|$)`, "i"),
         ];
 
-  return {
+  const categoryCondition = {
     $or: regexes.flatMap((regex) => [
       { category: regex },
       { categories: regex },
@@ -1453,6 +2053,75 @@ function buildCategoryCondition(category = "") {
       { "trainingLabels.deviceGroup": regex },
     ]),
   };
+
+  if (key === "do gia dung") {
+    const applianceIdentity = /^(?:máy|may|quạt|quat|robot|nồi|noi|bếp|bep|ấm|am|bàn ủi|ban ui|bàn là|ban la|bàn chải|ban chai|lò|lo|tủ|tu|cân|can|tông đơ|tong do|bình thủy|binh thuy|chảo điện|chao dien|đầu thu|dau thu)(?:[\s-]|$)|(?:tv box|mi box|playbox|tv stick|apple tv)/i;
+    const applianceAccessoryIdentity = /^(?:lõi lọc|loi loc|lưỡi cạo|luoi cao|đầu cạo|dau cao|đầu bàn chải|dau ban chai|bộ đổi nguồn|bo doi nguon|phụ kiện|phu kien|túi đựng|tui dung|dung dịch|dung dich|chổi chính|choi chinh|chổi cạnh|choi canh|màng lọc|mang loc|điều khiển|dieu khien|remote|filter|adapter)(?:[\s-]|$)/i;
+    return {
+      $and: [
+        categoryCondition,
+        regexCondition(["name", "slug", "sku"], applianceIdentity),
+        { name: { $not: applianceAccessoryIdentity } },
+        { slug: { $not: applianceAccessoryIdentity } },
+      ],
+    };
+  }
+
+  if (key === "laptop") {
+    const nonLaptopProduct = /màn hình|man hinh|\bmonitor\b|studio display|display xdr|máy tính để bàn|may tinh de ban|\bdesktop\b|\bimac\b|mac mini/i;
+    return {
+      $and: [
+        categoryCondition,
+        { name: { $not: nonLaptopProduct } },
+        { slug: { $not: nonLaptopProduct } },
+      ],
+    };
+  }
+
+  if (key === "tai nghe") {
+    // Một số tài liệu crawl của loa/micro có categoryTrail "Tai nghe mới".
+    // Xác nhận thêm bằng tên định danh sản phẩm để không lẫn các nhóm đó.
+    const headphoneIdentity = /tai nghe|headphone|headset|earphone|earbud|airpods|galaxy buds|redmi buds|realme buds|oneplus buds|oppo buds|xiaomi buds|freebuds|soundpeats|openfit|openswim|openrun|quietcomfort|wf-\d|wh-\d|inzone/i;
+    const clearlyNotHeadphone = /^(?:loa|speaker|soundbar|microphone|micro|mic|hộp sạc|hop sac|ốp|op lung|bao da|phụ kiện|phu kien)(?:[\s-]|$)/i;
+    return {
+      $and: [
+        categoryCondition,
+        regexCondition([
+          "name",
+          "slug",
+          "sku",
+          "trainingLabels.productName",
+          "trainingLabels.deviceGroup",
+        ], headphoneIdentity),
+        { name: { $not: clearlyNotHeadphone } },
+        { slug: { $not: clearlyNotHeadphone } },
+      ],
+    };
+  }
+
+  if (key === "dong ho thong minh") {
+    const watchIdentity = /đồng hồ|dong ho|smartwatch|\bwatch\b|vòng đeo tay|vong deo tay|vòng tay thông minh|vong tay thong minh|smart ?band|\bband\b|galaxy fit|fitbit/i;
+    const watchAccessoryIdentity = /^(?:dây|day|đai|dai|cảm biến|cam bien|sạc|sac|cáp|cap|ốp|op|bao|bộ\s+\d+\s+dây|bo\s+\d+\s+day)(?:[\s-]|$)/i;
+    const usedProductCategory = /^hàng cũ$/i;
+    return {
+      $and: [
+        categoryCondition,
+        regexCondition([
+          "name",
+          "slug",
+          "sku",
+          "trainingLabels.productName",
+          "trainingLabels.deviceLine",
+          "trainingLabels.deviceGroup",
+        ], watchIdentity),
+        { name: { $not: watchAccessoryIdentity } },
+        { slug: { $not: watchAccessoryIdentity } },
+        { category: { $not: usedProductCategory } },
+      ],
+    };
+  }
+
+  return categoryCondition;
 }
 
 function createBrandRegex(brand = "") {
@@ -1480,24 +2149,62 @@ function createBrandRegex(brand = "") {
 }
 
 function buildBrandCondition(brand = "") {
+  const key = String(brand || "").trim().toLowerCase();
   const regex = createBrandRegex(brand);
-  return regexCondition([
+  const explicitBrandFields = [
     "brand",
     "brandKey",
-    "name",
-    "slug",
     "trainingLabels.brand",
     "trainingLabels.deviceBrand",
     "rawProductJsonLd.brand.name",
+  ];
+
+  // AQUA vừa là thương hiệu vừa xuất hiện trong tên dòng sản phẩm của Dreame
+  // và Philips. Với thương hiệu này chỉ tin các trường brand đã chuẩn hóa để
+  // không đưa Dreame Aqua/Philips SpeedPro Aqua vào trang hãng AQUA.
+  if (key === "aqua") {
+    return regexCondition(explicitBrandFields, /^aqua$/i);
+  }
+
+  const condition = regexCondition([
+    ...explicitBrandFields,
+    "name",
+    "slug",
   ], regex);
+
+  // Một số bản crawl cũ gán nhầm Vivo Watch vào brand OPPO. Giữ nhóm liên
+  // quan Realme/OnePlus theo alias hiện có, nhưng không để Vivo lọt vào trang
+  // thương hiệu OPPO.
+  if (key === "oppo") {
+    return {
+      $and: [
+        condition,
+        { name: { $not: /\bvivo\b/i } },
+        { slug: { $not: /\bvivo\b/i } },
+      ],
+    };
+  }
+
+  return condition;
 }
 
 function buildSegmentCondition(segment = "") {
   const key = String(segment || "").trim().toLowerCase();
+
+  if (key === "pin" || key === "battery") {
+    return { "facets.batteryCapacityMah": { $gte: LONG_BATTERY_PHONE_MIN_MAH } };
+  }
+
   const fields = [
     "name",
     "slug",
+    "category",
     "categories",
+    "categoryTrail.name",
+    "categoryTrail.label",
+    "trainingLabels.categoryLevel1",
+    "trainingLabels.categoryLevel2",
+    "trainingLabels.deviceGroup",
     "trainingLabels.labelPathText",
     "trainingLabels.productName",
     "trainingLabels.deviceLine",
@@ -1558,6 +2265,137 @@ function buildSegmentCondition(segment = "") {
             { slug: /laptop/i },
           ],
         },
+      ],
+    };
+  }
+
+  const productTypeSegmentAliases = {
+    "apple-accessories": "phu-kien-apple",
+    "cables-chargers": "cu-cap",
+    "power-banks": "sac-du-phong",
+    cases: "op-lung",
+    "mouse-keyboard": "chuot-ban-phim",
+    camera: "camera",
+  };
+  if (productTypeSegmentAliases[key]) {
+    return buildProductTypeCondition(productTypeSegmentAliases[key]);
+  }
+
+  // Segment filters must classify the product itself, not words buried in a
+  // long description. The previous full-text rules made a MagSafe Samsung
+  // case look like an Apple accessory and made DJI action cameras look like
+  // gimbals/flycams.
+  const accessoryIdentityFields = ["name", "slug", "sku"];
+  const accessoryCategoryFields = [
+    "category",
+    "categories",
+    "categoryTrail.name",
+    "categoryTrail.label",
+    "trainingLabels.categoryLevel1",
+    "trainingLabels.categoryLevel2",
+    "trainingLabels.deviceGroup",
+  ];
+  const accessorySegmentRules = {
+    "screen-protectors": {
+      identityInclude: /dán màn hình|dan man hinh|kính cường lực|kinh cuong luc|miếng dán|mieng dan|screen protector/i,
+      categoryInclude: /^(?:dán màn hình|dan man hinh|kính cường lực|kinh cuong luc)$/i,
+    },
+    "memory-usb": {
+      identityInclude: /(?:^|[\s-])(?:thẻ nhớ|the nho|usb|ổ cứng|o cung|ssd|memory card|sd card|microsd|flash drive)(?:$|[\s-])/i,
+      categoryInclude: /^(?:thẻ nhớ|the nho|usb|ổ cứng|o cung|ssd)$/i,
+      exclude: /hub|dock|cổng chuyển|cong chuyen/i,
+    },
+    "gaming-gear": {
+      identityInclude: /gaming gear|playstation|ps5|tay cầm|tay cam|bàn phím|ban phim|chuột|chuot|controller|gamepad|console/i,
+      categoryInclude: /^(?:gaming gear|playstation|tay cầm chơi game|tay cam choi game)$/i,
+    },
+    sim: {
+      identityInclude: /(?:^|[\s-])(?:sim|esim)(?:$|[\s-])|sim 4g|sim 5g|sim data/i,
+      categoryInclude: /^(?:sim|sim 4g|sim 5g)$/i,
+    },
+    network: {
+      identityInclude: /router|wifi|wi-?fi|mesh|modem|bộ phát|bo phat|repeater|access point|mở rộng sóng|mo rong song/i,
+      categoryInclude: /^(?:thiết bị mạng|thiet bi mang|router|bộ phát wifi|bo phat wifi)$/i,
+    },
+    gimbal: {
+      identityInclude: /(?:^|[\s-])gimbal(?:$|[\s-])|tay cầm chống rung|tay cam chong rung|dji (?:om|osmo mobile)(?:$|[\s-])|stabilizer/i,
+      categoryInclude: /^(?:gimbal|tay cầm chống rung|tay cam chong rung)$/i,
+      exclude: /camera hành động|camera hanh dong|action|osmo pocket|osmo 360|osmo nano/i,
+    },
+    flycam: {
+      identityInclude: /(?:^|[\s-])(?:flycam|drone)(?:$|[\s-])|dji (?:mini|air|mavic|avata|neo)(?:$|[\s-])/i,
+      categoryInclude: /^(?:flycam|drone)$/i,
+      requireIdentity: true,
+      exclude: /camera hành động|camera hanh dong|action|osmo|gimbal|goggles|intelligent flight battery|pin flycam|cánh quạt|canh quat|propeller|charging hub|hub sạc|hub sac|remote controller|tay điều khiển|tay dieu khien|phụ kiện|phu kien/i,
+    },
+    cameras: {
+      identityInclude: /(?:^|[\s-])máy ảnh(?:$|[\s-])|(?:^|[\s-])may anh(?:$|[\s-])|camera (?:sony|canon|nikon|fujifilm)/i,
+      exclude: /máy in ảnh|may in anh|phim|phụ kiện|phu kien|lens|ống kính|ong kinh/i,
+    },
+    bags: {
+      identityInclude: /(?:^|[\s-])(?:balo|ba lô|túi xách|tui xach|túi chống sốc|tui chong soc|backpack)(?:$|[\s-])/i,
+      categoryInclude: /^(?:balo|túi xách|tui xach|túi chống sốc|tui chong soc)$/i,
+    },
+    hubs: {
+      identityInclude: /(?:^|[\s-])(?:hub|dock|dongle)(?:$|[\s-])|hub chuyển đổi|hub chuyen doi|cổng chuyển|cong chuyen/i,
+      categoryInclude: /^(?:hub|hub chuyển đổi|hub chuyen doi)$/i,
+    },
+    "phone-accessories": {
+      identityInclude: /phụ kiện điện thoại|phu kien dien thoai|ốp lưng|op lung|dán màn hình|dan man hinh|cáp|cap|sạc|sac|tai nghe|magsafe/i,
+    },
+    "laptop-accessories": {
+      identityInclude: /phụ kiện laptop|phu kien laptop|balo|túi chống sốc|tui chong soc|chuột|chuot|bàn phím|ban phim|hub|dock|đế tản nhiệt|de tan nhiet/i,
+    },
+  };
+  const accessoryRule = accessorySegmentRules[key];
+  if (accessoryRule) {
+    const includes = [];
+    if (accessoryRule.identityInclude) includes.push(regexCondition(accessoryIdentityFields, accessoryRule.identityInclude));
+    if (accessoryRule.categoryInclude && !accessoryRule.requireIdentity) {
+      includes.push(regexCondition(accessoryCategoryFields, accessoryRule.categoryInclude));
+    }
+    const conditions = [includes.length === 1 ? includes[0] : { $or: includes }];
+    if (accessoryRule.exclude) {
+      conditions.push({
+        $nor: [regexCondition([...accessoryIdentityFields, ...accessoryCategoryFields], accessoryRule.exclude)],
+      });
+    }
+    return conditions.length === 1 ? conditions[0] : { $and: conditions };
+  }
+
+  const usedIdentityFields = [
+    "name",
+    "slug",
+    "category",
+    "categories",
+    "categoryTrail.name",
+    "categoryTrail.label",
+    "trainingLabels.categoryLevel1",
+    "trainingLabels.categoryLevel2",
+    "trainingLabels.deviceGroup",
+    "trainingLabels.productName",
+  ];
+  const usedCommonRegex = /hàng cũ|hang cu|cũ đẹp|cu dep|cũ trầy xước|cu tray xuoc|like new|like-new|đã kích hoạt|da kich hoat|trưng bày|trung bay|qua sử dụng|qua su dung|refurbished/i;
+  const usedSegmentRegexes = {
+    "used-phone": /điện thoại|dien thoai|iphone|samsung|galaxy|xiaomi|oppo|honor|realme|phone|smartphone/i,
+    "used-tablet": /tablet|máy tính bảng|may tinh bang|ipad/i,
+    "used-macbook": /macbook|mac book|mac/i,
+    "used-laptop": /laptop|notebook|asus|lenovo|hp|dell|acer|msi/i,
+    "used-headphones": /tai nghe|headphone|earphone|airpods|buds/i,
+    "used-speaker": /loa|speaker|jbl|marshall/i,
+    "used-watch": /đồng hồ|dong ho|watch|apple watch|galaxy watch|garmin|amazfit/i,
+    "used-appliance": /đồ gia dụng|do gia dung|tủ lạnh|tu lanh|máy giặt|may giat|máy hút bụi|may hut bui|robot|nồi chiên|noi chien|quạt|quat/i,
+    "used-accessories": /phụ kiện|phu kien|ốp|op lung|bao da|cáp|cap|sạc|sac|pin dự phòng|pin du phong|hub|balo|chuột|chuot|bàn phím|ban phim/i,
+    "used-monitor": /màn hình|man hinh|monitor/i,
+    "used-tv": /tivi|tv|smart tv|smart tivi/i,
+    "used-charger": /cáp sạc|cap sac|cáp|cap|sạc|sac|củ sạc|cu sac|adapter|charger|type-?c|lightning/i,
+  };
+
+  if (usedSegmentRegexes[key]) {
+    return {
+      $and: [
+        regexCondition(usedIdentityFields, usedCommonRegex),
+        regexCondition(usedIdentityFields, usedSegmentRegexes[key]),
       ],
     };
   }
@@ -1707,6 +2545,7 @@ async function getDb() {
   } = getMongoConfig();
   const db = mongoClient.db(dbName);
   const context = {
+    client: mongoClient,
     db,
     dbName,
     productsCollection,
@@ -1928,8 +2767,11 @@ async function handleApiIndex(_req, res) {
       requestRegisterOtp: "/api/auth/request-register-otp",
       verifyRegisterOtp: "/api/auth/verify-register-otp",
       login: "/api/auth/login",
+      google: "/api/auth/google",
+      businessSubmit: "/api/auth/business/submit",
       me: "/api/auth/me",
       adminSummary: "/api/admin/summary",
+      adminBusinessVerifications: "/api/admin/business-verifications",
       adminOrders: "/api/admin/orders",
       adminShipments: "/api/admin/shipments",
       adminPayments: "/api/admin/payments",
@@ -1952,7 +2794,8 @@ async function handleListProducts(req, res) {
   const limit = toPositiveInt(url.searchParams.get("limit"), DEFAULT_LIMIT, MAX_LIMIT);
   const skip = (page - 1) * limit;
   const query = buildListQuery(url.searchParams);
-  const sort = buildSort(url.searchParams.get("sort"));
+  const sortKey = url.searchParams.get("sort");
+  const sort = buildSort(sortKey);
   const includeRaw = url.searchParams.get("raw") === "true";
   const includeDetails = url.searchParams.get("include") === "details";
 
@@ -1982,6 +2825,7 @@ async function handleListProducts(req, res) {
       availability: 1,
       stock: 1,
       inventory: 1,
+      facets: 1,
       category: 1,
       categories: 1,
       categoryTrail: 1,
@@ -2015,9 +2859,33 @@ async function handleListProducts(req, res) {
         : {}),
     };
 
+  const docsPromise = isPriceSort(sortKey)
+    ? webProducts.aggregate([
+      { $match: query },
+      { $set: { __effectivePrice: buildEffectivePriceExpression() } },
+      {
+        $set: {
+          __missingPrice: {
+            $cond: [{ $gt: ["$__effectivePrice", 0] }, 0, 1],
+          },
+        },
+      },
+      {
+        $sort: {
+          __missingPrice: 1,
+          __effectivePrice: String(sortKey).toLowerCase().replace(/-/g, "_") === "price_desc" ? -1 : 1,
+          name: 1,
+        },
+      },
+      { $skip: skip },
+      { $limit: limit },
+      { $project: buildAggregateProjection(projection) },
+    ]).toArray()
+    : webProducts.find(query, { projection }).sort(sort).skip(skip).limit(limit).toArray();
+
   const [total, docs] = await Promise.all([
     webProducts.countDocuments(query),
-    webProducts.find(query, { projection }).sort(sort).skip(skip).limit(limit).toArray(),
+    docsPromise,
   ]);
 
   sendJson(res, 200, {
@@ -2213,6 +3081,10 @@ function normalizeEmail(value = "") {
 
 function sanitizePhone(value = "") {
   return String(value || "").replace(/[^\d+]/g, "").slice(0, 24);
+}
+
+function isValidBasicEmail(value = "") {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
 }
 
 function sanitizeRating(value) {
@@ -2597,6 +3469,15 @@ function getOptionalOrderOwner(req) {
   };
 }
 
+async function getCouponMember(req, db) {
+  const owner = getOptionalOrderOwner(req);
+  if (!owner?.userId || !ObjectId.isValid(owner.userId)) return null;
+  return db.collection(process.env.USERS_COLLECTION || "smember_users").findOne({
+    _id: new ObjectId(owner.userId),
+    status: { $ne: "blocked" },
+  });
+}
+
 function getRequiredCustomer(req, res) {
   const owner = getOptionalOrderOwner(req);
   if (!owner?.userId) {
@@ -2604,95 +3485,6 @@ function getRequiredCustomer(req, res) {
     return null;
   }
   return owner;
-}
-
-function generateOrderCode() {
-  const now = new Date();
-  const datePart = [
-    now.getFullYear(),
-    String(now.getMonth() + 1).padStart(2, "0"),
-    String(now.getDate()).padStart(2, "0"),
-  ].join("");
-  const randomPart = Math.random().toString(36).slice(2, 8).toUpperCase();
-  return `CPS${datePart}${randomPart}`;
-}
-
-const ORDER_TRACKING_LABELS = {
-  pending: "Chờ xác nhận",
-  confirmed: "Đã xác nhận",
-  packing: "Đang chuẩn bị hàng",
-  ready_for_pickup: "Sẵn sàng nhận tại cửa hàng",
-  shipping: "Đang giao",
-  completed: "Giao thành công",
-  cancelled: "Đã hủy",
-  refunded: "Hoàn tiền",
-};
-
-const ORDER_TRACKING_FLOW = [
-  "pending",
-  "confirmed",
-  "packing",
-  "shipping",
-  "completed",
-];
-
-function normalizeTimelineEntry(entry = {}, fallbackStatus = "pending") {
-  const status = entry.status || fallbackStatus;
-  return {
-    status,
-    label: entry.label || ORDER_TRACKING_LABELS[status] || status,
-    note: entry.note || "",
-    changedBy: entry.changedBy || "",
-    changedByRole: entry.changedByRole || "",
-    time: entry.changedAt || entry.createdAt || null,
-  };
-}
-
-function buildOrderTracking(order = {}) {
-  const currentStatus = order.status || "pending";
-  const history = Array.isArray(order.statusHistory) && order.statusHistory.length
-    ? order.statusHistory.map((entry) => normalizeTimelineEntry(entry, currentStatus))
-    : [
-      {
-        status: "pending",
-        label: ORDER_TRACKING_LABELS.pending,
-        note: "Đặt hàng thành công.",
-        changedBy: order.userId || "guest",
-        changedByRole: order.userRole || "guest",
-        time: order.createdAt || null,
-      },
-    ];
-
-  const completedStatuses = new Set(history.map((entry) => entry.status));
-  const flow = ORDER_TRACKING_FLOW.map((status) => ({
-    status,
-    label: ORDER_TRACKING_LABELS[status],
-    completed: completedStatuses.has(status) || ORDER_TRACKING_FLOW.indexOf(status) <= ORDER_TRACKING_FLOW.indexOf(currentStatus),
-    current: status === currentStatus,
-  }));
-
-  if (["cancelled", "refunded"].includes(currentStatus)) {
-    flow.push({
-      status: currentStatus,
-      label: ORDER_TRACKING_LABELS[currentStatus],
-      completed: true,
-      current: true,
-    });
-  }
-
-  return {
-    orderCode: order.orderCode || "",
-    status: currentStatus,
-    statusLabel: order.statusLabel || ORDER_TRACKING_LABELS[currentStatus] || "",
-    paymentStatus: order.payment?.status || "unpaid",
-    paymentLabel: order.payment?.statusLabel || "",
-    trackingCode: order.shippingChoice?.trackingCode || order.shipment?.trackingCode || "",
-    carrier: order.shippingChoice?.carrier || order.shipment?.carrier || "",
-    etaText: order.shippingChoice?.etaText || "",
-    timeline: history.sort((a, b) => new Date(a.time || 0) - new Date(b.time || 0)),
-    flow,
-    updatedAt: order.updatedAt || order.createdAt || null,
-  };
 }
 
 function sanitizeOrderPerson(input = {}, fallback = {}) {
@@ -2736,8 +3528,26 @@ function sanitizeCompanyInvoice(input = {}) {
     invoiceEmail,
     email: invoiceEmail,
     invoiceStatus: requested ? cleanLimitedText(input.invoiceStatus || "pending", 40) : "not_requested",
+    emailDeliveryStatus: requested ? "pending" : "not_requested",
     note: requested ? cleanLimitedText(input.note, 1000) : "",
   };
+}
+
+function validateCompanyInvoice(invoice = {}) {
+  if (!invoice.requested) return "";
+  if (!invoice.companyName || invoice.companyName.length < 2) {
+    return "Vui lòng nhập tên công ty để xuất hóa đơn.";
+  }
+  if (!/^\d{10}(?:-\d{3})?$/.test(invoice.taxCode || "")) {
+    return "Mã số thuế cần gồm 10 chữ số hoặc 10 chữ số kèm mã đơn vị 3 chữ số.";
+  }
+  if (!invoice.companyAddress || invoice.companyAddress.length < 5) {
+    return "Vui lòng nhập địa chỉ công ty để xuất hóa đơn.";
+  }
+  if (!invoice.invoiceEmail || !isValidBasicEmail(invoice.invoiceEmail)) {
+    return "Vui lòng nhập email nhận hóa đơn hợp lệ.";
+  }
+  return "";
 }
 
 function sanitizeShippingChoice(input = {}) {
@@ -2751,91 +3561,6 @@ function sanitizeShippingChoice(input = {}) {
     label: cleanLimitedText(input.label || choiceLabel, 80),
     etaText: cleanLimitedText(input.etaText || input.eta, 180),
     fee: cleanCartPrice(input.fee),
-  };
-}
-
-function sanitizePaymentMethod(value = "") {
-  const raw = String(value || "").trim().toLowerCase();
-  if (["bank_qr", "bank-qr", "vietqr", "qr", "bank_transfer", "bank-transfer"].includes(raw)) {
-    return "bank_qr";
-  }
-  return "cod";
-}
-
-function getBankQrConfig() {
-  const bankId = cleanLimitedText(
-    process.env.BANK_QR_BANK_ID || process.env.BANK_QR_BANK_CODE,
-    40
-  );
-  const accountNumber = cleanLimitedText(
-    process.env.BANK_QR_ACCOUNT_NUMBER || process.env.BANK_ACCOUNT_NUMBER,
-    80
-  );
-  const accountName = cleanLimitedText(
-    process.env.BANK_QR_ACCOUNT_NAME || process.env.BANK_ACCOUNT_NAME || "CELLPHONES CLONE",
-    120
-  );
-  const template = cleanLimitedText(process.env.BANK_QR_TEMPLATE || "compact2", 32);
-
-  return {
-    provider: "vietqr",
-    enabled: Boolean(bankId && accountNumber),
-    bankId,
-    accountNumber,
-    accountName,
-    template,
-  };
-}
-
-function buildBankQrImageUrl({ amount, transferContent }) {
-  const config = getBankQrConfig();
-  if (!config.enabled) return "";
-
-  const base = `https://img.vietqr.io/image/${encodeURIComponent(config.bankId)}-${encodeURIComponent(config.accountNumber)}-${encodeURIComponent(config.template)}.png`;
-  const params = new URLSearchParams({
-    amount: String(Math.max(0, Math.round(Number(amount || 0)))),
-    addInfo: transferContent,
-    accountName: config.accountName,
-  });
-
-  return `${base}?${params.toString()}`;
-}
-
-function buildOrderPayment({ method, orderCode, totals }) {
-  if (method === "bank_qr") {
-    const amount = Math.max(0, Math.round(Number(totals.total || totals.roundedTotal || 0)));
-    const transferContent = orderCode;
-    const bankConfig = getBankQrConfig();
-
-    return {
-      method: "bank_qr",
-      methodLabel: "Chuyển khoản ngân hàng qua mã QR",
-      status: "pending",
-      statusLabel: "Chờ chuyển khoản",
-      provider: bankConfig.provider,
-      reference: orderCode,
-      transferContent,
-      amount,
-      currency: totals.currency || "VND",
-      qrImageUrl: buildBankQrImageUrl({ amount, transferContent }),
-      expiresAt: new Date(Date.now() + Number(process.env.BANK_QR_EXPIRES_MINUTES || 30) * 60 * 1000),
-      bank: {
-        bankId: bankConfig.bankId,
-        accountNumber: bankConfig.accountNumber,
-        accountName: bankConfig.accountName,
-      },
-      instructions: bankConfig.enabled
-        ? "Quét mã QR và giữ nguyên nội dung chuyển khoản để hệ thống tự xác nhận khi ngân hàng gửi thông báo giao dịch."
-        : "Chưa cấu hình BANK_QR_BANK_ID và BANK_QR_ACCOUNT_NUMBER trong .env.",
-      createdAt: new Date(),
-    };
-  }
-
-  return {
-    method: "cod",
-    methodLabel: "Thanh toán khi nhận hàng",
-    status: "unpaid",
-    statusLabel: "Chưa thanh toán",
   };
 }
 
@@ -2867,62 +3592,6 @@ function buildOrderTotals(items = [], options = {}) {
   };
 }
 
-function computeCouponDiscount(coupon = {}, totalsBase = {}) {
-  if (!coupon || coupon.status !== "active") return 0;
-
-  const now = new Date();
-  if (coupon.startsAt && new Date(coupon.startsAt) > now) return 0;
-  if (coupon.expiresAt && new Date(coupon.expiresAt) < now) return 0;
-  if (coupon.usageLimit && Number(coupon.usedCount || 0) >= Number(coupon.usageLimit)) return 0;
-
-  const subtotal = cleanCartPrice(totalsBase.subtotal);
-  if (subtotal < cleanCartPrice(coupon.minSubtotal)) return 0;
-
-  if (coupon.type === "free_shipping") return cleanCartPrice(totalsBase.shippingFee);
-  if (coupon.type === "percent") {
-    const rawDiscount = Math.floor((subtotal * Number(coupon.value || 0)) / 100);
-    return coupon.maxDiscount ? Math.min(rawDiscount, cleanCartPrice(coupon.maxDiscount)) : rawDiscount;
-  }
-
-  return Math.min(subtotal, cleanCartPrice(coupon.value));
-}
-
-function normalizeCouponForPublic(coupon = {}, discount = 0) {
-  if (!coupon) return null;
-  return {
-    id: String(coupon._id || ""),
-    code: coupon.code || "",
-    name: coupon.name || "",
-    description: coupon.description || "",
-    type: coupon.type || "fixed",
-    value: coupon.value || 0,
-    minSubtotal: coupon.minSubtotal || 0,
-    maxDiscount: coupon.maxDiscount || 0,
-    discount,
-    startsAt: coupon.startsAt || null,
-    expiresAt: coupon.expiresAt || null,
-  };
-}
-
-function getCouponInvalidReason(coupon = null, totalsBase = {}) {
-  if (!coupon) return "Mã giảm giá không tồn tại hoặc đã ngừng áp dụng.";
-  if (coupon.status !== "active") return "Mã giảm giá đang không hoạt động.";
-
-  const now = new Date();
-  if (coupon.startsAt && new Date(coupon.startsAt) > now) return "Mã giảm giá chưa tới thời gian áp dụng.";
-  if (coupon.expiresAt && new Date(coupon.expiresAt) < now) return "Mã giảm giá đã hết hạn.";
-  if (coupon.usageLimit && Number(coupon.usedCount || 0) >= Number(coupon.usageLimit)) {
-    return "Mã giảm giá đã hết lượt sử dụng.";
-  }
-
-  const subtotal = cleanCartPrice(totalsBase.subtotal);
-  if (subtotal < cleanCartPrice(coupon.minSubtotal)) {
-    return `Đơn hàng cần tối thiểu ${cleanCartPrice(coupon.minSubtotal).toLocaleString("vi-VN")}đ để áp dụng mã này.`;
-  }
-
-  return "";
-}
-
 async function findActiveCoupon(coupons, code = "") {
   const couponCode = cleanLimitedText(code, 80).toUpperCase();
   if (!couponCode) return null;
@@ -2930,7 +3599,7 @@ async function findActiveCoupon(coupons, code = "") {
   return coupons.findOne({ code: couponCode, status: "active" });
 }
 
-async function buildCheckoutPreview({ productDetails, products, coupons, body = {} }) {
+async function buildCheckoutPreview({ productDetails, products, coupons, body = {}, couponContext = {} }) {
   const parsed = parseWithSchema(orderPayloadSchema, {
     ...body,
     items: Array.isArray(body.items)
@@ -2964,7 +3633,10 @@ async function buildCheckoutPreview({ productDetails, products, coupons, body = 
   let couponError = "";
   if (bodyData.couponCode || body.coupon?.code) {
     coupon = await findActiveCoupon(coupons, bodyData.couponCode || body.coupon?.code);
-    couponError = getCouponInvalidReason(coupon, preCouponTotals);
+    couponError = getCouponInvalidReason(coupon, preCouponTotals, {
+      ...couponContext,
+      educationOffer,
+    });
     couponDiscount = couponError ? 0 : computeCouponDiscount(coupon, preCouponTotals);
     if (!couponError && couponDiscount <= 0) {
       couponError = "Đơn hàng chưa đủ điều kiện áp dụng mã giảm giá.";
@@ -3587,7 +4259,7 @@ async function handleBankPaymentWebhook(req, res) {
 }
 
 async function handleOrdersRequest(req, res, pathParts) {
-  const { orders, carts, products, productDetails, inventory, coupons, userEvents, notifications } = await getDb();
+  const { db, orders, carts, products, productDetails, inventory, coupons, userEvents, notifications } = await getDb();
   await ensureOrderIndexes(orders);
 
   const owner = getOptionalOrderOwner(req);
@@ -3624,6 +4296,21 @@ async function handleOrdersRequest(req, res, pathParts) {
     }
 
     const bodyData = parsed.data;
+    if (bodyData.educationOffer) {
+      if (!owner?.userId || !ObjectId.isValid(owner.userId)) {
+        sendError(res, 403, "Vui lòng đăng nhập và xác minh S-Student/S-Teacher để dùng ưu đãi giáo dục.");
+        return;
+      }
+      const member = await db.collection(process.env.USERS_COLLECTION || "smember_users").findOne({
+        _id: new ObjectId(owner.userId),
+        "educationVerification.status": "verified",
+        "educationVerification.expiresAt": { $gt: new Date() },
+      });
+      if (!member) {
+        sendError(res, 403, "Tài khoản chưa xác minh S-Student/S-Teacher hoặc xác minh đã hết hạn.");
+        return;
+      }
+    }
     const rawItems = Array.isArray(bodyData.items) ? bodyData.items : [];
     let items;
 
@@ -3645,12 +4332,17 @@ async function handleOrdersRequest(req, res, pathParts) {
     const companyInvoice = sanitizeCompanyInvoice({
       ...(bodyData.companyInvoice || {}),
       requested: educationOffer ? false : Boolean(bodyData.companyInvoice?.requested),
+      invoiceEmail:
+        bodyData.companyInvoice?.invoiceEmail ||
+        bodyData.companyInvoice?.email ||
+        customer.email,
     });
     const shippingChoice = sanitizeShippingChoice(bodyData.shippingChoice || bodyData.shipping || {});
     const validationError = validateOrderPayload({ customer, receiver, shippingAddress, shippingChoice, items });
+    const invoiceValidationError = validateCompanyInvoice(companyInvoice);
 
-    if (validationError) {
-      sendError(res, 400, validationError);
+    if (validationError || invoiceValidationError) {
+      sendError(res, 400, validationError || invoiceValidationError);
       return;
     }
 
@@ -3665,7 +4357,11 @@ async function handleOrdersRequest(req, res, pathParts) {
 
     if (bodyData.couponCode) {
       appliedCoupon = await findActiveCoupon(coupons, bodyData.couponCode);
-      const couponError = getCouponInvalidReason(appliedCoupon, preCouponTotals);
+      const couponMember = await getCouponMember(req, db);
+      const couponError = getCouponInvalidReason(appliedCoupon, preCouponTotals, {
+        member: couponMember,
+        educationOffer,
+      });
       if (couponError) {
         sendError(res, 400, couponError);
         return;
@@ -3781,6 +4477,43 @@ async function handleOrdersRequest(req, res, pathParts) {
     } catch (error) {
       await releaseInventoryReservations(inventory, reservations);
       throw error;
+    }
+
+    if (inserted?.companyInvoice?.requested) {
+      const invoiceEmail = inserted.companyInvoice.invoiceEmail || inserted.customer?.email || "";
+      try {
+        const delivery = await sendOrderInvoiceEmail({ order: inserted });
+        const sentAt = new Date();
+        await orders.updateOne(
+          { _id: inserted._id },
+          {
+            $set: {
+              "companyInvoice.invoiceStatus": "sent",
+              "companyInvoice.emailDeliveryStatus": "sent",
+              "companyInvoice.sentAt": sentAt,
+              "companyInvoice.messageId": cleanLimitedText(delivery?.messageId, 240),
+              "companyInvoice.emailError": "",
+              updatedAt: sentAt,
+            },
+          }
+        );
+      } catch (error) {
+        const failedAt = new Date();
+        console.error(`[invoice-email] Không thể gửi bill đơn ${orderCode} tới ${invoiceEmail}:`, error?.message || error);
+        await orders.updateOne(
+          { _id: inserted._id },
+          {
+            $set: {
+              "companyInvoice.invoiceStatus": "pending",
+              "companyInvoice.emailDeliveryStatus": "failed",
+              "companyInvoice.emailFailedAt": failedAt,
+              "companyInvoice.emailError": cleanLimitedText(error?.message || "Không thể gửi email hóa đơn.", 500),
+              updatedAt: failedAt,
+            },
+          }
+        );
+      }
+      inserted = await orders.findOne({ _id: inserted._id });
     }
 
     const normalized = normalizeOrder(inserted);
@@ -4083,7 +4816,7 @@ async function handleMeExtrasRequest(req, res, pathParts) {
   if (!owner) return;
 
   const resource = pathParts[2];
-  const { orders } = await getDb();
+  const { db, orders, coupons } = await getDb();
   const query = buildCustomerOrderQuery(owner);
 
   if (resource === "warranties" && req.method === "GET") {
@@ -4112,10 +4845,12 @@ async function handleMeExtrasRequest(req, res, pathParts) {
   }
 
   if (resource === "vouchers" && req.method === "GET") {
+    const member = await getCouponMember(req, db);
+    const availableCoupons = await findAvailableCouponsForMember(coupons, member);
     sendJson(res, 200, {
       ok: true,
-      message: "Mã giảm giá không tự gán vào tài khoản. Khách cần nhập mã ở bước thanh toán.",
-      data: [],
+      message: "Danh sách mã giảm giá khả dụng cho tài khoản.",
+      data: availableCoupons.map((coupon) => normalizeCouponForPublic(coupon, 0)),
     });
     return;
   }
@@ -4172,6 +4907,19 @@ async function findOrderForService(orders, identifier = "") {
   });
 }
 
+async function ensureReturnRequestIndexes(returns) {
+  if (returnRequestIndexesReady) return;
+
+  await Promise.all([
+    returns.createIndex({ returnCode: 1 }, { unique: true, name: "unique_return_code" }),
+    returns.createIndex({ userId: 1, createdAt: -1 }, { name: "returns_user_created" }),
+    returns.createIndex({ orderCode: 1, status: 1 }, { name: "returns_order_status" }),
+    returns.createIndex({ status: 1, createdAt: -1 }, { name: "returns_status_created" }),
+  ]);
+
+  returnRequestIndexesReady = true;
+}
+
 function getOrderItemWarranty(item = {}, order = {}, warrantyDoc = null) {
   const warrantyMonths = Number(
     warrantyDoc?.warrantyMonths ||
@@ -4202,15 +4950,22 @@ function normalizeReturnRequest(doc = {}) {
     userId: doc.userId || "",
     productId: doc.productId || "",
     productSlug: doc.productSlug || "",
+    productSku: doc.productSku || "",
     productName: doc.productName || "",
+    productImage: doc.productImage || "",
     reason: doc.reason || "",
     status: doc.status || "pending",
-    statusLabel: doc.statusLabel || "Chờ tiếp nhận",
+    statusLabel: doc.status === "completed" ? "Hoàn trả thành công" : (doc.statusLabel || "Chờ tiếp nhận"),
     returnStatus: doc.status || "pending",
     customerPhone: doc.customerPhone || "",
-    images: doc.images || [],
+    images: Array.isArray(doc.images) ? doc.images : [],
     note: doc.note || "",
     adminNote: doc.adminNote || "",
+    quantity: Number(doc.quantity || 1),
+    unitPrice: Number(doc.unitPrice || 0),
+    refundAmount: Number(doc.refundAmount || 0),
+    refundedAt: doc.refundedAt || null,
+    statusHistory: Array.isArray(doc.statusHistory) ? doc.statusHistory : [],
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
   };
@@ -4222,9 +4977,33 @@ function generateReturnCode() {
 }
 
 async function handleReturnsRequest(req, res, pathParts) {
-  const { orders, returns } = await getDb();
+  const { orders, returns, notifications } = await getDb();
+  await ensureReturnRequestIndexes(returns);
   const owner = getOptionalOrderOwner(req);
   const identifier = decodeURIComponent(pathParts[2] || "");
+
+  if (!identifier && req.method === "GET") {
+    const customer = getRequiredCustomer(req, res);
+    if (!customer) return;
+
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const limit = toPositiveInt(url.searchParams.get("limit"), 50, MAX_LIMIT);
+    const status = cleanLimitedText(url.searchParams.get("status"), 40);
+    const query = customer.role === "admin" ? {} : { userId: customer.userId };
+    if (status && status !== "all") query.status = status;
+
+    const docs = await returns
+      .find(query)
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(limit)
+      .toArray();
+
+    sendJson(res, 200, {
+      ok: true,
+      data: docs.map(normalizeReturnRequest),
+    });
+    return;
+  }
 
   if (!identifier && req.method === "POST") {
     const parsed = parseWithSchema(returnRequestSchema, await parseJsonBody(req));
@@ -4246,8 +5025,8 @@ async function handleReturnsRequest(req, res, pathParts) {
       return;
     }
 
-    if (["cancelled", "refunded"].includes(order.status)) {
-      sendError(res, 400, "Đơn hàng đã hủy hoặc hoàn tiền, không thể tạo yêu cầu đổi trả mới.");
+    if (order.status !== "completed") {
+      sendError(res, 400, "Chỉ có thể tạo yêu cầu đổi trả sau khi đơn hàng đã giao thành công.");
       return;
     }
 
@@ -4276,6 +5055,40 @@ async function handleReturnsRequest(req, res, pathParts) {
       return;
     }
 
+    const selectedProductId = selectedItem.productId || selectedItem.mongoId || "";
+    const selectedProductSlug = selectedItem.slug || selectedItem.productSlug || "";
+    const selectedProductName = selectedItem.name || selectedItem.productName || "Sản phẩm CellphoneS";
+    const activeRequest = await returns.findOne({
+      orderCode: order.orderCode,
+      $or: [
+        ...(selectedProductId ? [{ productId: selectedProductId }] : []),
+        ...(selectedProductSlug ? [{ productSlug: selectedProductSlug }] : []),
+        { productName: selectedProductName },
+      ],
+      status: { $in: ["pending", "received", "approved", "completed"] },
+    });
+
+    if (activeRequest) {
+      sendError(
+        res,
+        409,
+        activeRequest.status === "completed"
+          ? `Sản phẩm này đã hoàn trả thành công theo yêu cầu #${activeRequest.returnCode}.`
+          : `Sản phẩm này đang có yêu cầu đổi trả #${activeRequest.returnCode}.`
+      );
+      return;
+    }
+
+    const returnImages = Array.isArray(input.images)
+      ? input.images.slice(0, 6).map((item) => String(item || "").trim()).filter(Boolean)
+      : [];
+    const totalImagePayloadSize = returnImages.reduce((sum, image) => sum + image.length, 0);
+
+    if (totalImagePayloadSize > 1_500_000) {
+      sendError(res, 400, "Tổng dung lượng ảnh đổi trả quá lớn. Vui lòng chọn ít ảnh hơn hoặc ảnh có dung lượng nhỏ hơn.");
+      return;
+    }
+
     const now = new Date();
     const doc = {
       returnCode: generateReturnCode(),
@@ -4287,11 +5100,23 @@ async function handleReturnsRequest(req, res, pathParts) {
       productSku: selectedItem.sku || "",
       productName: selectedItem.name || selectedItem.productName || "Sản phẩm CellphoneS",
       productImage: selectedItem.image || selectedItem.thumbnail || selectedItem.primaryImage || "",
+      quantity: Math.max(1, Number(selectedItem.quantity || 1)),
+      unitPrice: cleanCartPrice(selectedItem.currentPrice || selectedItem.price || selectedItem.unitPrice),
       reason: cleanLimitedText(input.reason, 1000),
       status: "pending",
       statusLabel: "Chờ tiếp nhận",
+      statusHistory: [
+        {
+          status: "pending",
+          label: "Chờ tiếp nhận",
+          note: "Khách hàng đã gửi yêu cầu đổi trả từ trang Smember.",
+          changedBy: owner?.userId || "customer",
+          changedByRole: owner?.role || "customer",
+          changedAt: now,
+        },
+      ],
       customerPhone: sanitizePhone(input.customerPhone || order.customer?.phone || order.receiver?.phone),
-      images: Array.isArray(input.images) ? input.images.slice(0, 6).map((item) => cleanLimitedText(item, 1000)).filter(Boolean) : [],
+      images: returnImages,
       note: cleanLimitedText(input.note, 1000),
       adminNote: "",
       createdAt: now,
@@ -4300,6 +5125,18 @@ async function handleReturnsRequest(req, res, pathParts) {
 
     const result = await returns.insertOne(doc);
     const inserted = await returns.findOne({ _id: result.insertedId });
+
+    if (doc.userId) {
+      await createUserNotification(notifications, {
+        userId: doc.userId,
+        type: "return_requested",
+        title: "Đã gửi yêu cầu đổi trả",
+        message: `Yêu cầu ${doc.returnCode} cho đơn ${doc.orderCode} đang chờ CellphoneS tiếp nhận.`,
+        orderCode: doc.orderCode,
+        productId: doc.productId,
+        metadata: { returnCode: doc.returnCode, returnStatus: doc.status },
+      });
+    }
 
     sendJson(res, 201, {
       ok: true,
@@ -4413,7 +5250,7 @@ async function handleSmemberProfile(req, res) {
   const owner = getRequiredCustomer(req, res);
   if (!owner) return;
 
-  const { orders } = await getDb();
+  const { orders, returns } = await getDb();
 
   const docs = await orders
     .find({
@@ -4427,19 +5264,49 @@ async function handleSmemberProfile(req, res) {
       payment: 1,
       paymentStatus: 1,
       paymentMethod: 1,
+      items: 1,
       createdAt: 1,
     })
     .sort({ createdAt: -1 })
     .toArray();
 
   const eligibleDocs = docs.filter(isCompletedOrderEligibleForStats);
+  const completedReturns = await returns
+    .find({ userId: owner.userId, status: "completed" })
+    .project({ orderCode: 1, productId: 1, productSlug: 1, productName: 1, quantity: 1, unitPrice: 1, refundAmount: 1 })
+    .toArray();
 
-  const totalSpent = eligibleDocs.reduce(
-    (sum, order) => sum + cleanCartPrice(order.totals?.total || order.totals?.roundedTotal),
+  const getNetOrderTotal = (order = {}) => {
+    const originalTotal = cleanCartPrice(order.totals?.total || order.totals?.roundedTotal);
+    const explicitNetTotal = Number(order.totals?.netTotal);
+    if (Number.isFinite(explicitNetTotal) && explicitNetTotal >= 0) return explicitNetTotal;
+
+    const orderReturns = completedReturns.filter((item) => item.orderCode === order.orderCode);
+    const derivedRefund = orderReturns.reduce((sum, returnItem) => {
+      const matchedItem = (order.items || []).find((item) => (
+        (returnItem.productId && [item.productId, item.mongoId].includes(returnItem.productId))
+        || (returnItem.productSlug && [item.slug, item.productSlug].includes(returnItem.productSlug))
+        || (returnItem.productName && returnItem.productName === (item.name || item.productName))
+      ));
+      const quantity = Math.max(1, Number(matchedItem?.quantity || returnItem.quantity || 1));
+      const lineTotal = cleanCartPrice(matchedItem?.lineTotal || matchedItem?.total || matchedItem?.subtotal);
+      const unitPrice = cleanCartPrice(
+        matchedItem?.currentPrice || matchedItem?.price || matchedItem?.unitPrice || returnItem.unitPrice
+      );
+      return sum + (cleanCartPrice(returnItem.refundAmount) || lineTotal || unitPrice * quantity);
+    }, 0);
+
+    const recordedRefund = cleanCartPrice(order.totals?.refundedAmount || order.payment?.refundedAmount);
+    return Math.max(0, originalTotal - Math.max(recordedRefund, derivedRefund));
+  };
+
+  const netEligibleDocs = eligibleDocs.filter((order) => getNetOrderTotal(order) > 0);
+  const totalSpent = netEligibleDocs.reduce(
+    (sum, order) => sum + getNetOrderTotal(order),
     0
   );
 
-  const totalOrders = eligibleDocs.length;
+  const totalOrders = netEligibleDocs.length;
   const points = Math.floor(totalSpent / 100000);
   const memberRank = buildMemberRank(totalSpent);
   const nextRankSpent =
@@ -4461,10 +5328,10 @@ async function handleSmemberProfile(req, res) {
       memberRank,
       nextRankSpent,
       remainingToNextRank: nextRankSpent ? Math.max(0, nextRankSpent - totalSpent) : 0,
-      recentOrders: eligibleDocs.slice(0, 5).map((order) => ({
+      recentOrders: netEligibleDocs.slice(0, 5).map((order) => ({
         orderCode: order.orderCode,
         status: order.status,
-        total: order.totals?.total || order.totals?.roundedTotal || 0,
+        total: getNetOrderTotal(order),
         createdAt: order.createdAt,
       })),
     },
@@ -5072,13 +5939,298 @@ async function ensureCouponIndexes(coupons) {
   await Promise.all([
     coupons.createIndex({ code: 1 }, { unique: true, name: "unique_coupon_code" }),
     coupons.createIndex({ status: 1, expiresAt: 1 }, { name: "coupons_status_expiry" }),
+    coupons.createIndex({ status: 1, audiences: 1, expiresAt: 1 }, { name: "coupons_audience_availability" }),
   ]);
 
   couponIndexesReady = true;
 }
 
+async function ensureNewsletterCoupon(coupons) {
+  await ensureCouponIndexes(coupons);
+  const now = new Date();
+  const expiresAt = new Date(now);
+  expiresAt.setFullYear(expiresAt.getFullYear() + 1);
+
+  const coupon = {
+    code: "KHUYENMAI10",
+    name: "Khuyến mãi 10%",
+    description: "Mã giảm giá 10% dành cho khách đăng ký nhận tin khuyến mãi.",
+    type: "percent",
+    value: 10,
+    maxDiscount: 0,
+    minSubtotal: 0,
+    audiences: ["all"],
+    allowWithEducationOffer: true,
+    status: "active",
+    startsAt: now,
+    expiresAt,
+    source: "newsletter",
+    updatedAt: now,
+  };
+
+  await coupons.updateOne(
+    { code: coupon.code },
+    {
+      $set: coupon,
+      $setOnInsert: {
+        usedCount: 0,
+        createdAt: now,
+      },
+    },
+    { upsert: true }
+  );
+
+  return coupons.findOne({ code: coupon.code });
+}
+
+async function ensureSupportRequestIndexes(supportRequests) {
+  if (supportRequestIndexesReady) return;
+
+  await Promise.all([
+    supportRequests.createIndex(
+      { requestCode: 1 },
+      { unique: true, name: "unique_support_request_code" }
+    ),
+    supportRequests.createIndex(
+      { status: 1, createdAt: -1 },
+      { name: "support_status_created_at" }
+    ),
+    supportRequests.createIndex(
+      { email: 1, createdAt: -1 },
+      { name: "support_email_created_at" }
+    ),
+  ]);
+
+  supportRequestIndexesReady = true;
+}
+
+function createSupportRequestCode() {
+  const now = new Date();
+  const datePart = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  ].join("");
+  const timePart = String(Date.now()).slice(-6);
+  const randomPart = String(Math.floor(Math.random() * 1000)).padStart(3, "0");
+  return `HT${datePart}${timePart}${randomPart}`;
+}
+
+function sanitizeSupportAttachment(input = null) {
+  if (!input || typeof input !== "object") return null;
+
+  const dataUrl = String(input.dataUrl || input.url || "").trim();
+  if (!dataUrl) return null;
+
+  const match = dataUrl.match(/^data:(image\/(?:jpeg|png|webp));base64,([a-z0-9+/=]+)$/i);
+  if (!match) {
+    const error = new Error("Ảnh đính kèm không hợp lệ. Chỉ chấp nhận JPG, PNG hoặc WEBP.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const estimatedBytes = Math.floor((match[2].length * 3) / 4);
+  if (estimatedBytes > 1_200_000) {
+    const error = new Error("Ảnh đính kèm quá lớn. Vui lòng chọn ảnh nhỏ hơn 1,2MB.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return {
+    name: cleanLimitedText(input.name || "anh-dinh-kem.jpg", 180),
+    type: match[1].toLowerCase(),
+    size: estimatedBytes,
+    dataUrl,
+  };
+}
+
+function normalizeSupportRequestForPublic(doc = {}) {
+  return {
+    id: String(doc._id || ""),
+    requestCode: doc.requestCode || "",
+    status: doc.status || "new",
+    statusLabel: doc.statusLabel || "Mới tiếp nhận",
+    createdAt: doc.createdAt,
+  };
+}
+
+async function handleCreateSupportRequest(req, res) {
+  if (req.method !== "POST") {
+    sendError(res, 405, "Method not allowed.");
+    return;
+  }
+
+  const body = await parseJsonBody(req);
+  const issueType = cleanLimitedText(body.issueType || body.category || body.topic, 120);
+  const fullName = cleanLimitedText(body.fullName || body.name, 120);
+  const phone = sanitizePhone(body.phone);
+  const email = normalizeEmail(body.email);
+  const orderCode = cleanLimitedText(body.orderCode, 80).toUpperCase();
+  const content = cleanLimitedText(body.content || body.message || body.description, 4000);
+
+  if (!issueType) {
+    sendError(res, 400, "Vui lòng chọn nhóm vấn đề.");
+    return;
+  }
+  if (!fullName || fullName.length < 2) {
+    sendError(res, 400, "Vui lòng nhập họ và tên.");
+    return;
+  }
+  if (!phone && !email) {
+    sendError(res, 400, "Vui lòng nhập số điện thoại hoặc email để nhận phản hồi.");
+    return;
+  }
+  if (phone && !/^0\d{9}$/.test(phone)) {
+    sendError(res, 400, "Số điện thoại cần gồm 10 chữ số và bắt đầu bằng 0.");
+    return;
+  }
+  if (email && !isValidBasicEmail(email)) {
+    sendError(res, 400, "Email không hợp lệ.");
+    return;
+  }
+  if (!content || content.length < 10) {
+    sendError(res, 400, "Nội dung hỗ trợ cần có ít nhất 10 ký tự.");
+    return;
+  }
+
+  let attachment = null;
+  try {
+    attachment = sanitizeSupportAttachment(body.attachment);
+  } catch (error) {
+    sendError(res, error.statusCode || 400, error.message);
+    return;
+  }
+
+  const requester = getRequestUser(req);
+  const rateIdentifier = requester?.sub || email || phone || req.socket?.remoteAddress || "support";
+  if (!rateLimitOrSend({
+    req,
+    res,
+    sendError,
+    scope: "support:create",
+    identifier: rateIdentifier,
+    max: Number(process.env.RATE_LIMIT_SUPPORT_MAX || 8),
+    message: "Bạn gửi yêu cầu quá nhanh. Vui lòng thử lại sau ít phút.",
+  })) return;
+
+  const { db } = await getDb();
+  const supportRequests = db.collection(process.env.SUPPORT_REQUESTS_COLLECTION || "support_requests");
+  await ensureSupportRequestIndexes(supportRequests);
+
+  const now = new Date();
+  const doc = {
+    requestCode: createSupportRequestCode(),
+    issueType,
+    fullName,
+    phone,
+    email,
+    orderCode,
+    content,
+    attachment,
+    status: "new",
+    statusLabel: "Mới tiếp nhận",
+    adminNote: "",
+    response: "",
+    userId: requester?.sub || requester?.id || "",
+    userRole: requester?.role || "guest",
+    ip: req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "",
+    userAgent: req.headers["user-agent"] || "",
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const result = await supportRequests.insertOne(doc);
+  doc._id = result.insertedId;
+
+  sendJson(res, 201, {
+    ok: true,
+    message: `Đã gửi yêu cầu hỗ trợ #${doc.requestCode}.`,
+    data: normalizeSupportRequestForPublic(doc),
+  });
+}
+
+async function handleNewsletterSubscribe(req, res) {
+  if (req.method !== "POST") {
+    sendError(res, 405, "Method not allowed.");
+    return;
+  }
+
+  const body = await parseJsonBody(req);
+  const email = normalizeEmail(body.email);
+  const phone = sanitizePhone(body.phone);
+  const accepted = Boolean(body.accepted ?? body.acceptTerms ?? body.consent);
+
+  if (!email || !isValidBasicEmail(email)) {
+    sendError(res, 400, "Vui lòng nhập email hợp lệ.");
+    return;
+  }
+
+  if (phone && !/^0\d{9}$/.test(phone)) {
+    sendError(res, 400, "Số điện thoại cần gồm 10 chữ số và bắt đầu bằng 0.");
+    return;
+  }
+
+  if (!accepted) {
+    sendError(res, 400, "Vui lòng đồng ý điều khoản trước khi đăng ký.");
+    return;
+  }
+
+  if (!rateLimitOrSend({
+    req,
+    res,
+    sendError,
+    scope: "newsletter:subscribe",
+    identifier: email,
+    max: Number(process.env.RATE_LIMIT_NEWSLETTER_MAX || 5),
+    message: "Bạn đăng ký nhận khuyến mãi quá nhanh. Vui lòng thử lại sau ít phút.",
+  })) return;
+
+  const { db, coupons } = await getDb();
+  const subscribers = db.collection(process.env.NEWSLETTER_COLLECTION || "newsletter_subscribers");
+  const coupon = await ensureNewsletterCoupon(coupons);
+  const couponCode = "khuyenmai10";
+  const now = new Date();
+
+  try {
+    await sendNewsletterCouponEmail({ email, couponCode });
+  } catch (error) {
+    console.error(`[newsletter] Không thể gửi mã giảm giá tới ${email}:`, error?.message || error);
+    sendError(res, 502, "Không thể gửi email khuyến mãi. Vui lòng thử lại sau.");
+    return;
+  }
+
+  await subscribers.updateOne(
+    { email },
+    {
+      $set: {
+        email,
+        phone,
+        couponCode: coupon.code,
+        status: "active",
+        lastSentAt: now,
+        updatedAt: now,
+        ip: req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "",
+        userAgent: req.headers["user-agent"] || "",
+      },
+      $inc: { emailSentCount: 1 },
+      $setOnInsert: { createdAt: now },
+    },
+    { upsert: true }
+  );
+
+  sendJson(res, 200, {
+    ok: true,
+    message: "Đăng ký thành công. Mã giảm giá đã được gửi về email của bạn.",
+    data: {
+      email,
+      coupon: normalizeCouponForPublic(coupon, 0),
+      code: couponCode,
+    },
+  });
+}
+
 async function handleCouponApply(req, res) {
-  const { coupons } = await getDb();
+  const { db, coupons } = await getDb();
   await ensureCouponIndexes(coupons);
 
   const body = await parseJsonBody(req);
@@ -5097,7 +6249,17 @@ async function handleCouponApply(req, res) {
     return;
   }
 
-  const discount = computeCouponDiscount(coupon, { subtotal, shippingFee });
+  const baseTotals = { subtotal, shippingFee };
+  const reason = getCouponInvalidReason(coupon, baseTotals, {
+    member: await getCouponMember(req, db),
+    educationOffer: Boolean(body.educationOffer),
+  });
+  if (reason) {
+    sendError(res, 400, reason);
+    return;
+  }
+
+  const discount = computeCouponDiscount(coupon, baseTotals);
   if (discount <= 0) {
     sendError(res, 400, "Đơn hàng chưa đủ điều kiện áp dụng mã giảm giá.");
     return;
@@ -5116,7 +6278,7 @@ async function handleCouponApply(req, res) {
 }
 
 async function handleCouponValidate(req, res) {
-  const { coupons, productDetails, products } = await getDb();
+  const { db, coupons, productDetails, products } = await getDb();
   const body = await parseJsonBody(req);
   const code = cleanLimitedText(body.code || body.couponCode || body.coupon?.code, 80).toUpperCase();
 
@@ -5127,6 +6289,7 @@ async function handleCouponValidate(req, res) {
 
   let subtotal = cleanCartPrice(body.subtotal || body.totals?.subtotal || body.total);
   let shippingFee = cleanCartPrice(body.shippingFee || body.totals?.shippingFee);
+  const couponMember = await getCouponMember(req, db);
 
   if (Array.isArray(body.items) && body.items.length) {
     try {
@@ -5135,6 +6298,7 @@ async function handleCouponValidate(req, res) {
         products,
         coupons,
         body: { ...body, couponCode: code },
+        couponContext: { member: couponMember },
       });
       if (preview.couponError) {
         sendError(res, 400, preview.couponError);
@@ -5161,7 +6325,10 @@ async function handleCouponValidate(req, res) {
 
   const coupon = await findActiveCoupon(coupons, code);
   const baseTotals = { subtotal, shippingFee };
-  const reason = getCouponInvalidReason(coupon, baseTotals);
+  const reason = getCouponInvalidReason(coupon, baseTotals, {
+    member: couponMember,
+    educationOffer: Boolean(body.educationOffer),
+  });
   if (reason) {
     sendError(res, 400, reason);
     return;
@@ -5186,34 +6353,64 @@ async function handleCouponValidate(req, res) {
   });
 }
 
-async function handleCouponsAvailable(req, res) {
-  const { coupons } = await getDb();
+async function findAvailableCouponsForMember(coupons, member, limit = 50) {
   await ensureCouponIndexes(coupons);
   const now = new Date();
+  const eligibleAudiences = getEligibleCouponAudiences(member);
   const docs = await coupons
     .find({
       status: "active",
       $and: [
         { $or: [{ startsAt: { $exists: false } }, { startsAt: null }, { startsAt: { $lte: now } }] },
         { $or: [{ expiresAt: { $exists: false } }, { expiresAt: null }, { expiresAt: { $gte: now } }] },
+        {
+          $or: [
+            { audiences: { $exists: false } },
+            { audiences: null },
+            { audiences: { $size: 0 } },
+            { audiences: { $in: eligibleAudiences } },
+          ],
+        },
       ],
     })
     .sort({ expiresAt: 1, createdAt: -1 })
-    .limit(50)
+    .limit(limit)
     .toArray();
+
+  return docs.filter((coupon) => !getCouponAvailabilityInvalidReason(coupon, { member }));
+}
+
+async function handleCouponsAvailable(req, res) {
+  const { db, coupons } = await getDb();
+  const member = await getCouponMember(req, db);
+  const eligibleDocs = await findAvailableCouponsForMember(coupons, member);
 
   sendJson(res, 200, {
     ok: true,
-    data: docs.map((coupon) => normalizeCouponForPublic(coupon, 0)),
+    data: eligibleDocs.map((coupon) => normalizeCouponForPublic(coupon, 0)),
   });
 }
 
 async function handleCheckoutPreview(req, res) {
-  const { coupons, productDetails, products } = await getDb();
+  const { db, coupons, productDetails, products } = await getDb();
   const body = await parseJsonBody(req);
 
   try {
-    const preview = await buildCheckoutPreview({ productDetails, products, coupons, body });
+    const couponMember = await getCouponMember(req, db);
+    if (body.educationOffer) {
+      const education = couponMember?.educationVerification || {};
+      if (education.status !== "verified" || (education.expiresAt && new Date(education.expiresAt) <= new Date())) {
+        sendError(res, 403, "Tài khoản chưa xác minh S-Student/S-Teacher hoặc xác minh đã hết hạn.");
+        return;
+      }
+    }
+    const preview = await buildCheckoutPreview({
+      productDetails,
+      products,
+      coupons,
+      body,
+      couponContext: { member: couponMember },
+    });
     sendJson(res, 200, {
       ok: true,
       message: "Đã tính lại giỏ hàng từ dữ liệu MongoDB.",
@@ -5663,6 +6860,16 @@ async function routeRequest(req, res) {
     return;
   }
 
+  if (pathParts[1] === "newsletter" && pathParts[2] === "subscribe") {
+    await handleNewsletterSubscribe(req, res);
+    return;
+  }
+
+  if (pathParts[1] === "support-requests") {
+    await handleCreateSupportRequest(req, res);
+    return;
+  }
+
   if (pathParts[1] === "coupons" && pathParts[2] === "apply" && req.method === "POST") {
     await handleCouponApply(req, res);
     return;
@@ -5780,6 +6987,7 @@ async function routeRequest(req, res) {
 }
 
 const server = http.createServer((req, res) => {
+  prepareCorsResponse(req, res);
   routeRequest(req, res).catch((error) => {
     console.error("[api]", error);
     sendError(res, 500, "Internal server error.", error.message);

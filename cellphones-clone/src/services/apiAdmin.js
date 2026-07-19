@@ -41,6 +41,24 @@ export async function fetchAdminSummary() {
   return payload.data;
 }
 
+export async function fetchAdminBusinessVerifications(params = {}) {
+  const payload = await adminRequest('/api/admin/business-verifications', {
+    params: {
+      limit: 50,
+      ...params,
+    },
+  });
+  return payload;
+}
+
+export async function updateAdminBusinessVerification(userId, body) {
+  const payload = await adminRequest(`/api/admin/business-verifications/${encodeURIComponent(userId)}`, {
+    method: 'PATCH',
+    body,
+  });
+  return payload.data;
+}
+
 export async function fetchAdminUsers(params = {}) {
   const payload = await adminRequest('/api/admin/users', { params });
   return payload;
@@ -320,6 +338,31 @@ export async function updateAdminReturn(returnId, body) {
 
 export async function deleteAdminReturn(returnId) {
   const payload = await adminRequest(`/api/admin/returns/${encodeURIComponent(returnId)}`, {
+    method: 'DELETE',
+  });
+  return payload.deleted;
+}
+
+export async function fetchAdminSupportRequests(params = {}) {
+  const payload = await adminRequest('/api/admin/support-requests', {
+    params: {
+      limit: 50,
+      ...params,
+    },
+  });
+  return payload;
+}
+
+export async function updateAdminSupportRequest(identifier, body) {
+  const payload = await adminRequest(`/api/admin/support-requests/${encodeURIComponent(identifier)}`, {
+    method: 'PATCH',
+    body,
+  });
+  return payload.data;
+}
+
+export async function deleteAdminSupportRequest(identifier) {
+  const payload = await adminRequest(`/api/admin/support-requests/${encodeURIComponent(identifier)}`, {
     method: 'DELETE',
   });
   return payload.deleted;
