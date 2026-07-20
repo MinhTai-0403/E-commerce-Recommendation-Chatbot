@@ -134,7 +134,7 @@ export const directInfoRoutes = {
 };
 
 const directLabelRoutes = [
-  { keywords: ['mua hang va thanh toan online', 'chinh sach mua hang'], path: '/chinh-sach-giao-hang' },
+  { keywords: ['mua hang va thanh toan online', 'chinh sach mua hang'], path: '/chinh-sach/mua-hang-va-thanh-toan-online' },
   { keywords: ['mua hang tra gop bang the tin dung', 'tra gop bang the tin dung'], path: '/huong-dan-mua-hang-tra-gop-bang-the-tin-dung-tai-cellphones' },
   { keywords: ['mua hang tra gop', 'tra gop'], path: '/tra-gop' },
   { keywords: ['chinh sach giao hang', 'giao hang'], path: '/chinh-sach-giao-hang' },

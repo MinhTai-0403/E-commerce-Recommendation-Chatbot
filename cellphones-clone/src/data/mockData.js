@@ -91,7 +91,7 @@ export const heroSliderTabs = [
 export const heroSlides = [
   {
     id: 1,
-    image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:1036:450/q:100/plain/https://media-asset.cellphones.com.vn/dashboard-v1/manage-banner/KTBD-Home-6.png',
+    image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:1036:450/q:100/plain/https://media-asset.cellphones.com.vn/dashboard-v1/manage-banner/Home_s26_0626_2.png',
     bgColor: '#f0f0f0',
     href: '/category/khuyen-mai?keyword=Khai+tr%C6%B0%C6%A1ng&category=Khuy%E1%BA%BFn+m%C3%A3i&title=%C6%AFu+%C4%91%C3%A3i+khai+tr%C6%B0%C6%A1ng',
     title: 'Xem ưu đãi khai trương',

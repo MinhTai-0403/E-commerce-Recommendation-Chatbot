@@ -10,6 +10,9 @@ const {
   verifyJwt,
 } = require("../services/auth-service");
 const { ensureCommerceDatabase } = require("../services/db-maintenance");
+const {
+  searchCellphoneStores,
+} = require("../services/google-places-store-service");
 const { extractCellphonesDetails } = require("../cellphones/cellphones-detail-extractor");
 const { createMongoClient, getMongoConfig } = require("../config/mongodb");
 const { rateLimitOrSend } = require("../middlewares/rate-limit");
@@ -847,6 +850,159 @@ function buildNetworkTopicCondition(value = "") {
     : includeCondition;
 }
 
+function buildPcTopicCondition(value = "") {
+  const key = normalizeSearchKey(value).replace(/[^a-z0-9]+/g, "-");
+  const fields = [
+    "name",
+    "slug",
+    "sku",
+    "categoryTrail.name",
+    "categoryTrail.label",
+    "trainingLabels.productName",
+    "trainingLabels.deviceGroup",
+  ];
+  const rules = {
+    "build-pc": /^(?:pc cps|pc gaming cps|pc đồ họa cps|pc do hoa cps|pc workstation)/i,
+    "cau-hinh-san": /^(?:pc|máy tính để bàn|may tinh de ban|desktop)(?:[\s-]|$)/i,
+    "all-in-one": /(?:^|[\s-])(?:all[\s-]*in[\s-]*one|aio|imac)(?:[\s-]|$)/i,
+    "pc-bo": /^(?:pc|máy tính để bàn|may tinh de ban|desktop)(?:[\s-]|$)/i,
+    gaming: /^(?:pc|máy tính để bàn|may tinh de ban).{0,48}(?:gaming|chơi game|choi game)|^pc gaming$/i,
+    "do-hoa": /^(?:pc|máy tính để bàn|may tinh de ban).{0,48}(?:đồ họa|do hoa|workstation)|^máy tính đồ họa$/i,
+    "van-phong": /^(?:pc|máy tính để bàn|may tinh de ban).{0,48}(?:văn phòng|van phong|office)|^máy tính văn phòng$/i,
+  };
+  const include = rules[key];
+  if (!include) return null;
+
+  const condition = regexCondition(fields, include);
+  if (key === "all-in-one") return condition;
+
+  return {
+    $and: [
+      condition,
+      { name: { $not: /(?:all[\s-]*in[\s-]*one|\baio\b|\bimac\b|pc mini|mini pc)/i } },
+      { slug: { $not: /(?:all[\s-]*in[\s-]*one|\baio\b|\bimac\b|pc-mini|mini-pc)/i } },
+    ],
+  };
+}
+
+function buildComputerComponentTopicCondition(value = "") {
+  const key = normalizeSearchKey(value).replace(/[^a-z0-9]+/g, "-");
+  const fields = [
+    "name",
+    "slug",
+    "sku",
+    "categoryTrail.name",
+    "categoryTrail.label",
+    "trainingLabels.productName",
+    "trainingLabels.deviceGroup",
+  ];
+  const rules = {
+    cpu: /^(?:cpu|bộ vi xử lý|bo vi xu ly|processor)(?:[\s-]|$)/i,
+    main: /^(?:mainboard|main board|bo mạch chủ|bo mach chu|main)(?:[\s-]|$)/i,
+    ram: /^(?:ram|bộ nhớ ram|bo nho ram)(?:[\s-]|$)/i,
+    "o-cung": /^(?:ổ cứng|o cung|ssd|hdd|solid state drive)(?:[\s-]|$)/i,
+    nguon: /^(?:nguồn máy tính|nguon may tinh|psu|power supply)(?:[\s-]|$)/i,
+    vga: /^(?:vga|card màn hình|card man hinh|graphics card|gpu)(?:[\s-]|$)/i,
+    "tan-nhiet": /^(?:tản nhiệt|tan nhiet|quạt tản nhiệt|quat tan nhiet|fan case|keo tản nhiệt|keo tan nhiet|cpu cooler)(?:[\s-]|$)/i,
+    case: /^(?:case máy tính|case may tinh|vỏ case|vo case|thùng máy|thung may|computer case)(?:[\s-]|$)/i,
+  };
+  const include = rules[key];
+  if (!include) return null;
+
+  const includeCondition = regexCondition(fields, include);
+  const excludes = {
+    "o-cung": /^(?:hộp|hop|box|dock|case|khay|thay|sửa|sua)(?:[\s-]|$)/i,
+    "tan-nhiet": /^(?:ốp|op|bao da|dán|dan|đế tản nhiệt laptop|de tan nhiet laptop)(?:[\s-]|$)/i,
+  };
+  const exclude = excludes[key];
+  return exclude
+    ? { $and: [includeCondition, { name: { $not: exclude } }, { slug: { $not: exclude } }] }
+    : includeCondition;
+}
+
+function buildMonitorTopicCondition(value = "") {
+  const key = normalizeSearchKey(value).replace(/[^a-z0-9]+/g, "-");
+  const fields = [
+    "name",
+    "slug",
+    "categoryTrail.name",
+    "categoryTrail.label",
+    "trainingLabels.productName",
+    "trainingLabels.deviceGroup",
+    "trainingLabels.labelPathText",
+  ];
+  const rules = {
+    gaming: /^(?:màn hình|man hinh|monitor).{0,56}(?:gaming|chơi game|choi game)|^màn hình gaming$/i,
+    "van-phong": /^(?:màn hình|man hinh|monitor).{0,56}(?:văn phòng|van phong|office)|^màn hình văn phòng$/i,
+    "do-hoa": /^(?:màn hình|man hinh|monitor).{0,56}(?:đồ họa|do hoa|designer|creator)|^màn hình đồ họa$/i,
+    "lap-trinh": /^(?:màn hình|man hinh|monitor).{0,56}(?:lập trình|lap trinh|coding|programming)|^màn hình lập trình$/i,
+    "man-hinh-di-dong": /^(?:màn hình di động|man hinh di dong|portable monitor)(?:[\s-]|$)/i,
+    "arm-man-hinh": /^(?:arm màn hình|arm man hinh|giá treo màn hình|gia treo man hinh|tay đỡ màn hình|tay do man hinh|monitor arm)(?:[\s-]|$)/i,
+  };
+  const include = rules[key];
+  return include ? regexCondition(fields, include) : null;
+}
+
+function buildGamingGearTopicCondition(value = "") {
+  const key = normalizeSearchKey(value).replace(/[^a-z0-9]+/g, "-");
+  const fields = ["name", "slug", "sku", "categoryTrail.name", "categoryTrail.label", "trainingLabels.productName"];
+  const rules = {
+    playstation: /(?:^|[\s-])(?:playstation|ps[345])(?:[\s-]|$)/i,
+    "rog-ally": /(?:^|[\s-])rog ally(?:[\s-]|$)/i,
+    "ban-phim-gaming": /^(?:bàn phím|ban phim|keyboard).{0,56}(?:gaming|game|esport)/i,
+    "chuot-choi-game": /^(?:chuột|chuot|mouse).{0,48}(?:gaming|chơi game|choi game|game)/i,
+    "tai-nghe-gaming": /^(?:tai nghe|headset|headphone).{0,56}(?:gaming|game|esport)/i,
+    "tay-cam-choi-game": /^(?:tay cầm|tay cam|gamepad|controller).{0,48}(?:gaming|chơi game|choi game|game)|^(?:gamepad|gaming controller)/i,
+  };
+  const include = rules[key];
+  if (!include) return null;
+
+  const topicAccessoryExclusion = key === "rog-ally"
+    ? /^(?:hộp|hop|túi|tui|bao|ốp|op|phụ kiện|phu kien|dán|dan|kính|kinh)(?:[\s-]|$)/i
+    : /^(?:bàn di chuột|ban di chuot|lót chuột|lot chuot|mouse ?pad|ốp|op|bao da)(?:[\s-]|$)/i;
+
+  return {
+    $and: [
+      regexCondition(fields, include),
+      { name: { $not: topicAccessoryExclusion } },
+      { slug: { $not: /^(?:ban-di-chuot|lot-chuot|mouse-?pad|op-lung|bao-da)(?:-|$)/i } },
+    ],
+  };
+}
+
+function buildOfficeDeviceTopicCondition(value = "") {
+  const key = normalizeSearchKey(value).replace(/[^a-z0-9]+/g, "-");
+  const fields = [
+    "name",
+    "slug",
+    "sku",
+    "categoryTrail.name",
+    "categoryTrail.label",
+    "trainingLabels.productName",
+    "trainingLabels.deviceGroup",
+  ];
+  const rules = {
+    "may-in": /^(?:máy in|may in|printer)(?:[\s-]|$)/i,
+    "phan-mem": /^(?:phần mềm|phan mem|microsoft (?:office|365|windows)|office (?:home|personal|professional)|windows 1[01]|antivirus)(?:[\s-]|$)/i,
+    "bang-ve-dien-tu": /^(?:bảng vẽ điện tử|bang ve dien tu|bảng vẽ|bang ve|drawing tablet|pen tablet)(?:[\s-]|$)/i,
+    "may-tinh-cam-tay": /^(?:máy tính cầm tay|may tinh cam tay|máy tính casio|may tinh casio|casio (?:fx|dc|gx)|calculator)(?:[\s-]|$)/i,
+    "decor-ban-lam-viec": /^(?:decor bàn làm việc|decor ban lam viec|bảng treo đồ|bang treo do|đèn bàn|den ban|kệ bàn|ke ban|desk decor|desk organizer)(?:[\s-]|$)/i,
+  };
+  const include = rules[key];
+  if (!include) return null;
+
+  const includeCondition = regexCondition(fields, include);
+  if (key !== "may-in") return includeCondition;
+
+  return {
+    $and: [
+      includeCondition,
+      { name: { $not: /^(?:mực|muc|toner|hộp mực|hop muc|cartridge|drum)(?:[\s-]|$)/i } },
+      { slug: { $not: /^(?:muc|toner|hop-muc|cartridge|drum)(?:-|$)/i } },
+    ],
+  };
+}
+
 function buildListQuery(searchParams) {
   const query = {};
   const source = searchParams.get("source") || "all";
@@ -882,8 +1038,9 @@ function buildListQuery(searchParams) {
 
   if (source !== "all") query.source = source;
 
+  const categoryKey = normalizeSearchKey(category);
+
   if (q) {
-    const categoryKey = normalizeSearchKey(category);
     const applianceTopicCondition = categoryKey === "do gia dung"
       ? buildApplianceTopicCondition(q)
       : null;
@@ -893,11 +1050,31 @@ function buildListQuery(searchParams) {
     const networkTopicCondition = categoryKey === "thiet bi mang"
       ? buildNetworkTopicCondition(q)
       : null;
+    const pcTopicCondition = categoryKey === "pc"
+      ? buildPcTopicCondition(q)
+      : null;
+    const componentTopicCondition = categoryKey === "linh kien may tinh"
+      ? buildComputerComponentTopicCondition(q)
+      : null;
+    const monitorTopicCondition = categoryKey === "man hinh"
+      ? buildMonitorTopicCondition(q)
+      : null;
+    const gamingGearTopicCondition = categoryKey === "gaming gear"
+      ? buildGamingGearTopicCondition(q)
+      : null;
+    const officeDeviceTopicCondition = categoryKey === "thiet bi van phong"
+      ? buildOfficeDeviceTopicCondition(q)
+      : null;
     Object.assign(
       query,
       applianceTopicCondition
         || accessoryTopicCondition
         || networkTopicCondition
+        || pcTopicCondition
+        || componentTopicCondition
+        || monitorTopicCondition
+        || gamingGearTopicCondition
+        || officeDeviceTopicCondition
         || buildProductSearchCondition(q)
     );
   }
@@ -908,7 +1085,22 @@ function buildListQuery(searchParams) {
       ? { $or: requestedCategories.map((item) => buildCategoryCondition(item)) }
       : buildCategoryCondition(category));
   }
-  if (brand && brand !== "all") appendAndCondition(query, buildBrandCondition(brand));
+  if (brand && brand !== "all") {
+    const categoriesWithReliableBrandInName = new Set([
+      "man hinh",
+      "tivi",
+      "tu lanh",
+      "may giat",
+      "dieu hoa - may lanh",
+    ]);
+    const brandCondition = categoriesWithReliableBrandInName.has(categoryKey)
+      ? regexCondition(
+        ["name", "slug", "trainingLabels.productName", "rawProductJsonLd.name"],
+        createBrandRegex(brand)
+      )
+      : buildBrandCondition(brand);
+    appendAndCondition(query, brandCondition);
+  }
   if (segment) appendAndCondition(query, buildSegmentCondition(segment));
   // `facet` identifies the filter group opened by the UI. Once an exact value
   // is selected (for example ram=8GB RAM), the indexed `facets.*` condition
@@ -1336,7 +1528,11 @@ function buildProductTypeCondition(productType = "") {
       exclude: /dự phòng|du phong|power ?bank|flash drive|usb sandisk|ổ cứng|o cung|thẻ nhớ|the nho|microphone|mic thu âm|mic thu am/i,
     },
     "chuot-ban-phim": {
-      include: /chuột|chuot|mouse|bàn phím|ban phim|keyboard/i,
+      // Classify the item itself. Tablets whose title merely ends in
+      // "kèm bàn phím" must not become keyboard products.
+      identityInclude: /^(?:(?:chuột|chuot|mouse|bàn phím|ban[- ]phim|keyboard)(?:[\s-]|$)|(?:combo|bộ|bo)[\s-]+(?:chuột|chuot|mouse|bàn phím|ban[- ]phim|keyboard))/i,
+      requireIdentity: true,
+      exclude: /^(?:máy tính bảng|may[- ]tinh[- ]bang|tablet|ipad|điện thoại|dien[- ]thoai|laptop)(?:[\s-]|$)/i,
     },
     "sac-du-phong": {
       include: /sạc dự phòng|sac du phong|pin dự phòng|pin du phong|power ?bank/i,
@@ -1348,11 +1544,13 @@ function buildProductTypeCondition(productType = "") {
       identityInclude: /(?:^|[\s-])(camera|webcam|gimbal|flycam|dji osmo|máy quay|may quay|insta360)(?:$|[\s-])/i,
       categoryInclude: /^(?:camera|camera an ninh|camera hành trình|camera hanh trinh|webcam|gimbal|flycam|máy quay|may quay)$/i,
       requireIdentity: true,
-      exclude: /ốp lưng|op lung|bao da|\bcase\b|housing|vỏ bảo vệ|vo bao ve|(?:^|[- ])dán(?:$|[- ])|(?:^|[- ])dan(?:$|[- ])|miếng dán|mieng dan|kính cường lực|kinh cuong luc|bảo vệ camera|bao ve camera|viền camera|vien camera|camera control|sticker|thẻ nhớ|the nho|memory card|lens dành|lens danh|ống kính|ong kinh/i,
+      exclude: /ốp lưng|op lung|bao da|\bcase\b|housing|vỏ bảo vệ|vo bao ve|(?:^|[- ])dán(?:$|[- ])|(?:^|[- ])dan(?:$|[- ])|miếng dán|mieng dan|kính cường lực|kinh cuong luc|bảo vệ camera|bao ve camera|viền camera|vien camera|camera control|sticker|thẻ nhớ|the nho|memory card|lens dành|lens danh|ống kính|ong kinh|thay camera|sửa camera|sua camera|camera sau iphone|camera trước iphone|camera truoc iphone/i,
     },
     "phu-kien-apple": {
       // MagSafe alone is not enough: many Samsung/Android cases also carry it.
-      include: /airtag|airpods|apple pencil|apple watch|magic keyboard|magic mouse|phụ kiện apple|phu kien apple|phụ kiện iphone|phu kien iphone|phụ kiện ipad|phu kien ipad|iphone|ipad|macbook/i,
+      identityInclude: /^(?:airtag|apple pencil|magic keyboard|magic mouse|phụ kiện apple|phu[- ]kien[- ]apple|phụ kiện iphone|phu[- ]kien[- ]iphone|phụ kiện ipad|phu[- ]kien[- ]ipad|(?:cáp|cap|sạc|sac|adapter|ốp|op|bao da|dán|dan|kính|kinh|hub|dock|bàn phím|ban[- ]phim|chuột|chuot).{0,64}(?:apple|iphone|ipad|macbook))(?=[\s-]|$)/i,
+      requireIdentity: true,
+      exclude: /^(?:airpods|tai nghe|apple watch|iphone|ipad|macbook|apple\s*care\+?|applecare\+?)(?:[\s-]|$)/i,
     },
     "phu-kien-tien-ich": {
       // Use lamp phrases instead of a bare "den" token; product slugs cannot
@@ -1979,6 +2177,7 @@ function buildCategoryCondition(category = "") {
   const escaped = escapeRegex(text);
   const aliasCategories = {
     "do gia dung": ["Đồ gia dụng", "Nhà thông minh", "Apple TV"],
+    pc: ["PC", "Máy tính để bàn"],
   };
 
   if (key === "hang cu") {
@@ -2009,6 +2208,41 @@ function buildCategoryCondition(category = "") {
       "trainingLabels.deviceGroup",
       "trainingLabels.productName",
     ], /phụ kiện|phu kien|ốp lưng|op lung|bao da|dán màn hình|dan man hinh|kính cường lực|kinh cuong luc|cáp|cap|sạc|sac|adapter|pin dự phòng|pin du phong|power ?bank|thẻ nhớ|the nho|memory card|micro ?sd|usb|ổ cứng|o cung|ssd|hdd|hub|dock|chuột|chuot|mouse|bàn phím|ban phim|keyboard|balo|túi chống sốc|tui chong soc|webcam|router|wi-?fi|card mạng|card mang|sim(?: 4g| 5g)?|gimbal|tay cầm|tay cam|dây đeo|day deo|bút cảm ứng|but cam ung|playstation|rog ally|quạt mini|quat mini|kính thông minh|kinh thong minh/i);
+  }
+
+  if (key === "gaming gear") {
+    const gamingIdentityFields = [
+      "name",
+      "slug",
+      "sku",
+      "category",
+      "categories",
+      "categoryTrail.name",
+      "categoryTrail.label",
+      "trainingLabels.productName",
+      "trainingLabels.deviceGroup",
+    ];
+    return {
+      $and: [
+        regexCondition(gamingIdentityFields, /(?:^|[\s-])(?:playstation|ps[345]|rog ally)(?:[\s-]|$)|^(?:bàn phím|ban phim|keyboard|chuột|chuot|mouse|tai nghe|headset|headphone|tay cầm|tay cam|gamepad|controller).{0,56}(?:gaming|chơi game|choi game|game|esport)/i),
+        { name: { $not: /^(?:màn hình|man hinh|laptop|điện thoại|dien thoai|bàn di chuột|ban di chuot|lót chuột|lot chuot|mouse ?pad|ốp|op|bao da)(?:[\s-]|$)/i } },
+        { slug: { $not: /^(?:man-hinh|laptop|dien-thoai|ban-di-chuot|lot-chuot|mouse-?pad|op-lung|bao-da)(?:-|$)/i } },
+      ],
+    };
+  }
+
+  if (key === "thiet bi van phong") {
+    return regexCondition([
+      "name",
+      "slug",
+      "sku",
+      "category",
+      "categories",
+      "categoryTrail.name",
+      "categoryTrail.label",
+      "trainingLabels.productName",
+      "trainingLabels.deviceGroup",
+    ], /^(?:máy in|may in|printer|phần mềm|phan mem|microsoft (?:office|365|windows)|office (?:home|personal|professional)|windows 1[01]|antivirus|bảng vẽ điện tử|bang ve dien tu|bảng vẽ|bang ve|drawing tablet|pen tablet|máy tính cầm tay|may tinh cam tay|máy tính casio|may tinh casio|casio (?:fx|dc|gx)|calculator|decor bàn làm việc|decor ban lam viec|bảng treo đồ|bang treo do|đèn bàn|den ban|kệ bàn|ke ban|desk decor|desk organizer)(?:[\s-]|$)/i);
   }
 
   const exactOnlyCategories = new Set([
@@ -2195,6 +2429,27 @@ function buildSegmentCondition(segment = "") {
     return { "facets.batteryCapacityMah": { $gte: LONG_BATTERY_PHONE_MIN_MAH } };
   }
 
+  if (key === "monitor-pc") {
+    return {
+      $and: [
+        {
+          $or: [
+            buildSegmentCondition("monitor"),
+            buildSegmentCondition("pc-gaming"),
+          ],
+        },
+        {
+          $nor: [
+            regexCondition(
+              ["name", "slug", "category", "categories", "categoryTrail.name", "categoryTrail.label"],
+              /hàng cũ|hang cu|cũ đẹp|cu dep|cũ trầy xước|cu tray xuoc|like new|like-new|đã kích hoạt|da kich hoat|trưng bày|trung bay|qua sử dụng|qua su dung|refurbished/i
+            ),
+          ],
+        },
+      ],
+    };
+  }
+
   const fields = [
     "name",
     "slug",
@@ -2255,14 +2510,25 @@ function buildSegmentCondition(segment = "") {
   }
 
   if (key === "pc" || key === "pc-gaming") {
+    const pcIdentityFields = [
+      "name",
+      "slug",
+      "sku",
+      "trainingLabels.productName",
+      "rawProductJsonLd.name",
+    ];
     return {
       $and: [
-        regexCondition(fields, /pc gaming|pc cps|máy tính để bàn|desktop|may tinh de ban/i),
+        // Do not trust inherited category trails here. Several speakers and
+        // coolers were crawled below a PC landing page and therefore carried
+        // the word "PC" in metadata even though the item was not a computer.
+        regexCondition(pcIdentityFields, /^(?:pc(?:[\s-]|$)|pc gaming|pc cps|pc mini|mini pc|máy tính để bàn|may[- ]tinh[- ]de[- ]ban|máy tính aio|may[- ]tinh[- ]aio|desktop|all[- ]in[- ]one)/i),
         {
           $nor: [
             { categories: /Laptop/i },
             { name: /laptop/i },
             { slug: /laptop/i },
+            regexCondition(pcIdentityFields, /^(?:loa|speaker|soundbar|màn hình|man[- ]hinh|monitor|quạt|quat|tản nhiệt|tan[- ]nhiet|ổ cứng|o[- ]cung|ssd|usb|linh kiện|linh[- ]kien|case máy tính|case[- ]may[- ]tinh)(?:[\s-]|$)/i),
           ],
         },
       ],
@@ -2301,21 +2567,30 @@ function buildSegmentCondition(segment = "") {
       categoryInclude: /^(?:dán màn hình|dan man hinh|kính cường lực|kinh cuong luc)$/i,
     },
     "memory-usb": {
-      identityInclude: /(?:^|[\s-])(?:thẻ nhớ|the nho|usb|ổ cứng|o cung|ssd|memory card|sd card|microsd|flash drive)(?:$|[\s-])/i,
-      categoryInclude: /^(?:thẻ nhớ|the nho|usb|ổ cứng|o cung|ssd)$/i,
-      exclude: /hub|dock|cổng chuyển|cong chuyen/i,
+      // A bare "USB" token also matches chargers, cables, laptops and
+      // headphones. Require a storage product at the start of its identity,
+      // or an exact storage category produced by the crawler.
+      identityInclude: /^(?:thẻ nhớ|the[- ]nho|memory card|micro[- ]?sd|sdxc|sdhc|cfexpress|flash drive|usb (?:sandisk|kingston|transcend|lexar|pny|samsung|teamgroup)|ổ cứng di động|o[- ]cung[- ]di[- ]dong|(?:ssd|hdd) (?:di động|portable))(?=[\s-]|$)/i,
+      categoryInclude: /^(?:thẻ nhớ(?:, usb)?|the nho(?:, usb)?|usb)$/i,
+      exclude: /^(?:sạc|sac|củ sạc|cu[- ]sac|cáp|cap|hub|dock|bộ chuyển|bo[- ]chuyen|wifi|wi-fi|bluetooth|laptop|tai nghe|headphone|thay ổ cứng|thay[- ]o[- ]cung|nâng cấp|nang[- ]cap|hộp|hop|box|case|khay|enclosure)(?:[\s-]|$)|(?:usb wifi|usb bluetooth|usb type-c to|usb-c to)/i,
     },
     "gaming-gear": {
-      identityInclude: /gaming gear|playstation|ps5|tay cầm|tay cam|bàn phím|ban phim|chuột|chuot|controller|gamepad|console/i,
+      identityInclude: /^(?:(?:gaming gear|playstation|ps[45]|xbox|nintendo|console|tay cầm|tay[- ]cam|controller|gamepad)(?:[\s-]|$)|(?:bàn phím|ban[- ]phim|keyboard|chuột|chuot|mouse|tai nghe|headset).{0,48}(?:gaming|game|esport|playstation|xbox))/i,
       categoryInclude: /^(?:gaming gear|playstation|tay cầm chơi game|tay cam choi game)$/i,
+      requireIdentity: true,
+      exclude: /^(?:máy tính bảng|may[- ]tinh[- ]bang|tablet|ipad|laptop|màn hình|man[- ]hinh|monitor)(?:[\s-]|$)/i,
     },
     sim: {
-      identityInclude: /(?:^|[\s-])(?:sim|esim)(?:$|[\s-])|sim 4g|sim 5g|sim data/i,
+      identityInclude: /^(?:(?:sim|esim)(?:[\s-]|$)|gói sim|goi[- ]sim|thẻ sim|the[- ]sim)/i,
       categoryInclude: /^(?:sim|sim 4g|sim 5g)$/i,
+      requireIdentity: true,
+      exclude: /^(?:iphone|điện thoại|dien[- ]thoai|smartphone|camera|máy tính bảng|may[- ]tinh[- ]bang|tablet)(?:[\s-]|$)/i,
     },
     network: {
-      identityInclude: /router|wifi|wi-?fi|mesh|modem|bộ phát|bo phat|repeater|access point|mở rộng sóng|mo rong song/i,
+      identityInclude: /^(?:router|modem|mesh wifi|mesh wi-fi|bộ phát wifi|bo[- ]phat[- ]wifi|bộ phát sóng|bo[- ]phat[- ]song|bộ kích sóng|bo[- ]kich[- ]song|kích sóng|kich[- ]song|repeater|access point|usb wifi|card mạng|card[- ]mang|thiết bị mạng|thiet[- ]bi[- ]mang)(?:[\s-]|$)/i,
       categoryInclude: /^(?:thiết bị mạng|thiet bi mang|router|bộ phát wifi|bo phat wifi)$/i,
+      requireIdentity: true,
+      exclude: /^(?:ipad|máy tính bảng|may[- ]tinh[- ]bang|tablet|laptop|điện thoại|dien[- ]thoai|camera)(?:[\s-]|$)/i,
     },
     gimbal: {
       identityInclude: /(?:^|[\s-])gimbal(?:$|[\s-])|tay cầm chống rung|tay cam chong rung|dji (?:om|osmo mobile)(?:$|[\s-])|stabilizer/i,
@@ -2326,11 +2601,12 @@ function buildSegmentCondition(segment = "") {
       identityInclude: /(?:^|[\s-])(?:flycam|drone)(?:$|[\s-])|dji (?:mini|air|mavic|avata|neo)(?:$|[\s-])/i,
       categoryInclude: /^(?:flycam|drone)$/i,
       requireIdentity: true,
-      exclude: /camera hành động|camera hanh dong|action|osmo|gimbal|goggles|intelligent flight battery|pin flycam|cánh quạt|canh quat|propeller|charging hub|hub sạc|hub sac|remote controller|tay điều khiển|tay dieu khien|phụ kiện|phu kien/i,
+      exclude: /camera hành động|camera hanh dong|action|osmo|gimbal|goggles|intelligent flight battery|pin flycam|cánh quạt|canh quat|propeller|charging hub|hub sạc|hub sac|remote controller|tay điều khiển|tay dieu khien|phụ kiện|phu kien|microphone|micro không dây|micro khong day|\bmic\b/i,
     },
     cameras: {
-      identityInclude: /(?:^|[\s-])máy ảnh(?:$|[\s-])|(?:^|[\s-])may anh(?:$|[\s-])|camera (?:sony|canon|nikon|fujifilm)/i,
-      exclude: /máy in ảnh|may in anh|phim|phụ kiện|phu kien|lens|ống kính|ong kinh/i,
+      identityInclude: /^(?:máy ảnh|may[- ]anh|camera (?:sony|canon|nikon|fujifilm|panasonic|leica))(?=[\s-]|$)/i,
+      requireIdentity: true,
+      exclude: /máy in ảnh|may in anh|phim|phụ kiện|phu kien|lens|ống kính|ong kinh|dây đeo|day[- ]deo|strap|thay camera|sửa camera|sua camera/i,
     },
     bags: {
       identityInclude: /(?:^|[\s-])(?:balo|ba lô|túi xách|tui xach|túi chống sốc|tui chong soc|backpack)(?:$|[\s-])/i,
@@ -2345,6 +2621,8 @@ function buildSegmentCondition(segment = "") {
     },
     "laptop-accessories": {
       identityInclude: /phụ kiện laptop|phu kien laptop|balo|túi chống sốc|tui chong soc|chuột|chuot|bàn phím|ban phim|hub|dock|đế tản nhiệt|de tan nhiet/i,
+      requireIdentity: true,
+      exclude: /^(?:máy tính bảng|may[- ]tinh[- ]bang|tablet|ipad|laptop|điện thoại|dien[- ]thoai)(?:[\s-]|$)/i,
     },
   };
   const accessoryRule = accessorySegmentRules[key];
@@ -2363,7 +2641,7 @@ function buildSegmentCondition(segment = "") {
     return conditions.length === 1 ? conditions[0] : { $and: conditions };
   }
 
-  const usedIdentityFields = [
+  const usedCommonFields = [
     "name",
     "slug",
     "category",
@@ -2375,27 +2653,58 @@ function buildSegmentCondition(segment = "") {
     "trainingLabels.deviceGroup",
     "trainingLabels.productName",
   ];
+  const usedProductIdentityFields = [
+    "name",
+    "slug",
+    "sku",
+    "trainingLabels.productName",
+    "rawProductJsonLd.name",
+  ];
   const usedCommonRegex = /hàng cũ|hang cu|cũ đẹp|cu dep|cũ trầy xước|cu tray xuoc|like new|like-new|đã kích hoạt|da kich hoat|trưng bày|trung bay|qua sử dụng|qua su dung|refurbished/i;
-  const usedSegmentRegexes = {
-    "used-phone": /điện thoại|dien thoai|iphone|samsung|galaxy|xiaomi|oppo|honor|realme|phone|smartphone/i,
-    "used-tablet": /tablet|máy tính bảng|may tinh bang|ipad/i,
-    "used-macbook": /macbook|mac book|mac/i,
-    "used-laptop": /laptop|notebook|asus|lenovo|hp|dell|acer|msi/i,
-    "used-headphones": /tai nghe|headphone|earphone|airpods|buds/i,
-    "used-speaker": /loa|speaker|jbl|marshall/i,
-    "used-watch": /đồng hồ|dong ho|watch|apple watch|galaxy watch|garmin|amazfit/i,
-    "used-appliance": /đồ gia dụng|do gia dung|tủ lạnh|tu lanh|máy giặt|may giat|máy hút bụi|may hut bui|robot|nồi chiên|noi chien|quạt|quat/i,
-    "used-accessories": /phụ kiện|phu kien|ốp|op lung|bao da|cáp|cap|sạc|sac|pin dự phòng|pin du phong|hub|balo|chuột|chuot|bàn phím|ban phim/i,
-    "used-monitor": /màn hình|man hinh|monitor/i,
-    "used-tv": /tivi|tv|smart tv|smart tivi/i,
-    "used-charger": /cáp sạc|cap sac|cáp|cap|sạc|sac|củ sạc|cu sac|adapter|charger|type-?c|lightning/i,
+  const usedSegmentRules = {
+    "used-phone": {
+      include: /^(?:điện thoại|dien[- ]thoai|iphone|samsung galaxy (?!tab|watch|buds)|xiaomi (?!pad|watch|buds)|redmi (?!watch|buds)|poco|oppo (?!watch|buds)|honor (?!watch|band|pad)|realme (?!watch|buds|pad)|vivo|nubia|google pixel|tecno|infinix)(?:[\s-]|$)/i,
+      exclude: /(?:tablet|máy tính bảng|may[- ]tinh[- ]bang|ipad|watch|đồng hồ|dong[- ]ho|buds|tai nghe|headphone|loa|speaker|ốp lưng|op[- ]lung|bao da|cáp|cap|sạc|sac)/i,
+    },
+    "used-tablet": {
+      include: /^(?:máy tính bảng|may[- ]tinh[- ]bang|tablet|ipad|samsung galaxy tab|huawei matepad|xiaomi pad|redmi pad|lenovo (?:tab|idea tab|yoga tab)|honor pad|oppo pad)(?:[\s-]|$)/i,
+      exclude: /(?:bao da|bàn phím|ban[- ]phim|ốp lưng|op[- ]lung|cáp|cap|sạc|sac)(?:[\s-]|$)/i,
+    },
+    "used-macbook": { include: /^mac ?book(?:[\s-]|$)/i },
+    "used-laptop": {
+      include: /^(?:laptop|notebook|asus (?!rog ally)|lenovo (?:thinkpad|ideapad|yoga|legion|loq)|hp (?:pavilion|probook|elitebook|victus|omen|envy|spectre)|dell (?:inspiron|latitude|vostro|xps|precision|alienware)|acer (?:aspire|swift|nitro|predator)|msi (?:modern|prestige|gaming|stealth|raider|katana|cyborg|creator))(?=[\s-])/i,
+      exclude: /(?:màn hình|man[- ]hinh|monitor|desktop|máy tính để bàn|may[- ]tinh[- ]de[- ]ban|balo|túi|tui|sạc|sac|cáp|cap)/i,
+    },
+    "used-headphones": {
+      include: /^(?:tai nghe|headphone|headset|earphone|earbud|airpods|galaxy buds|redmi buds|realme buds|oppo buds|oneplus buds|freebuds)(?:[\s-]|$)/i,
+      exclude: /^(?:ốp|op|bao|hộp|hop|case|phụ kiện|phu[- ]kien)(?:[\s-]|$)/i,
+    },
+    "used-speaker": { include: /^(?:loa|speaker|soundbar)(?:[\s-]|$)/i },
+    "used-watch": {
+      include: /^(?:đồng hồ|dong[- ]ho|smartwatch|apple watch|samsung galaxy watch|galaxy watch|garmin|amazfit|huawei watch|xiaomi watch|redmi watch|vòng đeo tay|vong[- ]deo[- ]tay|smart ?band)(?:[\s-]|$)/i,
+      exclude: /^(?:dây|day|ốp|op|sạc|sac|cáp|cap|kính|kinh)(?:[\s-]|$)/i,
+    },
+    "used-appliance": {
+      include: /^(?:robot hút bụi|robot[- ]hut[- ]bui|máy hút bụi|may[- ]hut[- ]bui|máy lọc không khí|may[- ]loc[- ]khong[- ]khi|máy hút ẩm|may[- ]hut[- ]am|máy sưởi|may[- ]suoi|máy chiếu|may[- ]chieu|máy massage|may[- ]massage|máy sấy tóc|may[- ]say[- ]toc|máy cạo râu|may[- ]cao[- ]rau|máy rửa mặt|may[- ]rua[- ]mat|máy tăm nước|may[- ]tam[- ]nuoc|máy triệt lông|may[- ]triet[- ]long|máy đo huyết áp|may[- ]do[- ]huyet[- ]ap|nồi|noi|quạt|quat|bếp|bep|tủ lạnh|tu[- ]lanh|cân sức khỏe|can[- ]suc[- ]khoe|bàn ủi|ban[- ]ui|tv box)(?:[\s-]|$)/i,
+      exclude: /^(?:máy tính bảng|may[- ]tinh[- ]bang|máy tính|may[- ]tinh|laptop|điện thoại|dien[- ]thoai|màn hình|man[- ]hinh)(?:[\s-]|$)/i,
+    },
+    "used-accessories": {
+      include: /^(?:phụ kiện|phu[- ]kien|ốp|op[- ]lung|bao da|cáp|cap|sạc|sac|củ sạc|cu[- ]sac|pin dự phòng|pin[- ]du[- ]phong|hub|dock|balo|túi|tui|chuột|chuot|mouse|bàn phím|ban[- ]phim|keyboard|bút cảm ứng|but[- ]cam[- ]ung)(?:[\s-]|$)/i,
+      exclude: /^(?:máy tính bảng|may[- ]tinh[- ]bang|tablet|ipad|macbook|laptop|điện thoại|dien[- ]thoai|tai nghe|headphone|loa|speaker|đồng hồ|dong[- ]ho|watch)(?:[\s-]|$)/i,
+    },
+    "used-monitor": { include: /^(?:màn hình|man[- ]hinh|monitor)(?:[\s-]|$)/i, exclude: /(?:laptop|tablet|điện thoại|dien[- ]thoai)/i },
+    "used-tv": { include: /^(?:tivi|tv|smart tv|smart tivi)(?:[\s-]|$)/i },
+    "used-charger": { include: /^(?:cáp sạc|cap[- ]sac|cáp|cap|sạc|sac|củ sạc|cu[- ]sac|adapter|charger)(?:[\s-]|$)/i },
   };
 
-  if (usedSegmentRegexes[key]) {
+  if (usedSegmentRules[key]) {
+    const rule = usedSegmentRules[key];
+    const subtypeConditions = [regexCondition(usedProductIdentityFields, rule.include)];
+    if (rule.exclude) subtypeConditions.push({ $nor: [regexCondition(usedProductIdentityFields, rule.exclude)] });
     return {
       $and: [
-        regexCondition(usedIdentityFields, usedCommonRegex),
-        regexCondition(usedIdentityFields, usedSegmentRegexes[key]),
+        regexCondition(usedCommonFields, usedCommonRegex),
+        ...subtypeConditions,
       ],
     };
   }
@@ -2751,6 +3060,7 @@ async function handleApiIndex(_req, res) {
     adminAuditLogsCollection,
     endpoints: {
       health: "/api/health",
+      stores: "/api/stores",
       products: "/api/products",
       productDetail: "/api/products/:slug",
       productDetails: "/api/products/:slug/details",
@@ -2784,6 +3094,59 @@ async function handleApiIndex(_req, res) {
       adminAuditLogs: "/api/admin/audit-logs",
     },
   });
+}
+
+async function handleStoresRequest(req, res) {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const latitudeValue = url.searchParams.get("lat");
+  const longitudeValue = url.searchParams.get("lng");
+  const radiusValue = url.searchParams.get("radius");
+
+  try {
+    const result = await searchCellphoneStores({
+      province:
+        url.searchParams.get("province") ||
+        url.searchParams.get("city") ||
+        "Hồ Chí Minh",
+      district: url.searchParams.get("district") || "",
+      query:
+        url.searchParams.get("q") ||
+        url.searchParams.get("query") ||
+        "",
+      pageSize: toPositiveInt(url.searchParams.get("pageSize"), 20, 20),
+      maxPages: toPositiveInt(url.searchParams.get("maxPages"), 3, 3),
+      latitude:
+        latitudeValue === null || latitudeValue === ""
+          ? undefined
+          : Number(latitudeValue),
+      longitude:
+        longitudeValue === null || longitudeValue === ""
+          ? undefined
+          : Number(longitudeValue),
+      radius:
+        radiusValue === null || radiusValue === ""
+          ? undefined
+          : Number(radiusValue),
+      forceRefresh: url.searchParams.get("refresh") === "true",
+    });
+    const { stores, ...meta } = result;
+
+    sendJson(res, 200, {
+      ok: true,
+      data: stores,
+      message: "Đã tải danh sách cửa hàng CellphoneS.",
+      meta,
+    });
+  } catch (error) {
+    const statusCode = Number(error?.statusCode);
+    sendError(
+      res,
+      Number.isInteger(statusCode) && statusCode >= 400 && statusCode < 600
+        ? statusCode
+        : 502,
+      error?.message || "Không thể tải danh sách cửa hàng CellphoneS.",
+    );
+  }
 }
 
 async function handleListProducts(req, res) {
@@ -6786,6 +7149,16 @@ async function routeRequest(req, res) {
 
   if (pathParts[1] === "health" && req.method === "GET") {
     await handleHealth(req, res);
+    return;
+  }
+
+  if (pathParts[1] === "stores") {
+    if (req.method !== "GET") {
+      sendError(res, 405, "Method not allowed.");
+      return;
+    }
+
+    await handleStoresRequest(req, res);
     return;
   }
 

@@ -1,5 +1,5 @@
 const policyLinks = [
-  ['Mua hàng và thanh toán Online', '/chinh-sach-giao-hang'],
+  ['Mua hàng và thanh toán Online', '/chinh-sach/mua-hang-va-thanh-toan-online'],
   ['Mua hàng trả góp', '/tra-gop'],
   ['Mua hàng trả góp bằng thẻ tín dụng', '/huong-dan-mua-hang-tra-gop-bang-the-tin-dung-tai-cellphones'],
   ['Chính sách giao hàng', '/chinh-sach-giao-hang'],

@@ -34,16 +34,17 @@ const CartPage = lazy(() => import('./components/CartPage/CartPage'));
 const CheckoutPage = lazy(() => import('./components/CheckoutPage/CheckoutPage'));
 const SmemberAccount = lazy(() => import('./components/SmemberAccount/SmemberAccount'));
 const InfoPage = lazy(() => import('./components/InfoPage/InfoPage'));
+const StoreLocator = lazy(() => import('./components/StoreLocator/StoreLocator'));
 
 const homeProductQueries = {
-  hotTrend: { category: 'Phụ kiện', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
-  phones: { category: 'Điện thoại', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
-  laptops: { category: 'Laptop', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
-  audio: { category: 'Âm thanh', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
-  watches: { category: 'Đồng hồ thông minh', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
-  tvs: { category: 'Tivi', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
-  appliances: { category: 'Đồ gia dụng', include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
-  coldAppliances: { include: 'details', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
+  hotTrend: { category: 'Phụ kiện', displayLimit: 12, fetchLimit: 36, inStock: true, sort: 'latest' },
+  phones: { category: 'Điện thoại', displayLimit: 12, fetchLimit: 36, inStock: true, sort: 'latest' },
+  laptops: { category: 'Laptop', displayLimit: 12, fetchLimit: 72, sort: 'latest' },
+  audio: { category: 'Âm thanh', displayLimit: 12, fetchLimit: 36, inStock: true, sort: 'latest' },
+  watches: { category: 'Đồng hồ thông minh', displayLimit: 12, fetchLimit: 36, inStock: true, sort: 'latest' },
+  tvs: { category: 'Tivi', displayLimit: 12, fetchLimit: 36, inStock: true, sort: 'latest' },
+  appliances: { category: 'Đồ gia dụng', displayLimit: 12, fetchLimit: 36, inStock: true, sort: 'latest' },
+  coldAppliances: { displayLimit: 12, fetchLimit: 36, inStock: true, sort: 'latest' },
 };
 
 const homeTabQueries = {
@@ -91,6 +92,7 @@ const getAppPageFromPathname = (pathname = '') => {
   if (cleaned === '/admin') return 'admin';
   if (cleaned === '/cart' || cleaned === '/gio-hang') return 'cart';
   if (cleaned === '/checkout' || cleaned === '/thanh-toan') return 'checkout';
+  if (cleaned === '/dia-chi-cua-hang' || cleaned === '/he-thong-cua-hang') return 'stores';
   if (cleaned === '/smember' || cleaned === '/smember/profile' || cleaned === '/smember/account' || cleaned === '/thong-tin-ca-nhan') return 'account';
   return getAuthPageFromPathname(cleaned);
 };
@@ -112,6 +114,29 @@ const audioBrandFilters = [
   { id: 'sony', name: 'Sony' },
   { id: 'jbl', name: 'JBL' },
   { id: 'anker', name: 'Anker' },
+];
+
+const allBrandFilter = { id: 'all', name: 'Tất cả' };
+const laptopFiltersByTab = [
+  laptopBrandFilters,
+  [allBrandFilter, { id: 'asus', name: 'ASUS' }, { id: 'samsung', name: 'Samsung' }, { id: 'lg', name: 'LG' }, { id: 'xiaomi', name: 'Xiaomi' }, { id: 'dell', name: 'Dell' }, { id: 'msi', name: 'MSI' }],
+  [allBrandFilter, { id: 'asus', name: 'ASUS' }, { id: 'lenovo', name: 'Lenovo' }, { id: 'hp', name: 'HP' }, { id: 'dell', name: 'Dell' }],
+];
+const audioFiltersByTab = [
+  audioBrandFilters,
+  audioBrandFilters,
+  [allBrandFilter, { id: 'sony', name: 'Sony' }, { id: 'jbl', name: 'JBL' }, { id: 'anker', name: 'Anker' }, { id: 'samsung', name: 'Samsung' }, { id: 'marshall', name: 'Marshall' }],
+];
+const coldApplianceFiltersByTab = [
+  applianceBrandFilters,
+  [allBrandFilter, { id: 'toshiba', name: 'Toshiba' }, { id: 'panasonic', name: 'Panasonic' }, { id: 'samsung', name: 'Samsung' }, { id: 'electrolux', name: 'Electrolux' }, { id: 'lg', name: 'LG' }],
+  [allBrandFilter, { id: 'electrolux', name: 'Electrolux' }, { id: 'toshiba', name: 'Toshiba' }, { id: 'lg', name: 'LG' }, { id: 'samsung', name: 'Samsung' }, { id: 'panasonic', name: 'Panasonic' }],
+  [allBrandFilter, { id: 'panasonic', name: 'Panasonic' }, { id: 'lg', name: 'LG' }, { id: 'xiaomi', name: 'Xiaomi' }, { id: 'daikin', name: 'Daikin' }, { id: 'casper', name: 'Casper' }],
+];
+const applianceFiltersByTab = [
+  [allBrandFilter, { id: 'xiaomi', name: 'Xiaomi' }, { id: 'panasonic', name: 'Panasonic' }, { id: 'hoa-phat', name: 'Hòa Phát' }, { id: 'acerpure', name: 'Acerpure' }],
+  [allBrandFilter, { id: 'xiaomi', name: 'Xiaomi' }, { id: 'roborock', name: 'Roborock' }, { id: 'dreame', name: 'Dreame' }],
+  [allBrandFilter, { id: 'xiaomi', name: 'Xiaomi' }, { id: 'philips', name: 'Philips' }],
 ];
 
 const CELLPHONES_47_PROVINCES = [
@@ -251,6 +276,7 @@ function HomePage({ currentUser, onGoLogin, onGoRegister }) {
         title="Laptop"
         tabs={['Laptop', 'Màn hình', 'PC Gaming']}
         filters={laptopBrandFilters}
+        filtersByTab={laptopFiltersByTab}
         productQuery={homeProductQueries.laptops}
         tabQueries={homeTabQueries.laptops}
         products={laptopProducts}
@@ -261,6 +287,7 @@ function HomePage({ currentUser, onGoLogin, onGoRegister }) {
         title="Âm thanh"
         tabs={['Âm thanh', 'Tai nghe', 'Loa']}
         filters={audioBrandFilters}
+        filtersByTab={audioFiltersByTab}
         productQuery={homeProductQueries.audio}
         tabQueries={homeTabQueries.audio}
         products={audioProducts}
@@ -296,6 +323,7 @@ function HomePage({ currentUser, onGoLogin, onGoRegister }) {
         title="Tủ lạnh - Tủ đông"
         tabs={['Tủ lạnh - Tủ đông', 'Máy giặt', 'Máy sấy quần áo', 'Điều hòa - Máy lạnh']}
         filters={applianceBrandFilters}
+        filtersByTab={coldApplianceFiltersByTab}
         productQuery={homeProductQueries.coldAppliances}
         tabQueries={homeTabQueries.coldAppliances}
         products={applianceProducts}
@@ -306,6 +334,7 @@ function HomePage({ currentUser, onGoLogin, onGoRegister }) {
         title="Đồ gia dụng"
         tabs={['Đồ gia dụng', 'Chăm sóc nhà', 'Chăm sóc sức khỏe']}
         filters={applianceBrandFilters}
+        filtersByTab={applianceFiltersByTab}
         productQuery={homeProductQueries.appliances}
         tabQueries={homeTabQueries.appliances}
         products={applianceProducts}
@@ -624,6 +653,37 @@ function App() {
     );
   }
 
+  if (currentPage === 'stores') {
+    return (
+      <div className="app">
+        <TopBar />
+        <MainHeader
+          activePopup={activePopup}
+          setActivePopup={setActivePopup}
+          selectedLocation={selectedLocation}
+          currentUser={currentUser}
+          cartCount={cartState.count}
+          onGoCart={goCart}
+        />
+        <main className="main-content store-locator-main">
+          <StoreLocator initialCity={selectedLocation} />
+        </main>
+        <Footer />
+        <FloatingActions />
+        <HeaderPopups {...headerPopupProps} />
+        <ChatbotWidget
+          userName={
+            currentUser?.fullName
+            || currentUser?.displayName
+            || currentUser?.name
+            || currentUser?.username
+            || ''
+          }
+        />
+      </div>
+    );
+  }
+
   if (currentPage === 'info') {
     return (
       <div className="app">
@@ -705,141 +765,6 @@ function App() {
           || ''
         }
       />
-
-      {activePopup === 'location' && (
-        <div className="location-modal-box">
-          <div className="location-modal-header-bar">
-            <div className="location-modal-search-wrapper">
-              <svg
-                className="modal-search-icon"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="#999"
-                strokeWidth="2.5"
-                aria-hidden="true"
-              >
-                <circle cx="11" cy="11" r="8" />
-                <line x1="21" y1="21" x2="16.65" y2="16.65" />
-              </svg>
-              <input
-                type="text"
-                placeholder="Nhập tên tỉnh thành"
-                value={locationSearch}
-                onChange={(event) => setLocationSearch(event.target.value)}
-                autoFocus
-              />
-            </div>
-            <button
-              className="location-modal-close-btn"
-              onClick={handleCloseAllPopups}
-              type="button"
-            >
-              Đóng ×
-            </button>
-          </div>
-
-          <div className="location-modal-hint">
-            Vui lòng chọn tỉnh, thành phố để biết chính xác giá, khuyến mãi và tồn kho
-          </div>
-
-          <div className="location-modal-body">
-            {filteredProvinces.length > 0 ? (
-              <div className="location-grid-layout">
-                {filteredProvinces.map((province) => (
-                  <button
-                    key={province}
-                    className={`location-grid-item ${selectedLocation === province ? 'active' : ''}`}
-                    onClick={() => {
-                      setSelectedLocation(province);
-                      handleCloseAllPopups();
-                    }}
-                    type="button"
-                  >
-                    <span>{province}</span>
-                    {selectedLocation === province && <span className="check-mark">✓</span>}
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <div className="location-no-data">Không tìm thấy tỉnh thành phù hợp</div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {activePopup === 'auth' && (
-        <div className="auth-modal-box">
-          <button className="auth-modal-close-x" onClick={handleCloseAllPopups} type="button">
-            ×
-          </button>
-          <h2 className="auth-modal-title">Smember</h2>
-          <div className="auth-modal-mascot">
-            <img
-              src="https://cellphones.com.vn/media/wysiwyg/ant-smile.png"
-              alt="Smember Mascot"
-            />
-          </div>
-          {currentUser ? (
-            <>
-              <p className="auth-modal-desc">
-                Xin chào <strong>{currentUser.fullName || currentUser.email}</strong>.
-                Tài khoản của bạn đã đăng nhập và sẵn sàng dùng ưu đãi Smember.
-              </p>
-              <div className="auth-modal-user-meta">
-                <span>{currentUser.email}</span>
-                <span>{currentUser.phone}</span>
-                <span>{currentUser.role === 'admin' ? 'Quản trị viên' : 'Thành viên Smember'}</span>
-              </div>
-              <div className="auth-modal-actions stacked">
-                <button
-                  className="auth-btn btn-login"
-                  onClick={goAccount}
-                  type="button"
-                >
-                  Thông tin cá nhân
-                </button>
-                <button
-                  className="auth-btn btn-register"
-                  onClick={handleLogout}
-                  type="button"
-                >
-                  Đăng xuất
-                </button>
-              </div>
-            </>
-          ) : (
-            <>
-              <p className="auth-modal-desc">
-                Vui lòng đăng nhập tài khoản Smember để xem ưu đãi và thanh toán dễ dàng hơn.
-              </p>
-              <div className="auth-modal-actions">
-                <button
-                  className="auth-btn btn-register"
-                  onClick={() => {
-                    handleCloseAllPopups();
-                    goRegister();
-                  }}
-                  type="button"
-                >
-                  Đăng ký
-                </button>
-                <button
-                  className="auth-btn btn-login"
-                  onClick={() => {
-                    handleCloseAllPopups();
-                    goLogin();
-                  }}
-                  type="button"
-                >
-                  Đăng nhập
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      )}
     </div>
   );
 }

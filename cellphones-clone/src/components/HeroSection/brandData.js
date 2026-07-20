@@ -385,27 +385,27 @@ export const APPLIANCE_LOGOS = [
   },
   {
     name: "LG",
-    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:50/q:30/plain/https://cellphones.com.vn/media/wysiwyg/Icon/brand_logo/LG.png",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:50/q:30/plain/https://cellphones.com.vn/media/tmp/catalog/product/f/r/frame_84_1_.png",
   },
   {
     name: "Xiaomi",
-    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:50/q:30/plain/https://cellphones.com.vn/media/wysiwyg/Web/Brand/XIAOMI-new-240x50.png",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:50/q:30/plain/https://cellphones.com.vn/media/tmp/catalog/product/f/r/frame_61.png",
   },
   {
     name: "Panasonic",
-    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:50/q:30/plain/https://cellphones.com.vn/media/wysiwyg/Icon/brand_logo/HP.png",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:50/q:30/plain/https://cellphones.com.vn/media/tmp/catalog/product/p/a/panasonic-icon-brand.png",
   },
   {
     name: "AQUA",
-    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:50/q:30/plain/https://cellphones.com.vn/media/wysiwyg/Icon/brand_logo/acer.png",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:50/q:30/plain/https://cellphones.com.vn/media/wysiwyg/aqua_2.png",
   },
   {
     name: "Toshiba",
-    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:50/q:30/plain/https://cellphones.com.vn/media/wysiwyg/Logo/logo-brand-HPRT_4.png",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:50/q:30/plain/https://cellphones.com.vn/media/wysiwyg/toshiba.png",
   },
   {
     name: "Sony",
-    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:50/q:30/plain/https://cellphones.com.vn/media/wysiwyg/Web/Brand/SONY-240x50.png",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:50/q:30/plain/https://cellphones.com.vn/media/catalog/product/f/r/frame_87.png",
   },
   {
     name: "TCL",
@@ -413,19 +413,19 @@ export const APPLIANCE_LOGOS = [
   },
   {
     name: "Daikin",
-    logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/DAIKIN_logo.svg/3840px-DAIKIN_logo.svg.png",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:50/q:30/plain/https://cellphones.com.vn/media/wysiwyg/logo-daikin-new.png",
   },
   {
     name: "Sharp",
-    logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c8/Logo_of_the_Sharp_Corporation.svg/3840px-Logo_of_the_Sharp_Corporation.svg.png",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:50/q:30/plain/https://cellphones.com.vn/media/tmp/catalog/product/i/c/icon-sharp-brand.png",
   },
   {
     name: "Casper",
-    logo: "https://casper-electric.com/wp-content/uploads/2022/06/cropped-logo.png",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:50/q:30/plain/https://cellphones.com.vn/media/wysiwyg/casper.png",
   },
   {
     name: "Hitachi",
-    logo: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4d/Hitachi_logo.svg/3840px-Hitachi_logo.svg.png",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:50/q:30/plain/https://cellphones.com.vn/media/wysiwyg/logo-hitachi-new.png",
   },
   {
     name: "Bosch",
@@ -433,6 +433,6 @@ export const APPLIANCE_LOGOS = [
   },
   {
     name: "coocaa",
-    logo: "https://upload.wikimedia.org/wikipedia/commons/e/e8/Coocaa_logo.png",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:50/q:30/plain/https://cellphones.com.vn/media/catalog/product/f/r/frame_85.png",
   },
 ];

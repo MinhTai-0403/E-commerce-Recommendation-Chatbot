@@ -91,6 +91,8 @@ const getCategoryBrandPath = (category = "", brand = "", title = "", options = {
 };
 
 const getSidebarCategoryPath = (cat = {}, slug = "") => {
+  if (cat.id === 12) return "/tin-tuc/tin-cong-nghe";
+
   const categoryByPanel = {
     phone: "Điện thoại",
     laptop: "Laptop",
@@ -186,26 +188,6 @@ function GraduationCapIcon() {
     >
       <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
       <path d="M6 12v5c0 2 2 3 6 3s6-1 6-3v-5" />
-    </svg>
-  );
-}
-
-function RefreshIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="#ef4444"
-      strokeWidth="2.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
-      <path d="M21 3v5h-5" />
-      <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
-      <path d="M3 21v-5h5" />
     </svg>
   );
 }
@@ -1361,7 +1343,7 @@ export default function HeroSection({
                     className="mega-pill-item full-width-row-pill"
                     style={{ marginTop: "4px" }}
                   >
-                    Xem tất tất cả máy lạnh
+                    Xem tất cả máy lạnh
                   </a>
                 </div>
                 <div className="mega-section" style={{ marginTop: "20px" }}>
@@ -1370,7 +1352,11 @@ export default function HeroSection({
                     {hotTvProducts.map((prod, i) => (
                       <a
                         key={i}
-                        href={getCategoryTopicPath("Tivi", prod.name)}
+                        href={getCategoryTopicPath(
+                          prod.category,
+                          prod.query || prod.name,
+                          { title: prod.name },
+                        )}
                         className="mega-pill-item relative-pill"
                         style={{ gridColumn: `span ${prod.span}` }}
                       >
@@ -1596,7 +1582,9 @@ export default function HeroSection({
                 ))}
               </div>
               <button
+                type="button"
                 className="slider-nav prev"
+                aria-label="Banner trước"
                 onClick={() =>
                   setCurrentSlide((prev) =>
                     prev === 0 ? heroSlides.length - 1 : prev - 1,
@@ -1615,7 +1603,9 @@ export default function HeroSection({
                 </svg>
               </button>
               <button
+                type="button"
                 className="slider-nav next"
+                aria-label="Banner tiếp theo"
                 onClick={() =>
                   setCurrentSlide((prev) => (prev + 1) % heroSlides.length)
                 }
@@ -1635,8 +1625,12 @@ export default function HeroSection({
                 {heroSliderTabs.map((tab, idx) => (
                   <button
                     key={tab.id}
+                    type="button"
                     className={`slider-tab ${currentSlide === idx ? "active" : ""}`}
                     onClick={() => setCurrentSlide(idx)}
+                    role="tab"
+                    aria-selected={currentSlide === idx}
+                    aria-label={`${tab.line1} - ${tab.line2}`}
                   >
                     <span className="tab-line1">{tab.line1}</span>
                     <span className="tab-line2">{tab.line2}</span>
@@ -1770,31 +1764,6 @@ export default function HeroSection({
                       <GraduationCapIcon />
                       <span>
                         Laptop <b>ưu đãi khủng</b>
-                      </span>
-                    </a>
-                  </li>
-                </ul>
-              </div>
-
-              {/* Nhóm 2: Thu cũ đổi mới */}
-              <div className="benefit-scroller-group">
-                <div className="benefit-group-gray-header">
-                  Thu cũ lên đời giá hời
-                </div>
-                <ul className="benefit-scroller-list-items">
-                  <li>
-                    <a href="/smember?tab=tradein">
-                      <RefreshIcon />
-                      <span>
-                        iPhone trợ giá <b>đến 3 triệu</b>
-                      </span>
-                    </a>
-                  </li>
-                  <li>
-                    <a href="/smember?tab=tradein">
-                      <RefreshIcon />
-                      <span>
-                        Samsung trợ giá <b>đến 4 triệu</b>
                       </span>
                     </a>
                   </li>
@@ -2637,11 +2606,32 @@ const officeDeviceRows = [
 
 /* --- 8. DANH MỤC: TIVI, ĐIỆN MÁY --- */
 const hotTvProducts = [
-  { name: "Máy lạnh Mijia Pro 1.5 HP Inverter 2025", badge: "Hot", span: 6 },
-  { name: "Tủ lạnh Xiaomi Multidoor 510L 2024", badge: "Mới", span: 6 },
-  { name: "Tivi di động LG Stanby Me 27inch", span: 6 },
-  { name: "Giá treo tivi", span: 6 },
-  { name: "Tủ chăm sóc quần áo", span: 6 },
+  {
+    name: "Máy lạnh Mijia Pro Eco Star 1.5 HP Inverter 2025",
+    query: "Máy lạnh Xiaomi",
+    category: "Điều hòa - Máy lạnh",
+    badge: "Hot",
+    span: 6,
+  },
+  {
+    name: "Tủ lạnh Xiaomi Mijia Multidoor 510L 2025",
+    query: "Tủ lạnh Xiaomi",
+    category: "Tủ lạnh",
+    badge: "Mới",
+    span: 6,
+  },
+  {
+    name: "Tivi di động LG StanbyME 27 inch",
+    query: "LG Stanby",
+    category: "Tivi",
+    span: 6,
+  },
+  { name: "Giá treo tivi", category: "Tivi", span: 6 },
+  {
+    name: "Tủ chăm sóc quần áo",
+    category: "Máy giặt",
+    span: 6,
+  },
 ];
 
 /* --- 9. DANH MỤC: THU CŨ ĐỔI MỚI --- */

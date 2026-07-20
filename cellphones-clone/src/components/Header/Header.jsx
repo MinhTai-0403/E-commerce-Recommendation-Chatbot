@@ -137,8 +137,12 @@ export function MainHeader({
         {/* Nút Danh mục */}
         <div className="header-category-wrapper">
           <button
+            type="button"
             className={`header-outlined-btn ${activePopup === "category" ? "active-popup-btn" : ""}`}
             id="category-menu-btn"
+            aria-label="Mở danh mục sản phẩm"
+            aria-expanded={activePopup === "category"}
+            aria-controls="header-category-popup"
             onClick={(e) => {
               e.stopPropagation();
               setActivePopup(activePopup === "category" ? null : "category");
@@ -173,7 +177,10 @@ export function MainHeader({
 
         {/* Nút vị trí chọn Tỉnh thành */}
         <button
+          type="button"
           className={`header-outlined-btn header-location-btn ${activePopup === "location" ? "active-popup-btn" : ""}`}
+          aria-label={`Chọn khu vực, hiện tại ${selectedLocation}`}
+          aria-expanded={activePopup === "location"}
           onClick={(e) => {
             e.stopPropagation();
             setActivePopup(activePopup === "location" ? null : "location");
@@ -258,8 +265,11 @@ export function MainHeader({
           </a>
 
           <button
+            type="button"
             className={`header-outlined-btn header-login-btn ${activePopup === "auth" ? "active-popup-btn" : ""}`}
             id="header-login-btn"
+            aria-label={currentUser ? `Tài khoản ${accountLabel}` : 'Đăng nhập hoặc đăng ký'}
+            aria-expanded={activePopup === "auth"}
             onClick={(e) => {
               e.stopPropagation();
               setActivePopup(activePopup === "auth" ? null : "auth");

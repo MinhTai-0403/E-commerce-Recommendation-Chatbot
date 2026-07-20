@@ -482,7 +482,6 @@ function GenericMegaContent({ section }) {
 
 export function FloatingActions() {
   const [visible, setVisible] = useState(false);
-  const [showApp, setShowApp] = useState(true);
 
   useEffect(() => {
     const handleScroll = () => setVisible(window.scrollY > 400);
@@ -494,18 +493,11 @@ export function FloatingActions() {
 
   return (
     <aside className="floating-actions" aria-label="Liên kết hỗ trợ nhanh">
-      {showApp && (
-        <div className="floating-app">
-          <button type="button" onClick={() => setShowApp(false)} aria-label="Đóng quảng cáo tải ứng dụng">×</button>
-          <a href="/download-app" aria-label="Tải ứng dụng CellphoneS">
-            <img src="https://cdn2.cellphones.com.vn/insecure/rs:fill:100:100/q:100/plain/https://cellphones.com.vn/media/wysiwyg/icon_downloadapp.png" alt="Tải ứng dụng CellphoneS" width="100" height="100" />
-          </a>
-        </div>
-      )}
       <button
         className={`floating-action-button back-to-top ${visible ? 'visible' : ''}`}
         onClick={scrollToTop}
         type="button"
+        aria-label="Lên đầu trang"
       >
         <span>Lên đầu</span>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">

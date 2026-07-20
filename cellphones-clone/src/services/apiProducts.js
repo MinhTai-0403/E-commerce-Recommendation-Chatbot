@@ -69,7 +69,8 @@ const hasUsableImage = (src) => (
   Boolean(src) &&
   !String(src).toLowerCase().includes('no_selection') &&
   !String(src).toLowerCase().includes('no-product') &&
-  !String(src).toLowerCase().includes('placeholder')
+  !String(src).toLowerCase().includes('placeholder') &&
+  !/\/(?:\d+x\/)?media\/catalog\/product\/?(?:\?.*)?$/i.test(String(src))
 );
 
 const getProductImage = (product = {}) => {

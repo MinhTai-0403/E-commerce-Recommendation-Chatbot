@@ -4,7 +4,7 @@
   --chatbot-border: #ececec;
   --chatbot-text: #1f2937;
   position: relative;
-  z-index: 1400;
+  z-index: 2700;
 }
 
 .chatbot-widget,

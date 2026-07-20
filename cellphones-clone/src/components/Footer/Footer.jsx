@@ -6,8 +6,42 @@ import {
   footerSocials,
   paymentPartners,
 } from '../../data/mockData';
-import { externalLinks, getRouteForLabel } from '../../utils/linkRoutes';
+import { buildCategoryPath, externalLinks, getRouteForLabel } from '../../utils/linkRoutes';
 import { buildApiUrl } from '../../services/apiProducts';
+
+const footerPopularRoutes = {
+  'Điện thoại': () => buildCategoryPath('Điện thoại'),
+  'Điện thoại iPhone': () => buildCategoryPath('Điện thoại', { brand: 'apple', title: 'Điện thoại iPhone' }),
+  Xiaomi: () => buildCategoryPath('Điện thoại', { brand: 'xiaomi', title: 'Xiaomi' }),
+  'Điện thoại Samsung Galaxy': () => buildCategoryPath('Điện thoại', { brand: 'samsung', title: 'Điện thoại Samsung Galaxy' }),
+  'Điện thoại OPPO': () => buildCategoryPath('Điện thoại', { brand: 'oppo', title: 'Điện thoại OPPO' }),
+  Laptop: () => buildCategoryPath('Laptop'),
+  'Laptop Acer': () => buildCategoryPath('Laptop', { brand: 'acer', title: 'Laptop Acer' }),
+  'Laptop Dell': () => buildCategoryPath('Laptop', { brand: 'dell', title: 'Laptop Dell' }),
+  'Laptop HP': () => buildCategoryPath('Laptop', { brand: 'hp', title: 'Laptop HP' }),
+  Tivi: () => buildCategoryPath('Tivi'),
+  'Tivi Samsung': () => buildCategoryPath('Tivi', { brand: 'samsung', title: 'Tivi Samsung' }),
+  'Tivi Sony': () => buildCategoryPath('Tivi', { brand: 'sony', title: 'Tivi Sony' }),
+  'Tivi LG': () => buildCategoryPath('Tivi', { brand: 'lg', title: 'Tivi LG' }),
+  'Đồ gia dụng': () => buildCategoryPath('Đồ gia dụng'),
+  'Máy hút bụi gia đình': () => buildCategoryPath('Đồ gia dụng', { q: 'Máy hút bụi', title: 'Máy hút bụi gia đình' }),
+  'Build PC': () => buildCategoryPath('PC', { q: 'Build PC', segment: 'pc-gaming', title: 'Build PC' }),
+  Camera: () => buildCategoryPath('Camera', { segment: 'camera' }),
+  'iPhone cũ': () => buildCategoryPath('Hàng cũ', { q: 'iPhone', segment: 'used-phone', title: 'iPhone cũ' }),
+  'Macbook Neo': () => buildCategoryPath('Laptop', { brand: 'macbook', q: 'Macbook Neo', title: 'Macbook Neo' }),
+};
+
+const getFooterPopularRoute = (label) => {
+  const explicitRoute = footerPopularRoutes[label];
+  if (explicitRoute) return explicitRoute();
+
+  if (/^iPhone\b/i.test(label) || /^OPPO Find/i.test(label) || /^Xiaomi 17T/i.test(label)) {
+    const brand = /^OPPO/i.test(label) ? 'oppo' : (/^Xiaomi/i.test(label) ? 'xiaomi' : 'apple');
+    return buildCategoryPath('Điện thoại', { brand, q: label, title: label });
+  }
+
+  return getRouteForLabel(label, 'category');
+};
 
 export default function Footer() {
   const [newsletterForm, setNewsletterForm] = useState({
@@ -197,7 +231,7 @@ export default function Footer() {
           <div className="footer-popular-grid">
             {footerLinks.popular.map((group, index) => (
               <nav aria-label={`Liên kết sản phẩm ${index + 1}`} className="footer-popular-group" key={group[0]}>
-                {group.map((link) => <a href={getRouteForLabel(link, 'category')} key={link}>{link}</a>)}
+                {group.map((link) => <a href={getFooterPopularRoute(link)} key={link}>{link}</a>)}
               </nav>
             ))}
           </div>

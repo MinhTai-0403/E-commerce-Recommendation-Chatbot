@@ -193,6 +193,7 @@
 }
 
 .ht-product-wrapper {
+  flex: 0 0 215px;
   min-width: 215px;
   scroll-snap-align: start;
 }
@@ -216,5 +217,5 @@
   .ht-cat-filter { padding: 5px 11px; font-size: 11px; white-space: nowrap; }
   .hot-trend-sub-filters-container { margin-bottom: 10px; }
   .ht-sub-filter-icon { width: 28px; height: 28px; }
-  .ht-product-wrapper { min-width: 166px; }
+  .ht-product-wrapper { flex-basis: 166px; min-width: 166px; }
 }

@@ -35,7 +35,9 @@ const categoryQueryMap = {
   'dien-thoai': { category: 'Điện thoại' },
   tablet: { category: 'Máy tính bảng' },
   laptop: { category: 'Laptop' },
-  'man-hinh': { category: 'Màn hình|Linh kiện máy tính' },
+  // This tab represents complete monitors/desktop PCs, not every component
+  // crawled below the PC landing page.
+  'man-hinh': { segment: 'monitor-pc' },
   'dien-may': { category: 'Đồ gia dụng|Tivi' },
 };
 
@@ -56,7 +58,7 @@ const categoryValueMap = {
   'dien-thoai': ['dien thoai'],
   tablet: ['may tinh bang'],
   laptop: ['laptop'],
-  'man-hinh': ['man hinh', 'linh kien may tinh'],
+  'man-hinh': ['man hinh', 'may tinh de ban', 'pc'],
   'dien-may': ['do gia dung', 'nha thong minh', 'tivi'],
 };
 
@@ -114,6 +116,12 @@ const categoryValuesOfProduct = (product = {}) => [
 ].filter(Boolean).map(normalizeText);
 
 const matchesCategory = (product, categoryId) => {
+  if (categoryId === 'man-hinh') {
+    const identity = normalizeText([product?.name, product?.title, product?.slug].filter(Boolean).join(' '));
+    const isMonitorOrPc = /^(man hinh|monitor|pc(?: |$)|pc gaming|pc mini|mini pc|may tinh de ban|may tinh aio|desktop|all in one)/.test(identity);
+    const isPeripheral = /^(loa|speaker|soundbar|quat|tan nhiet|o cung|ssd|usb|linh kien|case may tinh)/.test(identity);
+    return isMonitorOrPc && !isPeripheral;
+  }
   const acceptedValues = categoryValueMap[categoryId] || [];
   if (!acceptedValues.length) return true;
   const productValues = categoryValuesOfProduct(product);
@@ -122,6 +130,10 @@ const matchesCategory = (product, categoryId) => {
 
 const matchesSubFilter = (product, filterId) => {
   if (filterId === 'all') return true;
+  const identity = normalizeText([product?.name, product?.title, product?.slug].filter(Boolean).join(' '));
+  if (filterId === 'chuot') {
+    return /^(chuot|mouse|ban phim|keyboard|combo (?:chuot|mouse|ban phim|keyboard)|bo (?:chuot|mouse|ban phim|keyboard))/.test(identity);
+  }
   const text = ` ${textOfProduct(product)} `;
   const excludedKeywords = subExcludeKeywordMap[filterId] || [];
   if (excludedKeywords.some((value) => text.includes(value))) {
@@ -154,9 +166,8 @@ const productScore = (product = {}, activeMainTab = 'deal') => {
 
 const buildHotTrendQuery = (activeMainTab, activeCategory, activeSubFilter) => {
   const base = {
-    include: 'details',
     displayLimit: 12,
-    fetchLimit: 96,
+    fetchLimit: 48,
     inStock: true,
     ...(mainTabConfig[activeMainTab] || mainTabConfig.deal),
     ...(categoryQueryMap[activeCategory] || categoryQueryMap['phu-kien']),
@@ -230,13 +241,13 @@ export default function HotTrend({ products = hotTrendProducts, loading = false 
           <div className="hot-trend-header">
             <div className="hot-trend-tabs-wrapper">
               <div className="hot-trend-tabs">
-                <button className={`hot-trend-tab-btn ${activeMainTab === 'deal' ? 'active' : ''}`} onClick={() => setActiveMainTab('deal')} aria-pressed={activeMainTab === 'deal'}>
+                <button type="button" className={`hot-trend-tab-btn ${activeMainTab === 'deal' ? 'active' : ''}`} onClick={() => setActiveMainTab('deal')} aria-label="Deal sốc mỗi ngày" aria-pressed={activeMainTab === 'deal'}>
                   <img src="https://cdn2.cellphones.com.vn/x/media/wysiwyg/Web/landing-page/hang-moi-ve/hotDueHome03.png" alt="Deal sốc mỗi ngày" />
                 </button>
-                <button className={`hot-trend-tab-btn ${activeMainTab === 'hot' ? 'active' : ''}`} onClick={() => setActiveMainTab('hot')} aria-pressed={activeMainTab === 'hot'}>
+                <button type="button" className={`hot-trend-tab-btn ${activeMainTab === 'hot' ? 'active' : ''}`} onClick={() => setActiveMainTab('hot')} aria-label="Sản phẩm hot trend" aria-pressed={activeMainTab === 'hot'}>
                   <img src="https://cdn2.cellphones.com.vn/x/media/wysiwyg/Web/landing-page/hang-moi-ve/hotTrendHome02.png" alt="Sản phẩm hot trend" />
                 </button>
-                <button className={`hot-trend-tab-btn ${activeMainTab === 'new' ? 'active' : ''}`} onClick={() => setActiveMainTab('new')} aria-pressed={activeMainTab === 'new'}>
+                <button type="button" className={`hot-trend-tab-btn ${activeMainTab === 'new' ? 'active' : ''}`} onClick={() => setActiveMainTab('new')} aria-label="Hàng mới về" aria-pressed={activeMainTab === 'new'}>
                   <img src="https://cdn2.cellphones.com.vn/x/media/wysiwyg/Web/landing-page/hang-moi-ve/newArrivalHome.png" alt="Hàng mới về" />
                 </button>
               </div>
@@ -249,6 +260,7 @@ export default function HotTrend({ products = hotTrendProducts, loading = false 
               {hotTrendCategoryFilters.map(filter => (
                 <button 
                   key={filter.id}
+                  type="button"
                   className={`ht-cat-filter ${activeCategory === filter.id ? 'active' : ''}`}
                   onClick={() => {
                     setActiveCategory(filter.id);
@@ -267,6 +279,7 @@ export default function HotTrend({ products = hotTrendProducts, loading = false 
                 {hotTrendSubFilters.map(filter => (
                   <button 
                     key={filter.id}
+                    type="button"
                     className={`ht-sub-filter ${activeSubFilter === filter.id ? 'active' : ''}`}
                     onClick={() => setActiveSubFilter(filter.id)}
                     aria-pressed={activeSubFilter === filter.id}

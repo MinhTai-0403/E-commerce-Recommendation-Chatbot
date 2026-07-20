@@ -22,6 +22,7 @@ export default function CategoryBlock({
   title, 
   tabs, 
   filters, 
+  filtersByTab,
   subCategories, // for image-based category pills
   productQuery,
   tabQueries,
@@ -41,19 +42,27 @@ export default function CategoryBlock({
     : '';
   const shouldShowSubCategories = Boolean(subCategories?.length) && activeTab === subCategoryTabIndex;
   const activeCategoryName = tabs?.[activeTab] || title;
-  const activeCategoryPath = useMemo(() => buildCategoryPath(activeCategoryName, {
+  const activeTabQuery = useMemo(() => tabQueries?.[activeTab] || {}, [activeTab, tabQueries]);
+  const activeFilters = filtersByTab?.[activeTab] || filters || [];
+  const activeCategoryPath = useMemo(() => buildCategoryPath(
+    activeTabQuery.routeCategory || activeCategoryName,
+    {
     ...(selectedSubCategory?.query || {}),
     keyword: selectedSubCategory?.name || activeCategoryName,
     title: selectedSubCategory?.name || activeCategoryName,
-    segment: selectedSubCategorySegment,
+    segment: selectedSubCategory ? selectedSubCategorySegment : activeTabQuery.segment,
     brand: activeFilter && activeFilter !== 'all' ? activeFilter : '',
-  }), [activeCategoryName, activeFilter, selectedSubCategory, selectedSubCategorySegment]);
+    },
+  ), [activeCategoryName, activeFilter, activeTabQuery, selectedSubCategory, selectedSubCategorySegment]);
   const effectiveQuery = useMemo(() => {
     if (!productQuery) return null;
 
+    const tabApiQuery = Object.fromEntries(
+      Object.entries(tabQueries?.[activeTab] || {}).filter(([key]) => key !== 'routeCategory'),
+    );
     const nextQuery = {
       ...productQuery,
-      ...(tabQueries?.[activeTab] || (tabs?.[activeTab] ? { category: tabs[activeTab] } : {})),
+      ...(Object.keys(tabApiQuery).length ? tabApiQuery : (tabs?.[activeTab] ? { category: tabs[activeTab] } : {})),
       ...(selectedSubCategory?.query || {}),
     };
 
@@ -111,6 +120,7 @@ export default function CategoryBlock({
                 {tabs.map((tab, idx) => (
                   <button 
                     key={idx}
+                    type="button"
                     className={`cb-tab-btn ${activeTab === idx ? 'active' : ''}`}
                     onClick={() => handleTabClick(idx)}
                     aria-pressed={activeTab === idx}
@@ -160,15 +170,16 @@ export default function CategoryBlock({
             )}
 
             {/* Text Filters */}
-            {filters && (
+            {activeFilters.length > 0 && (
               <div className="cb-filters">
-                {filters.map((filter, idx) => {
+                {activeFilters.map((filter, idx) => {
                   const filterKey = getFilterKey(filter, idx);
                   const filterLabel = getFilterLabel(filter);
 
                   return (
                     <button
                       key={filterKey}
+                      type="button"
                       className={`cb-filter-btn ${activeFilter === filterKey ? 'active' : ''}`}
                       onClick={() => setActiveFilter(filterKey)}
                       aria-pressed={activeFilter === filterKey}

@@ -155,13 +155,17 @@ export const normalizeCartItem = (input = {}, options = {}) => {
 
 export const normalizeCart = (cart = {}) => {
   const items = Array.isArray(cart.items) ? cart.items.map((item) => normalizeCartItem(item)) : [];
+  const calculatedSummary = summarizeCart(items);
 
   return {
     id: cart.id || '',
     userId: cart.userId || '',
     email: cart.email || '',
     items,
-    summary: cart.summary || summarizeCart(items),
+    summary: {
+      ...(cart.summary || {}),
+      ...calculatedSummary,
+    },
     createdAt: cart.createdAt || null,
     updatedAt: cart.updatedAt || null,
   };

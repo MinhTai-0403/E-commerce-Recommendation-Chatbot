@@ -861,7 +861,10 @@ const clearDetailedFilterPath = (page, item = {}) => {
 
 const buildCategoryControlPath = (page, overrides = {}) => {
   const category = overrides.category || getApiCategory(page) || page.keyword || 'Sản phẩm';
-  const inferredBrand = page.brand || (page.root === 'category'
+  const normalizedCategory = normalizeLabel(category);
+  const isAccessoryTopic = normalizedCategory === 'phu kien' && Boolean(page.q);
+  const currentBrand = isAccessoryTopic ? '' : page.brand;
+  const inferredBrand = currentBrand || (page.root === 'category' && !isAccessoryTopic
     ? getBrandFromText(page.keyword || page.title || page.slug)
     : '');
   return buildCategoryPath(category, {
@@ -1555,9 +1558,40 @@ function InstallmentLandingPage() {
 function ListingContent({ page }) {
   const apiCategory = getApiCategory(page);
   const isCategoryPage = page.root === 'category';
-  const isPhoneCategory = normalizeLabel(apiCategory) === 'dien thoai';
-  const brandFromText = getBrandFromText(page.brand || page.keyword || page.title || page.slug);
-  const effectiveBrand = page.brand || (isCategoryPage ? brandFromText : '');
+  const normalizedApiCategory = normalizeLabel(apiCategory);
+  const normalizedKeyword = normalizeLabel(page.keyword || page.q || page.title);
+  const canonicalApiCategory = normalizedApiCategory.replace(/[^a-z0-9]+/g, ' ').trim();
+  const canonicalKeyword = normalizedKeyword.replace(/[^a-z0-9]+/g, ' ').trim();
+  const isTradeInLanding = normalizedApiCategory === 'hang cu'
+    && normalizedKeyword.includes('thu cu doi moi');
+  const isPromotionLanding = normalizedApiCategory === 'khuyen mai';
+  const applianceEditorialKeys = new Set([
+    'cham nha chuan hien dai',
+    'cham soc chuan chuyen gia',
+    'tu lanh',
+    'tu lanh tu dong',
+  ]);
+  const applianceEditorialKey = applianceEditorialKeys.has(canonicalApiCategory)
+    ? canonicalApiCategory
+    : (applianceEditorialKeys.has(canonicalKeyword) ? canonicalKeyword : '');
+  const isApplianceEditorialLanding = Boolean(applianceEditorialKey);
+  const isRefrigeratorLanding = applianceEditorialKey === 'tu lanh'
+    || applianceEditorialKey === 'tu lanh tu dong';
+  const listingApiCategory = isRefrigeratorLanding
+    ? 'Tủ lạnh'
+    : (isApplianceEditorialLanding ? 'Đồ gia dụng' : apiCategory);
+  const normalizedListingCategory = normalizeLabel(listingApiCategory);
+  const shouldSuppressLooseKeyword = isTradeInLanding
+    || isPromotionLanding
+    || isApplianceEditorialLanding;
+  const isPhoneCategory = normalizedApiCategory === 'dien thoai';
+  const isAccessoryTopic = normalizedApiCategory === 'phu kien' && Boolean(page.q);
+  const brandFromText = isAccessoryTopic
+    ? ''
+    : getBrandFromText(page.brand || page.keyword || page.title || page.slug);
+  const effectiveBrand = isAccessoryTopic
+    ? ''
+    : page.brand || (isCategoryPage ? brandFromText : '');
   const activeFilter = page.facet || page.filter || (page.inStock === 'true' ? 'in-stock' : 'all');
   const listingCriteria = getCategoryCriteriaForPage(page, apiCategory);
   const isIphonePage = isCategoryPage && isPhoneCategory && (
@@ -1617,7 +1651,6 @@ function ListingContent({ page }) {
   if (page.inStock === 'true' || page.inStock === true) query.inStock = true;
   if (page.inStock === 'false' || page.inStock === false) query.inStock = false;
 
-  const normalizedApiCategory = normalizeLabel(apiCategory);
   const flexibleTopicCategories = new Set([
     'phu kien',
     'thiet bi mang',
@@ -1627,13 +1660,29 @@ function ListingContent({ page }) {
     'gaming gear',
     'thiet bi van phong',
   ]);
-  const isFlexibleTopicSearch = flexibleTopicCategories.has(normalizedApiCategory) && Boolean(page.q);
+  const isFlexibleTopicSearch = flexibleTopicCategories.has(normalizedListingCategory) && Boolean(page.q);
 
-  // Các nhóm trên được lưu bằng nhiều danh mục con khác nhau. Khi người dùng
-  // chọn một mục cụ thể, ưu tiên tìm theo từ khóa thay vì ép category tuyệt đối.
-  if (isCategoryPage && apiCategory && !isFlexibleTopicSearch) query.category = apiCategory;
+  // Những nhóm đã có bộ phân loại chuyên biệt ở backend phải giữ category để
+  // từ khóa ngắn như CPU, Case, Máy in hay Gaming không rơi vào tìm kiếm toàn kho.
+  const strictTopicCategories = new Set([
+    'phu kien',
+    'camera',
+    'do gia dung',
+    'linh kien may tinh',
+    'gaming gear',
+    'thiet bi van phong',
+  ]);
+  const shouldKeepTopicCategory = strictTopicCategories.has(normalizedListingCategory);
+  if (
+    isCategoryPage
+    && listingApiCategory
+    && !isPromotionLanding
+    && (!isFlexibleTopicSearch || shouldKeepTopicCategory)
+  ) {
+    query.category = listingApiCategory;
+  }
   if (isCategoryPage && effectiveBrand) query.brand = effectiveBrand;
-  if (page.q) query.q = page.q;
+  if (page.q && !shouldSuppressLooseKeyword) query.q = page.q;
   if (!isCategoryPage && page.keyword) query.q = page.keyword;
   if (
     isCategoryPage
@@ -1653,6 +1702,7 @@ function ListingContent({ page }) {
     && !page.camera
     && !page.refreshRate
     && !page.special
+    && !shouldSuppressLooseKeyword
     && normalizeLabel(page.keyword) !== normalizeLabel(apiCategory)
   ) {
     query.q = page.keyword;
@@ -1670,6 +1720,15 @@ function ListingContent({ page }) {
   if (page.camera) query.camera = page.camera;
   if (page.refreshRate) query.refreshRate = page.refreshRate;
   if (page.special) query.special = page.special;
+  if (isPromotionLanding) {
+    query.filter = 'hot-deal';
+    query.sort = 'hot_deal';
+  }
+  if (applianceEditorialKey === 'cham nha chuan hien dai') query.q = 'Robot hút bụi';
+  if (applianceEditorialKey === 'cham soc chuan chuyen gia') query.q = 'Máy massage';
+  if (applianceEditorialKey === 'tu lanh' || applianceEditorialKey === 'tu lanh tu dong') {
+    query.q = 'Tủ lạnh';
+  }
   const { products, loading } = useApiProducts(query, []);
   const canLoadMore = !loading && products.length >= visibleLimit && visibleLimit < CATEGORY_MAX_LIMIT;
   const handleLoadMoreProducts = () => {
