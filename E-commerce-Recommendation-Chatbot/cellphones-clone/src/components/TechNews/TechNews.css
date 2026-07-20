@@ -1,0 +1,132 @@
+.tech-news {
+  color: #212121;
+}
+
+.tech-news-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 40px;
+}
+
+.tech-news-header h2 {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 40px;
+  text-transform: uppercase;
+}
+
+.tech-news-divider {
+  width: 1px;
+  height: 24px;
+  background: #d4d4d4;
+}
+
+.tech-news-view-all {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 6px 8px;
+  color: #3b82f6;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.tech-news-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.tech-news-card {
+  overflow: hidden;
+  padding: 8px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.tech-news-card a {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tech-news-card img {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.tech-news-card span {
+  display: -webkit-box;
+  height: 63px;
+  overflow: hidden;
+  color: #262626;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 21px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.tech-news-card:hover span {
+  text-decoration: underline;
+}
+
+@media (max-width: 767px) {
+  .tech-news-header {
+    justify-content: space-between;
+    height: 32px;
+  }
+
+  .tech-news-header h2 {
+    font-size: 16px;
+    line-height: 24px;
+    text-transform: none;
+  }
+
+  .tech-news-divider {
+    display: none;
+  }
+
+  .tech-news-view-all {
+    margin-left: auto;
+    padding-inline: 0;
+    font-size: 12px;
+  }
+
+  .tech-news-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(2, auto);
+  }
+
+  .tech-news-card {
+    padding: 0;
+    border-radius: 16px;
+  }
+
+  .tech-news-card:nth-child(n + 5) {
+    display: none;
+  }
+
+  .tech-news-card a {
+    gap: 0;
+  }
+
+  .tech-news-card img {
+    border-radius: 16px 16px 0 0;
+  }
+
+  .tech-news-card span {
+    height: 60px;
+    margin: 8px;
+    font-weight: 700;
+    line-height: 20px;
+    -webkit-line-clamp: 2;
+  }
+}

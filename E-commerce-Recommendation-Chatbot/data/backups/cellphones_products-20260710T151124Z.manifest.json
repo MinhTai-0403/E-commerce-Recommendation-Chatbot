@@ -1,0 +1,178 @@
+{
+  "format": "mongodb-extended-json-lines-gzip",
+  "formatVersion": 1,
+  "status": "source_cleared",
+  "database": "cosarii",
+  "collection": "cellphones_products",
+  "exportedAt": "2026-07-10T15:11:24.505Z",
+  "sourceCountBefore": 40000,
+  "exportedCount": 40000,
+  "verifiedCount": 40000,
+  "compressedBytes": 64508032,
+  "sha256": "a4310e3849ac4047e76d3892f400371526b6f0f360afad82b6041f5767a52062",
+  "backupFile": "data\\backups\\cellphones_products-20260710T151124Z.ejsonl.gz",
+  "collectionOptions": {},
+  "indexes": [
+    {
+      "v": 2,
+      "key": {
+        "_id": 1
+      },
+      "name": "_id_"
+    },
+    {
+      "v": 2,
+      "key": {
+        "slug": 1
+      },
+      "name": "slug_1",
+      "background": true
+    },
+    {
+      "v": 2,
+      "key": {
+        "name": 1
+      },
+      "name": "name_1",
+      "background": true
+    },
+    {
+      "v": 2,
+      "key": {
+        "brand": 1
+      },
+      "name": "brand_1",
+      "background": true
+    },
+    {
+      "v": 2,
+      "key": {
+        "category": 1
+      },
+      "name": "category_1",
+      "background": true
+    },
+    {
+      "v": 2,
+      "key": {
+        "currentPrice": 1
+      },
+      "name": "currentPrice_1",
+      "background": true
+    },
+    {
+      "v": 2,
+      "key": {
+        "updatedAt": -1
+      },
+      "name": "updatedAt_-1",
+      "background": true
+    },
+    {
+      "v": 2,
+      "key": {
+        "scrapedAt": -1
+      },
+      "name": "scrapedAt_-1",
+      "background": true
+    },
+    {
+      "v": 2,
+      "key": {
+        "url": 1
+      },
+      "name": "url_1",
+      "unique": true
+    },
+    {
+      "v": 2,
+      "key": {
+        "source": 1,
+        "slug": 1
+      },
+      "name": "source_1_slug_1"
+    },
+    {
+      "v": 2,
+      "key": {
+        "webFreshnessScore": -1,
+        "realWorldYear": -1,
+        "effectiveRealWorldYear": -1,
+        "sitemapSortRank": -1,
+        "updatedAt": -1
+      },
+      "name": "webFreshnessScore_-1_realWorldYear_-1_effectiveRealWorldYear_-1_sitemapSortRank_-1_updatedAt_-1"
+    },
+    {
+      "v": 2,
+      "key": {
+        "stockStatus": 1,
+        "categoryName": 1,
+        "webFreshnessScore": -1
+      },
+      "name": "stockStatus_1_categoryName_1_webFreshnessScore_-1"
+    },
+    {
+      "v": 2,
+      "key": {
+        "seedOnly": 1
+      },
+      "name": "seedOnly_1"
+    },
+    {
+      "v": 2,
+      "key": {
+        "seedOnly": 1,
+        "sitemapSortRank": -1,
+        "webFreshnessScore": -1,
+        "updatedAt": 1
+      },
+      "name": "seedOnly_1_sitemapSortRank_-1_webFreshnessScore_-1_updatedAt_1"
+    },
+    {
+      "v": 2,
+      "key": {
+        "slug": 1
+      },
+      "name": "products_slug",
+      "sparse": true
+    },
+    {
+      "v": 2,
+      "key": {
+        "brand": 1,
+        "currentPrice": 1
+      },
+      "name": "products_brand_price"
+    },
+    {
+      "v": 2,
+      "key": {
+        "sku": 1
+      },
+      "name": "products_sku",
+      "sparse": true
+    },
+    {
+      "v": 2,
+      "key": {
+        "category": 1,
+        "currentPrice": 1
+      },
+      "name": "products_category_price"
+    },
+    {
+      "v": 2,
+      "key": {
+        "createdAt": -1
+      },
+      "name": "products_created"
+    }
+  ],
+  "clearedAt": "2026-07-10T15:12:25.180Z",
+  "deletedCount": 40000,
+  "remainingCount": 0,
+  "collectionStillExists": true,
+  "indexCountBefore": 19,
+  "indexCountAfter": 19
+}

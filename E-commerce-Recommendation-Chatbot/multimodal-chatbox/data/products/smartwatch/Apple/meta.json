@@ -1,0 +1,117 @@
+[
+  {
+    "id": "Apple Watch SE 2 2024 40mm (GPS)",
+    "name": "Apple Watch Se 2 2024 40Mm (Gps)",
+    "brand": "Apple",
+    "category": "Smart Watch",
+    "price": 5590000,
+    "currency": "VND",
+    "description": "Apple Watch SE 2 2024 40mm viền nhôm dây cao su mang đến thiết kế mới mẻ với kích thước 40mm cùng bộ kính cường lực Ion-X cứng cáp. Sử dụng con chip S8 SiP cùng khả năng theo dõi nhịp tim, cùng nhiều tính năng như theo dõi giấc ngủ, phát hiện té ngã Apple Watch SE 2024 sẽ giúp bạn theo dõi sức khỏe liên tục cả ngày.",
+    "specs": {
+      "Công nghệ màn hình": "Retina LTPO OLED \n Độ sáng tối đa lên đến 1000 nit",
+      "Đường kính mặt": "40mm",
+      "Kích thước cổ tay phù hợp": "13-18cm",
+      "Nghe,gọi": "Nghe gọi qua Bluetooth",
+      "Tiện ích sức khoẻ": "Chế độ luyện tập, Theo dõi giấc ngủ, Đo nhịp tim, Đếm bước chân, Tính quãng đường chạy, Phát hiện té ngã, Cảnh báo nhịp tim bất thường, Theo dõi chu kỳ",
+      "Tương thích": "iPhone Xs trở lên, bao gồm iPhone SE (thế hệ thứ 2 trở lên), sử dụng iOS 18 trở lên",
+      "Thời lượng pin": "Chế độ bình thường: 18 giờ"
+    },
+    "image": "Apple Watch SE 2 2024 40mm (GPS).png"
+  },
+  {
+    "id": "Apple Watch SE 2 2024 44mm (GPS)",
+    "name": "Apple Watch Se 2 2024 44Mm (Gps)",
+    "brand": "Apple",
+    "category": "Smart Watch",
+    "price": 6490000,
+    "currency": "VND",
+    "description": "Apple Watch SE 2 2024 44mm viền nhôm dây cao su với màn hình 44mm, sử dụng công nghệ Retina OLED, đảm bảo độ hiển thị rõ nét. Viền nhôm của Apple Watch SE 2024 này được thiết kế nhẹ nhàng, bền bỉ, tăng độ bền mà không gây nặng nề khi đeo. Dây cao su vừa mềm mại, vừa chống nước, đảm bảo sự thoải mái cho các hoạt động thể thao và vận động hằng ngày.",
+    "specs": {
+      "Công nghệ màn hình": "Retina LTPO OLED \n Độ sáng tối đa lên đến 1000 nit",
+      "Đường kính mặt": "44mm",
+      "Kích thước cổ tay phù hợp": "14-19cm",
+      "Nghe,gọi": "Nghe gọi qua Bluetooth",
+      "Tiện ích sức khoẻ": "Chế độ luyện tập, Theo dõi giấc ngủ, Đo nhịp tim, Đếm bước chân, Tính quãng đường chạy, Phát hiện té ngã, Cảnh báo nhịp tim bất thường, Theo dõi chu kỳ",
+      "Tương thích": "iPhone Xs trở lên, bao gồm iPhone SE (thế hệ thứ 2 trở lên), sử dụng iOS 18 trở lên",
+      "Thời lượng pin": "Chế độ bình thường: 18 giờ"
+    },
+    "image": "Apple Watch SE 2 2024 44mm (GPS).png"
+  },
+  {
+    "id": "Apple Watch Series 10 42mm (GPS)",
+    "name": "Apple Watch Series 10 42Mm (Gps)",
+    "brand": "Apple",
+    "category": "Smart Watch",
+    "price": 10290000,
+    "currency": "VND",
+    "description": "Apple Watch Series 10 42mm xử lý tác vụ hiệu quả qua chip S10 SiP lõi kép 64 bit, đi kèm đa tính năng và màn hình LTPO3 hiển thị độ sáng 2000 nits. Phiên bản Apple Watch này còn có thể chống nước 50 mét phù hợp mọi hoạt động. Ngoài ra, thiết bị cho phép hoạt động ở chế độ thường với thời lượng 18 giờ, kèm theo công nghệ sạc nhanh hiện đại. ",
+    "specs": {
+      "Công nghệ màn hình": "Màn hình Retina LTPO3 Luôn Bật \n OLED góc rộng \n Sáng hơn lên đến 40% khi nhìn từ góc nghiêng \n Độ sáng tối đa lên đến 2000 nit",
+      "Kích thước màn hình": "989mm",
+      "Đường kính mặt": "42mm",
+      "Kích thước cổ tay phù hợp": "13-18cm",
+      "Nghe,gọi": "Nghe gọi qua Bluetooth",
+      "Tiện ích sức khoẻ": "Chế độ luyện tập, Theo dõi giấc ngủ, Đo nhịp tim, Đo lượng oxy trong máu, Đếm bước chân, Tính calo tiêu thụ, Tính quãng đường chạy, Đo mức độ stress, Cảm biến nhiệt độ, Phát hiện té ngã, Cảnh báo nhịp tim bất thường, Đo điện tâm đồ, Theo dõi chu kỳ",
+      "Tương thích": "iPhone Xs trở lên, bao gồm iPhone SE (thế hệ thứ 2 trở lên) sử dụng iOS 18 trở lên",
+      "Thời lượng pin": "Chế độ bình thường: 18 giờ \n Chế độ nguồn điện thấp: 36 giờ"
+    },
+    "image": "Apple Watch Series 10 42mm (GPS).png"
+  },
+  {
+    "id": "Apple Watch Series 10 46mm (GPS)",
+    "name": "Apple Watch Series 10 46Mm (Gps)",
+    "brand": "Apple",
+    "category": "Smart Watch",
+    "price": 11290000,
+    "currency": "VND",
+    "description": "Apple Watch Series 10 46mm sở hữu mặt số 46mm với màn hình lớn nhất từng có với vỏ nhôm được đánh bóng thế hệ mới. Đồng hồ có độ mỏng nhất so với các thế hệ trước cùng thời lượng pin vượt trội, sạc nhanh khoảng 80% trong 30 phút. Apple Watch Series 10 được trang bị cảm biến chính xác theo dõi giấc ngủ, nhịp tim cùng các chỉ số luyện tập. Ngoài ra những tính năng thông minh cùng trợ giúp an toàn trên Series 10 cũng được tích hợp để hỗ trợ ngay khi bạn cần.",
+    "specs": {
+      "Công nghệ màn hình": "Màn hình Retina LTPO3 Luôn Bật \n OLED góc rộng \n Sáng hơn lên đến 40% khi nhìn từ góc nghiêng \n Độ sáng tối đa lên đến 2000 nit",
+      "Đường kính mặt": "46mm",
+      "Kích thước cổ tay phù hợp": "14-19cm",
+      "Nghe,gọi": "Nghe gọi qua Bluetooth",
+      "Tiện ích sức khoẻ": "Chế độ luyện tập, Theo dõi giấc ngủ, Đo nhịp tim, Đo lượng oxy trong máu, Đếm bước chân, Tính calo tiêu thụ, Tính quãng đường chạy, Đo mức độ stress, Cảm biến nhiệt độ, Phát hiện té ngã, Cảnh báo nhịp tim bất thường, Đo điện tâm đồ, Theo dõi chu kỳ",
+      "Tương thích": "iPhone Xs trở lên, bao gồm iPhone SE (thế hệ thứ 2 trở lên) sử dụng iOS 18 trở lên",
+      "Thời lượng pin": "Chế độ bình thường: 18 giờ \n Chế độ nguồn điện thấp: 36 giờ"
+    },
+    "image": "Apple Watch Series 10 46mm (GPS).png"
+  },
+  {
+    "id": "Apple Watch Series 10 46mm 4G",
+    "name": "Apple Watch Series 10 46Mm 4G",
+    "brand": "Apple",
+    "category": "Smart Watch",
+    "price": 19490000,
+    "currency": "VND",
+    "description": "Apple Watch Series 10 46mm 4G viền Titan dây thép với màn hình OLED lớn và hiệu suất mạnh mẽ nhờ chip S10, mang đến trải nghiệm vượt trội cho người dùng. Apple Watch Seri 10 còn hỗ trợ các tính năng an toàn như phát hiện va chạm, phát hiện ngã. Với thời lượng pin lên đến 18 giờ và khả năng sạc nhanh ấn tượng, giúp bạn thoải mái cả ngày.",
+    "specs": {
+      "Công nghệ màn hình": "Màn hình Retina LTPO3 Luôn Bật \n OLED góc rộng \n Sáng hơn lên đến 40% khi nhìn từ góc nghiêng \n Độ sáng tối đa lên đến 2000 nit",
+      "Đường kính mặt": "46mm",
+      "Kích thước cổ tay phù hợp": "13-18cm",
+      "Nghe,gọi": "Nghe gọi qua eSim",
+      "Tiện ích sức khoẻ": "Chế độ luyện tập, Theo dõi giấc ngủ, Đo nhịp tim, Đo lượng oxy trong máu, Đếm bước chân, Tính calo tiêu thụ, Tính quãng đường chạy, Đo mức độ stress, Cảm biến nhiệt độ, Phát hiện té ngã, Cảnh báo nhịp tim bất thường, Đo điện tâm đồ, Theo dõi chu kỳ",
+      "Tương thích": "iPhone Xs trở lên, bao gồm iPhone SE (thế hệ thứ 2 trở lên) sử dụng iOS 18 trở lên",
+      "Thời lượng pin": "Chế độ bình thường: 18 giờ \n Chế độ nguồn điện thấp: 36 giờ"
+    },
+    "image": "Apple Watch Series 10 46mm 4G.png"
+  },
+  {
+    "id": "Apple Watch Ultra 2 2024 49mm 4G",
+    "name": "Apple Watch Ultra 2 2024 49Mm 4G",
+    "brand": "Apple",
+    "category": "Smart Watch",
+    "price": 21690000,
+    "currency": "VND",
+    "description": "Apple Watch Ultra 2 2024 49mm viền Titan đen dây cao su sở hữu kích thước mặt kính 49mm kết hợp với dây cao su thoáng khí, phù hợp tập luyện thể thao. Đồng hồ Apple đi kèm công nghệ kết nối 4G nhanh chóng hỗ trợ liên lạc dễ dàng. Apple Watch Ultra 2 cũng tích hợp đa dạng bài tập cùng cảm biến theo dõi giấc ngủ, nhịp tim,..",
+    "specs": {
+      "Công nghệ màn hình": "Retina LTPO2 OLED \n Độ sáng lên đến 3000 nit",
+      "Đường kính mặt": "49mm",
+      "Kích thước cổ tay phù hợp": "13-20cm",
+      "Nghe,gọi": "Nghe gọi qua eSim",
+      "Tiện ích sức khoẻ": "Chế độ luyện tập, Theo dõi giấc ngủ, Đo nhịp tim, Đo lượng oxy trong máu, Đếm bước chân, Tính calo tiêu thụ, Tính quãng đường chạy, Đo mức độ stress, Cảm biến nhiệt độ, Phát hiện té ngã, Cảnh báo nhịp tim bất thường, Đo điện tâm đồ, Đo VO2 max (Đo lượng tiêu thụ oxy tối đa), Theo dõi chu kỳ",
+      "Tương thích": "iOS 18 trở lên",
+      "Thời lượng pin": "Lên đến 36 giờ khi sử dụng bình thường \n Lên đến 72 giờ ở Chế Độ Nguồn Điện Thấp"
+    },
+    "image": "Apple Watch Ultra 2 2024 49mm 4G.png"
+  }
+]

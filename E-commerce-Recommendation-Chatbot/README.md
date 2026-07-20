@@ -1,0 +1,153 @@
+# E-commerce Recommendation Chatbot
+
+AI chatbot hỗ trợ gợi ý sản phẩm thương mại điện tử bằng hình ảnh và ngôn ngữ tự nhiên.
+
+## Giới thiệu
+
+Đây là hệ thống chatbot gợi ý sản phẩm thương mại điện tử sử dụng trí tuệ nhân tạo nhằm hỗ trợ người dùng tìm kiếm và đề xuất sản phẩm thông qua văn bản hoặc hình ảnh.
+
+Hệ thống kết hợp nhiều công nghệ AI hiện đại như:
+
+- Gemini API để hội thoại
+- OpenCLIP để trích xuất đặc trưng hình ảnh
+- FAISS để tìm kiếm sản phẩm tương đồng
+- MongoDB để lưu trữ dữ liệu sản phẩm
+- Flask để xây dựng API Backend
+
+
+## Tổng quan
+
+Dự án gồm hai phần chính:
+
+- `multimodal-chatbox/`: ứng dụng Python/Flask cho chatbot, nhận diện hình ảnh và gợi ý sản phẩm.
+- `src/` và `scripts/`: pipeline Node.js để kết nối MongoDB, crawl dữ liệu sản phẩm CellphoneS, kiểm tra coverage sitemap và xem thống kê dữ liệu.
+
+## Công nghệ
+
+- Python, Flask
+- YOLOv8
+- Gemini API
+- OpenCV
+- Node.js
+- MongoDB Atlas
+
+## Chạy chatbot
+
+```bash
+cd multimodal-chatbox
+pip install -r requirements.txt
+python app.py
+```
+
+## Cấu hình data pipeline
+
+Tạo file `.env` ở root repo dựa trên `.env.example`:
+
+```bash
+MONGODB_URI=mongodb+srv://<username>:<password>@<cluster-url>/?appName=<app-name>
+MONGODB_DB=cosarii
+MONGODB_PRODUCTS_COLLECTION=cellphones_products
+MONGODB_PRODUCT_DETAILS_COLLECTION=cellphones_product_details
+```
+
+File `.env` chứa thông tin kết nối thật và đã được ignore bởi git.
+
+## Lệnh MongoDB và CellphoneS
+
+```bash
+npm install
+npm run mongo:test
+npm run mongo:cellphones:summary
+npm run mongo:cellphones:export-sample
+npm run scrape:cellphones:sample
+npm run scrape:cellphones:details -- --url=https://cellphones.com.vn/iphone-17-pro-max.html
+```
+
+Các lệnh chính:
+
+- `npm run mongo:test`: kiểm tra kết nối MongoDB.
+- `npm run mongo:cellphones:summary`: xem số lượng sản phẩm CellphoneS đã lưu và một sản phẩm mẫu.
+- `npm run mongo:cellphones:export-sample`: xuất một vài sản phẩm từ MongoDB ra `data/cellphones-products.sample.json`.
+- `npm run scrape:cellphones:sample`: crawl thử một sample nhỏ.
+- `npm run scrape:cellphones`: chạy scraper tùy biến bằng tham số CLI.
+- `npm run scrape:cellphones:details -- --url=<url>`: crawl chi tiết riêng cho trang sản phẩm, gồm FAQ, thông số, đặc điểm nổi bật, biến thể, màu sắc, cam kết và nội dung SEO.
+- `npm run verify:cellphones`: kiểm tra URL trong sitemap đã có trong MongoDB chưa.
+- `npm run verify:cellphones -- --sample-missing=0 --report-sitemaps`: xem số URL còn thiếu theo từng sitemap để chia worker crawl.
+
+## Chạy API backend
+
+API backend Node.js đọc `.env` ở root repo và truy vấn trực tiếp MongoDB. Mặc định chạy tại `http://localhost:5050`.
+
+```bash
+npm run api:start
+```
+
+Frontend clone gọi API qua `VITE_API_BASE_URL`. Khi chạy local, có thể copy env mẫu rồi bật Vite:
+
+```bash
+copy cellphones-clone\.env.example cellphones-clone\.env.local
+cd cellphones-clone
+npm run dev
+```
+
+Endpoint chính:
+
+- `GET /api/health`: kiểm tra MongoDB và collection hiện tại.
+- `GET /api/products?limit=20&page=1&q=iphone&category=Điện thoại&brand=Apple`: danh sách sản phẩm.
+- `GET /api/products/:slug`: chi tiết sản phẩm theo slug/SKU/ObjectId.
+- `GET /api/products/:slug/details`: chi tiết mở rộng đã crawl riêng từ trang CellphoneS.
+- `GET /api/products/:slug/related?limit=8`: sản phẩm liên quan.
+- `POST /api/products`: tạo sản phẩm mới cho admin.
+- `PATCH /api/products/:slug`: sửa một phần sản phẩm.
+- `PUT /api/products/:slug`: cập nhật sản phẩm.
+- `DELETE /api/products/:slug`: xóa sản phẩm.
+
+Nếu đặt `ADMIN_API_KEY` trong `.env`, các route ghi (`POST`, `PUT`, `PATCH`, `DELETE`) cần gửi header:
+
+```text
+Authorization: Bearer <ADMIN_API_KEY>
+```
+
+## Dữ liệu
+
+Dữ liệu CellphoneS đầy đủ đang nằm trong MongoDB collection `cellphones_products`.
+
+Dữ liệu chi tiết từng trang sản phẩm dùng cơ chế hybrid để không làm đầy MongoDB Atlas free tier:
+
+- MongoDB collection `cellphones_product_details` chỉ lưu manifest nhỏ: slug, URL, giá, ảnh đại diện, counts và `storage.path`.
+- Full detail 1-1 như media, biến thể, khuyến mãi, thông số, FAQ và SEO HTML được lưu thành file nén `.json.gz` trong `data/product-details/`.
+- API `GET /api/products/:slug/details` đọc manifest rồi hydrate full detail từ file. Nếu chưa có manifest/file, API sẽ lazy scrape từ CellphoneS, ghi file local và cache manifest vào MongoDB.
+
+Migration detail cũ sang file local:
+
+```bash
+npm run mongo:details:migrate-local
+```
+
+Crawl tiếp detail còn thiếu sau khi đã chuyển sang storage local:
+
+```bash
+npm run scrape:cellphones:details -- --from-products --limit=all --batch-size=100 --concurrency=20 --timeout-ms=45000 --retries=3
+```
+
+Để người mới đọc repo vẫn nhìn thấy cấu trúc dữ liệu mà không cần mở MongoDB, repo có file sample:
+
+```text
+data/cellphones-products.sample.json
+```
+
+Mỗi sản phẩm được chuẩn hóa theo các field như `url`, `name`, `brand`, `price`, `priceCurrency`, `availability`, `categories`, `primaryImage`, `sourceUrls`, `scrapedAt`.
+
+## Chức năng chính
+
+- Tìm kiếm sản phẩm bằng văn bản.
+- Tìm kiếm sản phẩm bằng hình ảnh.
+- Gợi ý sản phẩm tương tự.
+- Hỗ trợ hội thoại với AI.
+- Tìm kiếm nhanh bằng FAISS.
+- Quản lý dữ liệu sản phẩm bằng MongoDB.
+
+
+## Ghi chú crawl
+
+CellphoneS có bot protection/rate limit. Khi crawl nhiều luồng quá nhanh, scraper sẽ dừng thay vì ghi dữ liệu lỗi vào MongoDB. Nên ưu tiên chạy `scripts/scrape-cellphones-adaptive.ps1` để tự cooldown và resume theo sitemap.

@@ -1,0 +1,119 @@
+[
+  {
+    "id": "Vòng đeo tay thông minh Huawei Band 10 khung kim loại",
+    "name": "Vòng Đeo Tay Thông Minh Huawei Band 10 Khung Kim Loại",
+    "brand": "Huawei",
+    "category": "Smart Watch",
+    "price": 870000,
+    "currency": "VND",
+    "description": "Vòng đeo tay thông minh Huawei Band 10 khung kim loại sở hữu màn hình AMOLED 1.47 inch sắc nét, giúp người dùng dễ dàng quan sát thông tin rõ ràng. Nhờ được trang bị khoảng 100 chế độ luyện tập hỗ trợ bởi AI thông minh, thiết bị giúp tối ưu hiệu quả vận động. Đặc biệt, sản phẩm đồng hồ thông minh Huawei còn sở hữu thời lượng pin lên tới 14 ngày, hạn chế gián đoạn khi sử dụng.",
+    "specs": {
+      "Công nghệ màn hình": "Màn hình màu AMOLED",
+      "Kích thước màn hình": "1.47 inches",
+      "Kích thước cổ tay phù hợp": "Đen nhám, Xanh lá, Xanh dương, Đen: Từ 13-21cm",
+      "Nghe, gọi": "Không",
+      "Tiện ích sức khỏe": "Chế độ luyện tập, Theo dõi giấc ngủ, Đo nhịp tim, Đo lượng oxy trong máu, Đo mức độ stress, Cảnh báo nhịp tim bất thường, Theo dõi chu kỳ, Tình trạng HRV (Heart Rate Variability), Bài tập thở, Bài tập thư giãn",
+      "Tương thích": "Android 9.0 trở lên \n iOS 13.0 trở lên",
+      "Thời lượng pin": "Thời lượng sử dụng tối đa: 14 ngày \n Thời lượng sử dụng thường xuyên 8 ngày \n Thời lượng sử dụng khi bật AOD 3 ngày"
+    },
+    "image": "Vòng đeo tay thông minh Huawei Band 10 khung kim loại.png"
+  },
+  {
+    "id": "Vòng đeo tay thông minh Huawei Band 7",
+    "name": "Vòng Đeo Tay Thông Minh Huawei Band 7",
+    "brand": "Huawei",
+    "category": "Smart Watch",
+    "price": 690000,
+    "currency": "VND",
+    "description": "Về thiết kế, Huawei Band 7 có kích thước nhỏ gọn và trọng lượng chỉ khoảng 16 gram, khiến nó trở thành một trong những mẫu đồng hồ thông minh nhỏ gọn nhất hiện nay. Màn hình AMOLED 1.47 inch của Huawei Band 7 mang đến trải nghiệm hiển thị sắc nét, sống động.",
+    "specs": {
+      "Công nghệ màn hình": "AMOLED \n Hỗ trợ màn hình luôn bật",
+      "Kích thước màn hình": "1.47 inches",
+      "Đường kính mặt": "44mm",
+      "Kích thước cổ tay phù hợp": "Từ 14-22cm",
+      "Nghe, gọi": "Không",
+      "Tiện ích sức khỏe": "Chế độ luyện tập, Theo dõi giấc ngủ, Đo lượng oxy trong máu, Đếm bước chân, Tính quãng đường chạy, Cảnh báo nhịp tim bất thường",
+      "Tương thích": "Android 6.0 trở lên \n iOS 9.0 trở lên",
+      "Thời lượng pin": "Chế độ thông minh: 14 ngày \n Sử dụng thường xuyên 10 ngày"
+    },
+    "image": "Vòng đeo tay thông minh Huawei Band 7.png"
+  },
+  {
+    "id": "Vòng đeo tay thông minh Huawei Band 9",
+    "name": "Vòng Đeo Tay Thông Minh Huawei Band 9",
+    "brand": "Huawei",
+    "category": "Smart Watch",
+    "price": 670000,
+    "currency": "VND",
+    "description": "Vòng đeo tay thông minh Huawei Band 9 sở hữu màn hình có kích thước 1.47 inch với tấm nền AMOLED có khả năng mang đến chất lượng hình ảnh sắc nét. Đặc biệt hơn, thiết bị còn tích hợp đến 100 chế độ tập luyện cùng công nghệ TruSleep 4.0 hỗ trợ theo dõi chất lượng giấc ngủ. Viên pin trong vòng đeo tay có thời lượng hoạt động đến 14 ngày khi sử dụng với nhiều tác vụ nặng, lên đến 9 ngày ở chế độ sử dụng thông thường.",
+    "specs": {
+      "Công nghệ màn hình": "AMOLED",
+      "Kích thước màn hình": "1.47 inches",
+      "Đường kính mặt": "44mm",
+      "Kích thước cổ tay phù hợp": "Từ 120-190mm",
+      "Tiện ích sức khỏe": "Theo dõi giấc ngủ, Đo nhịp tim, Đo lượng oxy trong máu, Đếm bước chân, Tính calo tiêu thụ, Tính quãng đường chạy, Đo mức độ stress, Cảnh báo nhịp tim bất thường, Theo dõi chu kỳ",
+      "Tương thích": "Android 8.0 trở lên \n iOS 13.0 trở lên",
+      "Thời lượng pin": "Tối đa 14 ngày \n Sử dụng thường xuyên 9 ngày \n Bật AOD: 3 ngày"
+    },
+    "image": "Vòng đeo tay thông minh Huawei Band 9.png"
+  },
+  {
+    "id": "Đồng hồ thông minh Huawei Watch Fit 3",
+    "name": "Đồng Hồ Thông Minh Huawei Watch Fit 3",
+    "brand": "Huawei",
+    "category": "Smart Watch",
+    "price": 1990000,
+    "currency": "VND",
+    "description": "Đồng Hồ Thông Minh Huawei Watch Fit 3 chính hãng Huawei",
+    "specs": {
+      "Công nghệ màn hình": "Amoled",
+      "Kích thước màn hình": "1.82 inches",
+      "Đường kính mặ": "43.2mm",
+      "Nghe, gọi": "Nghe gọi qua Bluetooth",
+      "Tiện ích sức khoẻ": "Chế độ luyện tập, Theo dõi giấc ngủ, Đo nhịp tim, Đo lượng oxy trong máu, Tính calo tiêu thụ, Đo mức độ stress, Cảnh báo nhịp tim bất thường",
+      "Tương thích": "Android 8.0 trở lêniOS 13.0 trở lên",
+      "Thời lượng pin": "Chế độ thông minh: 10 ngày \n Sử dụng thường xuyên: 7 ngày \n Bật AOD: 4 ngày"
+    },
+    "image": "Đồng hồ thông minh Huawei Watch Fit 3.png"
+  },
+  {
+    "id": "Đồng hồ thông minh Huawei Watch Fit 4",
+    "name": "Đồng Hồ Thông Minh Huawei Watch Fit 4",
+    "brand": "Huawei",
+    "category": "Smart Watch",
+    "price": 2740000,
+    "currency": "VND",
+    "description": "Đồng hồ Huawei Watch Fit 4 sở hữu màn hình AMOLED 1.82 inch sắc nét, vỏ làm từ hợp kim nhôm, kích thước 43.0 × 38.0 × 9.5 mm nặng khoảng 27g (chưa bao gồm dây). Sản phẩm đồng hồ thông minh Huawei hỗ trợ kết nối Bluetooth 5.2, và tương thích với Android 8.0 hoặc iOS 13.0 trở lên. Pin đồng hồ sử dụng tối đa 10 ngày, kháng nước chuẩn 5ATM và sở hữu phiên bản dây đeo cao su tổng hợp nhiều màu.",
+    "specs": {
+      "Công nghệ màn hình": "AMOLED",
+      "Kích thước màn hình": "1.82 inches",
+      "Đường kính mặt": "43 mm",
+      "Kích thước cổ tay phù hợp": "Tím: 120-190mm Xám \n Trắng và Đen: 130-210mm",
+      "Nghe,gọi": "Nghe gọi qua Bluetooth",
+      "Tiện ích sức khoẻ": "Chế độ luyện tập, Theo dõi giấc ngủ, Đo nhịp tim, Đo lượng oxy trong máu, Đếm bước chân, Tính calo tiêu thụ, Tính quãng đường chạy, Đo mức độ stress, Cảnh báo nhịp tim bất thường, Theo dõi chu kỳ, Bài tập thở, Thiền",
+      "Tương thích": "Android 8.0 trở lên \n iOS 13.0 trở lên",
+      "Thời lượng pin": "Thời lượng sử dụng tối đa 10 ngày \n Thời lượng sử dụng thường xuyên 7 ngày \n Thời lượng sử dụng khi bật AOD 4 ngày"
+    },
+    "image": "Đồng hồ thông minh Huawei Watch Fit 4.png"
+  },
+  {
+    "id": "Đồng hồ thông minh Huawei Watch GT4 dây da",
+    "name": "Đồng Hồ Thông Minh Huawei Watch Gt4 Dây Da",
+    "brand": "Huawei",
+    "category": "Smart Watch",
+    "price": 3990000,
+    "currency": "VND",
+    "description": "Huawei Watch GT 4 gây ấn tượng với người dùng bởi 2 phiên bản 46mm và 41mm thiết kế sang trọng và màu sắc đa dạng: xanh, xám, nâu, đen, trắng bạc. Bên cạnh đó, thời lượng pin sử dụng lên đến 14 ngày với bản 46mm và 7 ngày với bản 41mm giúp nâng cao trải nghiệm sử dụng mà không cần lo lắng gián đoạn giữa chừng. Các tính năng khác nổi bật phải kể đến như: huấn luyện viên thông minh với hơn 100 bài luyện tập, theo dõi giấc ngủ TruSleep, phát hiện nhịp tim bất thường, dự đoán trước chu kỳ và thời gian rụng trứng ở nữ giới,...",
+    "specs": {
+      "Công nghệ màn hình": "AMOLED",
+      "Kích thước màn hình": "1.32 inches",
+      "Đường kính mặt": "41mm",
+      "Kích thước cổ tay phù hợp": "120-190 cm",
+      "Nghe,gọi": "Nghe gọi qua Bluetooth",
+      "Tiện ích sức khoẻ": "Chế độ luyện tập, Theo dõi giấc ngủ, Đo nhịp tim, Đo lượng oxy trong máu, Đếm bước chân, Tính calo tiêu thụ, Tính quãng đường chạy, Đo mức độ stress, Cảnh báo nhịp tim bất thường, Đo VO2 max (Đo lượng tiêu thụ oxy tối đa), Theo dõi chu kỳ",
+      "Tương thích": "Android 8.0 trở lên \n iOS 13.0 trở lên",
+      "Thời lượng pin": "Chế độ tiết kiệm pin: 7 ngày \n Sử dụng pin thông thường lên đến 4 ngày \n Bật AOD: lên đến 2 ngày"
+    },
+    "image": "Đồng hồ thông minh Huawei Watch GT4 dây da.png"
+  }
+]

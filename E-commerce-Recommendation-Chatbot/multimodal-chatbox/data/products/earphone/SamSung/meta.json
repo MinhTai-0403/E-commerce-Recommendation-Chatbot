@@ -1,0 +1,78 @@
+[
+  {
+    "id": "Tai nghe Bluetooth Samsung Galaxy Buds Core (ANC)",
+    "name": "Tai Nghe Bluetooth Samsung Galaxy Buds Core (Anc)",
+    "brand": "Samsung",
+    "category": "Earphone",
+    "price": 990000,
+    "currency": "VND",
+    "description": "Tai nghe Bluetooth Samsung Galaxy Buds Core sở hữu công nghệ âm thanh không dây hiện đại, với chuẩn kết nối Bluetooth 5.4, cùng khả năng kháng nước IP54. Thời lượng pin ấn tượng đạt 35 giờ sử dụng khi tắt ANC. Sản phẩm trang bị codec AAC, SBC, Scalable Codec, tích hợp AI hỗ trợ đàm thoại rõ ràng, với khả năng phiên dịch cuộc gọi.",
+    "specs": {
+      "Kích thước": "Tai nghe: 19.2 x 17.1 x 22.2 mm \n Hộp sạc: 50.0 x 50.0 x 27.7 mm",
+      "Trọng lượng": "Tai nghe: 5.3g \n Hộp sạc: 31.2g",
+      "Công nghệ âm thanh": "Active Noise Cancelling \n Công nghệ ENC \n Ambient Sound",
+      "Micro": "3 Micro (mỗi tai)",
+      "Cổng kết nối": "Type-C",
+      "Thời gian sử dụng Pin": "Tai nghe: 8.5 giờ (khi tắt ANC) \n Hộp sạc: 35 giờ",
+      "Phương thức điều khiển": "Cảm ứng chạm",
+      "Tính năng khác": "Kháng nước IP54 \n 3 Micro chống ồn \n Tự động chuyển đổi kết nối linh hoạt (Auto Switch) \n Trợ lý ảo Bixby \n Công nghệ tự điều chỉnh theo hướng giọng nói (Beamforming) \n Chế độ thất lạc (Lost Mode) \n Chống ồn chủ động ANC"
+    },
+    "image": "Tai nghe Bluetooth Samsung Galaxy Buds Core (ANC).png"
+  },
+  {
+    "id": "Tai nghe Bluetooth True Wireless Samsung Galaxy Buds 3 Pro",
+    "name": "Tai Nghe Bluetooth True Wireless Samsung Galaxy Buds 3 Pro",
+    "brand": "Samsung",
+    "category": "Earphone",
+    "price": 3690000,
+    "currency": "VND",
+    "description": "Tai nghe SamSung Galaxy Buds 3 Pro trang bị dải tần âm rộng từ 2.4GHz đến 2.48GHz và phạm vi kết nối lên đến 10-12 mét giúp đảm bảo kết nối ổn định hơn. Sản phẩm trang bị công nghệ Bluetooth 5.0 + EDR kết hợp sạc không dây Qi và tương thích với cả dòng điện thoại thông minh iPhone và Android. Bên cạnh đó, hộp sạc có pin dung lượng là 400mAh , cung cấp thời gian sạc nhanh trong khoảng 1-2 giờ và đủ để sử dụng trong thời gian dài. Các loa được tích hợp bao gồm loa trầm 11mm và loa 6.5mm, mang lại âm thanh rõ ràng. ",
+    "specs": {
+      "Kích thước": "Tai nghe: 18.1 x 19.8 x 33.2 mm \n Hộp sạc: 58.9 x 48.7 x 24.4 mm",
+      "Trọng lượng": "Tai nghe: 5.4g \n Hộp sạc: 46.5g",
+      "Công nghệ âm thanh": "Chống ồn chủ động ANC \n Âm thanh Hi-Fi 24 bit \n Âm thanh vòm 360 \n Âm thanh xung quanh \n Hệ thống âm thanh kép \n Hệ thống loa 2 chiều",
+      "Micro": "Có \n 6 Micro",
+      "Thời gian sử dụng Pin": "Tai nghe: 7 giờ (Tắt ANC) / 6 giờ (Bật ANC) \n Hộp sạc: 30 giờ (Tắt ANC) / 26 giờ (Bật ANC)",
+      "Phương thức điều khiển": "Cảm ứng chạm \n Nhấn thanh bar",
+      "Tính năng khác": "Tự động chuyển đổi kết nối giữa các thiết bị Galaxy \n Phiên dịch viên hỗ trợ nghe bản dichj trực tiếp \n Tự động tinh chỉnh ANC \n Thanh ánh sáng Blade Lights"
+    },
+    "image": "Tai nghe Bluetooth True Wireless Samsung Galaxy Buds 3 Pro.png"
+  },
+  {
+    "id": "Tai nghe Bluetooth True Wireless Samsung Galaxy Buds FE",
+    "name": "Tai Nghe Bluetooth True Wireless Samsung Galaxy Buds Fe",
+    "brand": "Samsung",
+    "category": "Earphone",
+    "price": 1250000,
+    "currency": "VND",
+    "description": "Samsung Galaxy Buds FE tích hợp chức năng chống ồn chủ động (ANC) đi kèm loa một chiều giúp tạo không gian yên tĩnh và cho chất lượng âm thanh tuyệt vời. Thiết kế in-ear dạng vây cá mập của tai nghe đảm bảo ôm sát và thoải mái. Không chỉ vậy, viên pin dung lượng lớn cho cả tai nghe và hộp sạc đảm bảo nguồn năng lượng cả ngày dài. ",
+    "specs": {
+      "Kích thước": "Tai nghe: 19.2 x 17.1 x 22.2 mm \n Hộp sạc: 50.0 x 50.0 x 27.7 mm",
+      "Trọng lượng": "Tai nghe: 5.6g \n Hộp sạc: 40g",
+      "Công nghệ âm thanh": "Chống ổn chủ động ANC",
+      "Micro": "Có \n 6 Micro",
+      "Thời gian sử dụng Pin": "Tai nghe + Hộp sạc: 30 giờ",
+      "Tính năng khác": "Tự điều chỉnh theo hướng giọng nói (Beamforming)"
+    },
+    "image": "Tai nghe Bluetooth True Wireless Samsung Galaxy Buds FE.png"
+  },
+  {
+    "id": "Tai nghe Bluetooth True Wireless Samsung Galaxy Buds2 Pro",
+    "name": "Tai Nghe Bluetooth True Wireless Samsung Galaxy Buds2 Pro",
+    "brand": "Samsung",
+    "category": "Earphone",
+    "price": 2390000,
+    "currency": "VND",
+    "description": "SamSung Galaxy Buds Pro với thiết kế chuẩn công thái học phong cách, ôm khít vào tai, hạn chế rơi khi di chuyển. Tạo cảm giác đắm chìm trong không gian âm nhạc riêng với tính năng chống ồn ANC và 360 Audio. Không phải lo ngại mưa rơi hay tập luyện cường độ cao khi sở hữu chuẩn kháng nước IPX7. Đạt chuẩn Bluetooth 5.3 mới nhất cho kết nối ổn định, nhận dạng thiết bị.",
+    "specs": {
+      "Kích thước": "Tai nghe: 21.6 x 19.9 x 18.7 mm \n Hộp sạc: 50.2 x 50.1 x 27.7 mm",
+      "Trọng lượng": "Tai nghe: 5.5 g \n Hộp sạc: 43.4 g",
+      "Công nghệ âm thanh": "Active Noise Cancelling \n 360 Reality Audio \n Ambient Sound \n Âm thanh Hi-Fi",
+      "Micro": "Có \n 6 Micro",
+      "Thời gian sử dụng Pin": "Tai nghe: Dùng 5 giờ \n Hộp sạc: Dùng 18 giờ (Tắt ANC)",
+      "Phương thức điều khiển": "Cảm ứng chạm",
+      "Tính năng khác": "Trợ Lý ảo Bixby \n Tự động kết nối khi mở hộp sạc \n Chống nước IPX7"
+    },
+    "image": "Tai nghe Bluetooth True Wireless Samsung Galaxy Buds2 Pro.png"
+  }
+]
