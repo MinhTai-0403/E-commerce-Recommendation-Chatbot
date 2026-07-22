@@ -4,6 +4,7 @@ from email.message import EmailMessage
 from html import escape
 from threading import Lock
 from time import monotonic
+from urllib.parse import unquote, urlparse
 
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
@@ -325,7 +326,7 @@ def login_required(view_function):
 # =========================
 # GEMINI CONFIG - GOOGLE GENAI SDK
 # =========================
-GEMINI_API_KEY = os.getenv("API_KEY", "").strip()
+GEMINI_API_KEY = os.getenv("MODEL_KEY", "").strip()
 
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite").strip()
 client = None
@@ -1104,6 +1105,167 @@ def _price_to_number(value):
     return int(digits) if digits else 0
 
 
+def _strip_html_route_value(value):
+    clean = unquote(str(value or "").strip())
+    clean = re.sub(r"^/+|/+$", "", clean)
+    return re.sub(r"\.html?$", "", clean, flags=re.IGNORECASE)
+
+
+def _slugify_route_value(value):
+    text = str(value or "").strip().lower().replace("đ", "d")
+    text = unicodedata.normalize("NFD", text)
+    text = "".join(
+        char for char in text
+        if unicodedata.category(char) != "Mn"
+    )
+    text = re.sub(r"[^a-z0-9]+", "-", text).strip("-")
+    return text or "san-pham"
+
+
+def _route_slug_from_url(value):
+    raw_value = str(value or "").strip()
+    if not raw_value:
+        return ""
+
+    try:
+        parsed_path = urlparse(raw_value).path
+    except Exception:
+        parsed_path = raw_value
+
+    segment = parsed_path.split("/")[-1]
+    return _strip_html_route_value(segment)
+
+
+def _product_detail_slug(product):
+    for key in ("slug", "sku"):
+        value = str(product.get(key) or "").strip()
+        if not value:
+            continue
+        if "://" in value:
+            value = _route_slug_from_url(value)
+        else:
+            value = _strip_html_route_value(value)
+        if value:
+            return value
+
+    for key in ("url", "sourceUrl", "inputUrl"):
+        value = _route_slug_from_url(product.get(key))
+        if value:
+            return value
+
+    source_urls = product.get("sourceUrls")
+    if isinstance(source_urls, (list, tuple)):
+        for item in source_urls:
+            value = _route_slug_from_url(item)
+            if value:
+                return value
+    else:
+        value = _route_slug_from_url(source_urls)
+        if value:
+            return value
+
+    return _slugify_route_value(
+        product.get("name")
+        or product.get("title")
+        or product.get("id")
+        or product.get("_id")
+    )
+
+
+def _product_has_database_identity(product):
+    identity_keys = (
+        "_id", "mongoId", "productKey", "id", "productId", "product_id",
+        "sku", "slug", "url", "sourceUrl", "inputUrl",
+    )
+    if any(str(product.get(key) or "").strip() for key in identity_keys):
+        return True
+
+    source_urls = product.get("sourceUrls")
+    if isinstance(source_urls, (list, tuple)):
+        return any(str(item or "").strip() for item in source_urls)
+
+    return bool(str(source_urls or "").strip())
+
+
+def _product_requires_contact(product, price):
+    if price <= 0:
+        return True
+    if not _product_has_database_identity(product):
+        return True
+
+    status_text = _normalize_search_text([
+        product.get("statusLabel"),
+        product.get("stockNote"),
+        product.get("availability"),
+    ])
+    contact_status_terms = (
+        "lien he", "het hang", "tam het", "ngung kinh doanh",
+        "ngung ban", "sap ve hang", "chua co hang",
+    )
+    return any(
+        _contains_search_term(status_text, term)
+        for term in contact_status_terms
+    )
+
+
+def _product_cart_payload(
+    product,
+    product_id,
+    detail_slug,
+    detail_href,
+    name,
+    brand,
+    image_url,
+    price,
+):
+    def text_value(value):
+        return str(value or "").strip()
+
+    current_price = (
+        _price_to_number(product.get("currentPrice"))
+        or _price_to_number(product.get("price"))
+        or price
+    )
+    original_price = _price_to_number(
+        product.get("originalPrice")
+        or product.get("original_price")
+    )
+
+    payload = {
+        "id": text_value(product_id or detail_slug),
+        "productId": text_value(
+            product.get("productId")
+            or product.get("product_id")
+            or product_id
+            or detail_slug
+        ),
+        "mongoId": text_value(product.get("mongoId") or product.get("_id")),
+        "sku": text_value(product.get("sku") or detail_slug),
+        "slug": text_value(detail_slug),
+        "name": text_value(name),
+        "brand": text_value(product.get("brandName") or brand),
+        "category": text_value(product.get("category")),
+        "image": text_value(image_url),
+        "thumbnail": text_value(image_url),
+        "url": text_value(detail_href),
+        "price": current_price,
+        "currentPrice": current_price,
+        "originalPrice": original_price,
+    }
+
+    return {
+        key: value
+        for key, value in payload.items()
+        if value not in (None, "", [], {})
+    }
+
+
+def _html_data_json(value):
+    return _safe_text(
+        json.dumps(value, ensure_ascii=True, separators=(",", ":"))
+    )
+
+
 def generate_product_cards(
     product_list,
     response_text_vi=None,
@@ -1146,7 +1308,12 @@ def generate_product_cards(
         )
         advice_item = advice_by_id.get(product_id)
         name = str(product.get("name") or product.get("title") or "Không có tên")
-        price = _price_to_number(product.get("price", 0))
+        price = (
+            _price_to_number(product.get("price"))
+            or _price_to_number(product.get("currentPrice"))
+            or _price_to_number(product.get("salePrice"))
+            or _price_to_number(product.get("finalPrice"))
+        )
         brand = str(product.get("brand") or "")
         category = str(product.get("category") or "")
         status_label = str(product.get("statusLabel") or product.get("stockNote") or "")
@@ -1293,6 +1460,71 @@ def generate_product_cards(
             if status_label and status_label != price_text
             else ""
         )
+        detail_slug = _product_detail_slug(product)
+        detail_href = f"/{detail_slug}.html"
+        safe_detail_href = _safe_text(detail_href)
+        safe_cart_payload = _html_data_json(
+            _product_cart_payload(
+                product=product,
+                product_id=product_id,
+                detail_slug=detail_slug,
+                detail_href=detail_href,
+                name=name,
+                brand=brand,
+                image_url=image_url,
+                price=price,
+            )
+        )
+        requires_contact = _product_requires_contact(product, price)
+        can_open_detail = _product_has_database_identity(product) and bool(detail_slug)
+        contact_note_html = (
+            "<p class='chatbot-product-contact-note'>"
+            "S&#7843;n ph&#7849;m n&#224;y c&#7847;n li&#234;n h&#7879; shop &#273;&#7875; "
+            "ki&#7875;m tra gi&#225; v&#224; t&#236;nh tr&#7841;ng h&#224;ng."
+            "</p>"
+            if requires_contact
+            else ""
+        )
+        if requires_contact:
+            detail_action_html = (
+                "<a class='chatbot-product-action chatbot-product-detail-action' "
+                f"href=\"{safe_detail_href}\" "
+                f"data-chatbot-detail-path=\"{safe_detail_href}\" "
+                f"aria-label=\"Xem chi ti&#7871;t {safe_name}\">"
+                "Xem chi ti&#7871;t"
+                "</a>"
+                if can_open_detail
+                else ""
+            )
+            product_actions_html = (
+                "<div class='chatbot-product-actions contact-only'>"
+                f"{detail_action_html}"
+                "<a class='chatbot-product-action chatbot-product-contact-action' "
+                "href=\"/lien-he\" "
+                "data-chatbot-contact-path=\"/lien-he\" "
+                f"aria-label=\"Li&#234;n h&#7879; t&#432; v&#7845;n {safe_name}\">"
+                "Li&#234;n h&#7879; t&#432; v&#7845;n"
+                "</a>"
+                "</div>"
+            )
+        else:
+            product_actions_html = (
+                "<div class='chatbot-product-actions'>"
+                "<a class='chatbot-product-action chatbot-product-detail-action' "
+                f"href=\"{safe_detail_href}\" "
+                f"data-chatbot-detail-path=\"{safe_detail_href}\" "
+                f"aria-label=\"Xem chi ti&#7871;t {safe_name}\">"
+                "Xem chi ti&#7871;t"
+                "</a>"
+                "<a class='chatbot-product-action chatbot-product-checkout-action' "
+                "href=\"/checkout\" "
+                "data-chatbot-checkout-path=\"/checkout\" "
+                f"data-chatbot-cart-product='{safe_cart_payload}' "
+                f"aria-label=\"Mua h&#224;ng {safe_name}\">"
+                "Mua h&#224;ng"
+                "</a>"
+                "</div>"
+            )
 
         html += f"""
         <div class='product-card'
@@ -1322,6 +1554,10 @@ def generate_product_cards(
             {suggestion_html}
 
             {advice_html}
+
+            {contact_note_html}
+
+            {product_actions_html}
         </div>
         """
 
