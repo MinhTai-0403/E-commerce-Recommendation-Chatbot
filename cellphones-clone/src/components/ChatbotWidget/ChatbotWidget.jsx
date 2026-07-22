@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { CART_ADD_EVENT } from '../../hooks/useCart';
 import { getAuthToken } from '../../services/apiAuth';
 import './ChatbotWidget.css';
 
@@ -530,6 +531,53 @@ function ChatbotWidget({ userName = '' }) {
     }
   };
 
+  const navigateWithinApp = (path) => {
+    const nextPath = String(path || '').trim();
+    if (!nextPath || !nextPath.startsWith('/')) return;
+
+    window.history.pushState(null, '', nextPath);
+    window.dispatchEvent(new Event('popstate'));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setIsOpen(false);
+  };
+
+  const handleProductActionClick = (event) => {
+    const actionElement = event.target.closest?.(
+      '[data-chatbot-cart-product], [data-chatbot-checkout-path], [data-chatbot-detail-path], [data-chatbot-contact-path]'
+    );
+    if (!actionElement) return;
+
+    const cartProductValue = actionElement.getAttribute('data-chatbot-cart-product');
+    const checkoutPath = actionElement.getAttribute('data-chatbot-checkout-path') || '/checkout';
+    const detailPath = actionElement.getAttribute('data-chatbot-detail-path');
+    const contactPath = actionElement.getAttribute('data-chatbot-contact-path');
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (cartProductValue) {
+      try {
+        const product = JSON.parse(cartProductValue);
+        window.dispatchEvent(new CustomEvent(CART_ADD_EVENT, {
+          detail: { product, quantity: 1 },
+        }));
+        navigateWithinApp(checkoutPath);
+      } catch {
+        addBotMessage('Minh chua doc duoc thong tin san pham nay. Ban thu mo chi tiet san pham nhe.');
+      }
+      return;
+    }
+
+    if (detailPath) {
+      navigateWithinApp(detailPath);
+      return;
+    }
+
+    if (contactPath) {
+      navigateWithinApp(contactPath);
+    }
+  };
+
   const handleKeyDown = (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
@@ -600,7 +648,7 @@ function ChatbotWidget({ userName = '' }) {
             </button>
           </header>
 
-          <div className="chatbot-messages">
+          <div className="chatbot-messages" onClick={handleProductActionClick}>
             {visibleMessages.map((item) => (
               <div
                 key={item.id}
