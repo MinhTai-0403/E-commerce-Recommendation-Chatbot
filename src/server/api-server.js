@@ -1,4 +1,5 @@
 const http = require("http");
+const crypto = require("node:crypto");
 const { ObjectId } = require("mongodb");
 const { ProxyAgent } = require("undici");
 const { handleAdminRequest, isAdminAuthorized } = require("../services/admin-service");
@@ -70,12 +71,29 @@ const LAZY_SCRAPE_FAILURE_COOLDOWN_MS = Number(
   process.env.LAZY_SCRAPE_FAILURE_COOLDOWN_MS || 10 * 60 * 1000
 );
 const LAZY_SCRAPE_DEBUG = String(process.env.LAZY_SCRAPE_DEBUG || "false") === "true";
+const API_RESPONSE_CACHE_ENABLED = String(process.env.API_RESPONSE_CACHE_ENABLED || "true") !== "false";
+const API_PRODUCTS_CACHE_TTL_MS = Number(process.env.API_PRODUCTS_CACHE_TTL_MS || 60_000);
+const API_PRODUCT_DETAIL_CACHE_TTL_MS = Number(process.env.API_PRODUCT_DETAIL_CACHE_TTL_MS || 10 * 60_000);
+const API_RELATED_PRODUCTS_CACHE_TTL_MS = Number(
+  process.env.API_RELATED_PRODUCTS_CACHE_TTL_MS || 2 * 60_000
+);
+const API_PRODUCT_COUNT_CACHE_TTL_MS = Number(
+  process.env.API_PRODUCT_COUNT_CACHE_TTL_MS || 5 * 60_000
+);
+const API_RESPONSE_CACHE_MAX_ENTRIES = Number(process.env.API_RESPONSE_CACHE_MAX_ENTRIES || 500);
+const API_PRODUCT_COUNT_CACHE_MAX_ENTRIES = Number(
+  process.env.API_PRODUCT_COUNT_CACHE_MAX_ENTRIES || 300
+);
 
 let mongoClient;
+let dbContextPromise;
 let lazyProxyPool;
 let lazyProxyCursor = 0;
 const lazyScrapeFailures = new Map();
 const lazyScrapeInflight = new Map();
+const apiResponseCache = new Map();
+const apiProductCountCache = new Map();
+const apiProductCountInflight = new Map();
 let cartIndexesReady = false;
 let orderIndexesReady = false;
 let inventoryIndexesReady = false;
@@ -92,6 +110,100 @@ function toPositiveInt(value, fallback, max = Number.MAX_SAFE_INTEGER) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) return fallback;
   return Math.min(parsed, max);
+}
+
+function getSortedRequestCacheKey(req, namespace = "api") {
+  const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+  const sortedParams = [...url.searchParams.entries()]
+    .sort(([keyA, valueA], [keyB, valueB]) => (
+      keyA === keyB ? String(valueA).localeCompare(String(valueB)) : String(keyA).localeCompare(String(keyB))
+    ));
+  const search = sortedParams
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+    .join("&");
+  return `${namespace}:${req.method}:${url.pathname}${search ? `?${search}` : ""}`;
+}
+
+function getApiResponseCache(req, namespace = "api") {
+  if (!API_RESPONSE_CACHE_ENABLED || req.method !== "GET") return null;
+  const key = getSortedRequestCacheKey(req, namespace);
+  const cached = apiResponseCache.get(key);
+  if (!cached) return null;
+
+  if (cached.expiresAt <= Date.now()) {
+    apiResponseCache.delete(key);
+    return null;
+  }
+
+  apiResponseCache.delete(key);
+  apiResponseCache.set(key, cached);
+  return cached.payload;
+}
+
+function setApiResponseCache(req, payload, ttlMs, namespace = "api") {
+  if (!API_RESPONSE_CACHE_ENABLED || req.method !== "GET" || !ttlMs || ttlMs <= 0) return payload;
+
+  if (apiResponseCache.size >= API_RESPONSE_CACHE_MAX_ENTRIES) {
+    const now = Date.now();
+    for (const [key, value] of apiResponseCache.entries()) {
+      if (value.expiresAt <= now || apiResponseCache.size >= API_RESPONSE_CACHE_MAX_ENTRIES) {
+        apiResponseCache.delete(key);
+      }
+      if (apiResponseCache.size < API_RESPONSE_CACHE_MAX_ENTRIES) break;
+    }
+  }
+
+  apiResponseCache.set(getSortedRequestCacheKey(req, namespace), {
+    expiresAt: Date.now() + ttlMs,
+    payload,
+  });
+  return payload;
+}
+
+function getProductCountCacheKey(req) {
+  const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+  const ignored = new Set(["page", "limit", "sort", "raw", "include"]);
+  const search = [...url.searchParams.entries()]
+    .filter(([key]) => !ignored.has(key))
+    .sort(([keyA, valueA], [keyB, valueB]) => (
+      keyA === keyB ? String(valueA).localeCompare(String(valueB)) : String(keyA).localeCompare(String(keyB))
+    ))
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+    .join("&");
+  return search || "__all__";
+}
+
+async function getCachedProductCount(req, collection, query) {
+  const key = getProductCountCacheKey(req);
+  const cached = apiProductCountCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    apiProductCountCache.delete(key);
+    apiProductCountCache.set(key, cached);
+    return cached.value;
+  }
+  if (cached) apiProductCountCache.delete(key);
+
+  if (apiProductCountInflight.has(key)) {
+    return apiProductCountInflight.get(key);
+  }
+
+  const countPromise = collection.countDocuments(query)
+    .then((value) => {
+      apiProductCountCache.set(key, {
+        value,
+        expiresAt: Date.now() + API_PRODUCT_COUNT_CACHE_TTL_MS,
+      });
+      while (apiProductCountCache.size > API_PRODUCT_COUNT_CACHE_MAX_ENTRIES) {
+        const oldestKey = apiProductCountCache.keys().next().value;
+        if (!oldestKey) break;
+        apiProductCountCache.delete(oldestKey);
+      }
+      return value;
+    })
+    .finally(() => apiProductCountInflight.delete(key));
+
+  apiProductCountInflight.set(key, countPromise);
+  return countPromise;
 }
 
 function slugify(value = "") {
@@ -1675,19 +1787,26 @@ function buildEffectivePriceExpression() {
   return {
     $let: {
       vars: {
+        effectivePrice: toNumber("$effectivePrice"),
         currentPrice: toNumber("$currentPrice"),
         price: toNumber("$price"),
         originalPrice: toNumber("$originalPrice"),
       },
       in: {
         $cond: [
-          { $gt: ["$$currentPrice", 0] },
-          "$$currentPrice",
+          { $gt: ["$$effectivePrice", 0] },
+          "$$effectivePrice",
           {
             $cond: [
-              { $gt: ["$$price", 0] },
-              "$$price",
-              "$$originalPrice",
+              { $gt: ["$$currentPrice", 0] },
+              "$$currentPrice",
+              {
+                $cond: [
+                  { $gt: ["$$price", 0] },
+                  "$$price",
+                  "$$originalPrice",
+                ],
+              },
             ],
           },
         ],
@@ -1850,59 +1969,66 @@ async function findProductByIdentifier(products, identifier) {
   const clean = stripHtmlExtension(identifier);
   const escaped = escapeRegex(clean);
   const aliases = getIdentifierAliasCandidates(clean);
-  const exactLookups = [
-    ...(ObjectId.isValid(clean) ? [{ _id: new ObjectId(clean) }] : []),
-    { slug: clean },
-    { sku: clean },
-    { url: clean },
-    { sourceUrls: clean },
-    { url: { $regex: `/${escaped}\\.html$`, $options: "i" } },
-    { sourceUrls: { $elemMatch: { $regex: `/${escaped}\\.html$`, $options: "i" } } },
+  const exactSlugs = uniqueStrings([clean, ...aliases]);
+  const numericIdentifier = /^\d+$/.test(clean) ? Number(clean) : null;
+  const exactProductIds = [
+    clean,
+    ...(Number.isSafeInteger(numericIdentifier) ? [numericIdentifier] : []),
   ];
-  const aliasLookups = aliases.flatMap((alias) => {
-    const aliasEscaped = escapeRegex(alias);
-    return [
-      { slug: alias },
-      { sku: alias },
-      { url: { $regex: `/${aliasEscaped}\\.html$`, $options: "i" } },
-      { sourceUrls: { $elemMatch: { $regex: `/${aliasEscaped}\\.html$`, $options: "i" } } },
-    ];
-  });
-  const fuzzyLookups = [
-    { slug: { $regex: `^${escaped}(-|$)`, $options: "i" } },
-    { sku: { $regex: `^${escaped}(-|$)`, $options: "i" } },
-    { url: { $regex: `/${escaped}(-[^/]+)?\\.html$`, $options: "i" } },
-    { sourceUrls: { $elemMatch: { $regex: `/${escaped}(-[^/]+)?\\.html$`, $options: "i" } } },
-  ];
+  const exactUrls = uniqueStrings([
+    /^https?:\/\//i.test(String(identifier)) ? String(identifier) : "",
+    ...exactSlugs.map((slug) => `https://cellphones.com.vn/${slug}.html`),
+  ]);
+  const exactLookup = {
+    $or: [
+      ...(ObjectId.isValid(clean) ? [{ _id: new ObjectId(clean) }] : []),
+      { slug: { $in: exactSlugs } },
+      { sku: { $in: exactSlugs } },
+      { productId: { $in: exactProductIds } },
+      { id: { $in: exactProductIds } },
+      { "general.productId": { $in: exactProductIds } },
+      { "general.product_id": { $in: exactProductIds } },
+      { "variants.productId": { $in: exactProductIds } },
+      { "colors.productId": { $in: exactProductIds } },
+      { lookupKeys: { $in: uniqueStrings([
+        ...exactSlugs,
+        ...exactSlugs.map((value) => value.toLowerCase()),
+        ...exactProductIds.map((value) => `id:${value}`),
+        ...exactProductIds.map((value) => `productid:${value}`),
+        ...exactUrls,
+        ...exactUrls.map((value) => value.toLowerCase()),
+      ]) } },
+    ],
+  };
+  const exactProduct = await findBestProductForLookup(products, exactLookup, clean, aliases, 60);
+  if (exactProduct) return exactProduct;
 
-  for (const lookup of exactLookups) {
-    const product = await findBestProductForLookup(products, lookup, clean, aliases, 10);
-    if (product) return product;
+  if (exactUrls.length) {
+    const productByUrl = await findBestProductForLookup(products, {
+      $or: [
+        { url: { $in: exactUrls } },
+        { inputUrl: { $in: exactUrls } },
+        { sourceUrl: { $in: exactUrls } },
+        { sourceUrls: { $in: exactUrls } },
+      ],
+    }, clean, aliases, 30);
+    if (productByUrl) return productByUrl;
   }
 
-  for (const lookup of aliasLookups) {
-    const product = await findBestProductForLookup(products, lookup, clean, aliases, 10);
-    if (product) return product;
-  }
+  const fuzzyAliases = exactSlugs.length ? exactSlugs : [clean];
+  const fuzzyLookup = {
+    $or: fuzzyAliases.flatMap((alias) => {
+      const aliasEscaped = escapeRegex(alias);
+      return [
+        { slug: { $regex: `^${aliasEscaped}(-|$)`, $options: "i" } },
+        { sku: { $regex: `^${aliasEscaped}(-|$)`, $options: "i" } },
+        { url: { $regex: `/${aliasEscaped}(-[^/]+)?\\.html$`, $options: "i" } },
+        { sourceUrls: { $elemMatch: { $regex: `/${aliasEscaped}(-[^/]+)?\\.html$`, $options: "i" } } },
+      ];
+    }),
+  };
 
-  const fuzzyCandidates = [];
-  for (const lookup of fuzzyLookups) {
-    const candidates = await products
-      .find(lookup)
-      .sort({
-        webFreshnessScore: -1,
-        realWorldYear: -1,
-        effectiveRealWorldYear: -1,
-        sitemapSortRank: -1,
-        updatedAt: -1,
-        scrapedAt: -1,
-      })
-      .limit(40)
-      .toArray();
-    fuzzyCandidates.push(...candidates);
-  }
-
-  return pickBestProductCandidate(fuzzyCandidates, clean, aliases);
+  return findBestProductForLookup(products, fuzzyLookup, clean, aliases, 80);
 }
 
 async function findBestProductDetailForLookup(productDetails, lookup, requestedSlug, canonicalSlugs = [], limit = 40) {
@@ -2113,28 +2239,42 @@ async function findProductDetailByIdentifier(productDetails, identifier, product
     getSlugFromUrl(product?.url),
     ...(product?.sourceUrls || []).map(getSlugFromUrl),
   ]);
-  const exactLookups = [
-    ...(ObjectId.isValid(directSlug) ? [{ _id: new ObjectId(directSlug) }] : []),
-    ...exactSlugs.flatMap((slug) => [
-      { slug },
-      { sku: slug },
-    ]),
-    ...exactUrls.flatMap((url) => [
-      { url },
-      { inputUrl: url },
-      { sourceUrl: url },
-    ]),
-    ...(exactUrls.length ? [{ sourceUrls: { $in: exactUrls } }] : []),
-  ];
-  const seen = new Set();
+  const exactLookup = {
+    $or: [
+      ...(ObjectId.isValid(directSlug) ? [{ _id: new ObjectId(directSlug) }] : []),
+      { slug: { $in: exactSlugs } },
+      { sku: { $in: exactSlugs } },
+      { lookupKeys: { $in: uniqueStrings([
+        ...exactSlugs,
+        ...exactSlugs.map((value) => value.toLowerCase()),
+        ...exactUrls,
+        ...exactUrls.map((value) => value.toLowerCase()),
+      ]) } },
+    ],
+  };
+  const exactDetail = await findOneBestExactDetail(
+    productDetails,
+    exactLookup,
+    directSlug,
+    canonicalSlugs
+  );
+  if (exactDetail) return exactDetail;
 
-  for (const lookup of exactLookups) {
-    const key = JSON.stringify(lookup);
-    if (seen.has(key)) continue;
-    seen.add(key);
-
-    const detail = await findOneBestExactDetail(productDetails, lookup, directSlug, canonicalSlugs);
-    if (detail) return detail;
+  if (exactUrls.length) {
+    const detailByUrl = await findOneBestExactDetail(
+      productDetails,
+      {
+        $or: [
+          { url: { $in: exactUrls } },
+          { inputUrl: { $in: exactUrls } },
+          { sourceUrl: { $in: exactUrls } },
+          { sourceUrls: { $in: exactUrls } },
+        ],
+      },
+      directSlug,
+      canonicalSlugs
+    );
+    if (detailByUrl) return detailByUrl;
   }
 
   return findBestProductDetailForFallback(productDetails, identifier, product);
@@ -2826,7 +2966,7 @@ function isWriteAuthorized(req) {
   return isAdminAuthorized(req);
 }
 
-async function getDb() {
+async function initializeDbContext() {
   if (!mongoClient) {
     mongoClient = createMongoClient();
     await mongoClient.connect();
@@ -2912,6 +3052,16 @@ async function getDb() {
     },
   });
   return context;
+}
+
+function getDb() {
+  if (!dbContextPromise) {
+    dbContextPromise = initializeDbContext().catch((error) => {
+      dbContextPromise = null;
+      throw error;
+    });
+  }
+  return dbContextPromise;
 }
 
 async function handleHealth(_req, res) {
@@ -3162,6 +3312,14 @@ async function handleListProducts(req, res) {
   const includeRaw = url.searchParams.get("raw") === "true";
   const includeDetails = url.searchParams.get("include") === "details";
 
+  if (!includeRaw && !includeDetails) {
+    const cachedPayload = getApiResponseCache(req, "products:list");
+    if (cachedPayload) {
+      sendJson(res, 200, cachedPayload);
+      return;
+    }
+  }
+
   const projection = includeRaw
     ? undefined
     : {
@@ -3247,11 +3405,11 @@ async function handleListProducts(req, res) {
     : webProducts.find(query, { projection }).sort(sort).skip(skip).limit(limit).toArray();
 
   const [total, docs] = await Promise.all([
-    webProducts.countDocuments(query),
+    getCachedProductCount(req, webProducts, query),
     docsPromise,
   ]);
 
-  sendJson(res, 200, {
+  const payload = {
     ok: true,
     pagination: {
       page,
@@ -3260,7 +3418,13 @@ async function handleListProducts(req, res) {
       totalPages: Math.ceil(total / limit),
     },
     data: includeRaw ? docs : docs.map(normalizeProduct),
-  });
+  };
+
+  if (!includeRaw && !includeDetails) {
+    setApiResponseCache(req, payload, API_PRODUCTS_CACHE_TTL_MS, "products:list");
+  }
+
+  sendJson(res, 200, payload);
 }
 
 async function handleGetProduct(_req, res, identifier) {
@@ -3280,12 +3444,21 @@ async function handleGetProduct(_req, res, identifier) {
 }
 
 async function handleGetProductDetails(req, res, identifier) {
-  const { productDetails } = await getDb();
   const url = new URL(req.url, `http://${req.headers.host}`);
   const includeRaw = url.searchParams.get("raw") === "true";
   const forceLazyScrape = url.searchParams.get("lazy") === "true" || url.searchParams.get("forceLazy") === "true";
+
+  if (!includeRaw && !forceLazyScrape) {
+    const cachedPayload = getApiResponseCache(req, "products:detail");
+    if (cachedPayload) {
+      sendJson(res, 200, cachedPayload);
+      return;
+    }
+  }
+
+  const { productDetails } = await getDb();
   const product = await findProductByIdentifier(productDetails, identifier);
-  const manifest = await findProductDetailByIdentifier(productDetails, identifier, product);
+  const manifest = product || await findProductDetailByIdentifier(productDetails, identifier, product);
   let detail = await hydrateProductDetail(manifest);
   let cacheStatus = detail ? "hit" : "miss";
 
@@ -3330,10 +3503,19 @@ async function handleGetProductDetails(req, res, identifier) {
   };
 
   if (includeRaw) payload.raw = manifest || detail;
+  if (!includeRaw && !forceLazyScrape) {
+    setApiResponseCache(req, payload, API_PRODUCT_DETAIL_CACHE_TTL_MS, "products:detail");
+  }
   sendJson(res, 200, payload);
 }
 
 async function handleRelatedProducts(req, res, identifier) {
+  const cachedPayload = getApiResponseCache(req, "products:related");
+  if (cachedPayload) {
+    sendJson(res, 200, cachedPayload);
+    return;
+  }
+
   const { productDetails } = await getDb();
   const webProducts = productDetails;
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -3409,11 +3591,13 @@ async function handleRelatedProducts(req, res, identifier) {
     ])
     .toArray();
 
-  sendJson(res, 200, {
+  const payload = {
     ok: true,
     baseProduct: normalizeProduct(product),
     data: docs.map(normalizeProduct),
-  });
+  };
+  setApiResponseCache(req, payload, API_RELATED_PRODUCTS_CACHE_TTL_MS, "products:related");
+  sendJson(res, 200, payload);
 }
 
 function getBearerToken(req) {
@@ -3553,6 +3737,10 @@ function buildCartItemId(item = {}) {
   return [slugify(base), optionSuffix].filter(Boolean).join("--").slice(0, 220);
 }
 
+function isCartMongoObjectId(value) {
+  return /^[a-f\d]{24}$/i.test(cleanCartText(value, 80));
+}
+
 function sanitizeCartItem(input = {}) {
   const product = input.product || input.item || input;
   const name = cleanCartText(product.name, 300);
@@ -3562,10 +3750,16 @@ function sanitizeCartItem(input = {}) {
     getSlugFromUrl(product.url || product.productUrl) ||
     slugify(name)
   );
+  const rawMongoId = cleanCartText(product.mongoId || product._id, 80);
+  const mongoId = isCartMongoObjectId(rawMongoId) ? rawMongoId : "";
+  const rawId = cleanCartText(product.id, 180);
+  const legacyProductId =
+    (rawMongoId && !mongoId ? rawMongoId : "") ||
+    (/^\d+$/.test(rawId) ? rawId : "");
   const selectedOptions = sanitizeCartOptions(product);
   const item = {
-    productId: cleanCartText(product.productId || product.id || product.mongoId || product._id || slug, 180),
-    mongoId: cleanCartText(product.mongoId || product._id, 80),
+    productId: cleanCartText(product.productId || legacyProductId || mongoId || slug, 180),
+    mongoId,
     sku: cleanCartText(product.sku || slug, 180),
     slug,
     name: name || "Sản phẩm CellphoneS",
@@ -4150,32 +4344,35 @@ function buildOrderItemFromProduct(product = {}, rawItem = {}) {
   return item;
 }
 
-function getOrderItemIdentifier(rawItem = {}) {
-  return cleanCartText(
-    rawItem.productId ||
-    rawItem.mongoId ||
-    rawItem.id ||
-    rawItem.slug ||
-    rawItem.sku ||
-    getSlugFromUrl(rawItem.url || rawItem.productUrl) ||
-    rawItem.name,
-    240
-  );
+function getOrderItemIdentifiers(rawItem = {}) {
+  return uniqueStrings([
+    rawItem.mongoId,
+    rawItem._id,
+    rawItem.slug,
+    rawItem.sku,
+    getSlugFromUrl(rawItem.url || rawItem.productUrl),
+    rawItem.productId,
+    rawItem.id,
+  ]).map((value) => cleanCartText(value, 240)).filter(Boolean);
 }
 
 async function resolveOrderItemsFromDb({ productDetails, products, rawItems = [] }) {
   const resolvedItems = [];
 
   for (const rawItem of rawItems) {
-    const identifier = getOrderItemIdentifier(rawItem);
-    if (!identifier) throw new Error("Thiếu mã sản phẩm trong giỏ hàng.");
+    const identifiers = getOrderItemIdentifiers(rawItem);
+    if (!identifiers.length) throw new Error("Thiếu mã sản phẩm trong giỏ hàng.");
 
-    const product =
-      (await findProductByIdentifier(productDetails, identifier)) ||
-      (await findProductByIdentifier(products, identifier));
+    let product = null;
+    for (const identifier of identifiers) {
+      product =
+        (await findProductByIdentifier(productDetails, identifier)) ||
+        (await findProductByIdentifier(products, identifier));
+      if (product) break;
+    }
 
     if (!product) {
-      throw new Error(`Không tìm thấy sản phẩm "${identifier}" trong MongoDB.`);
+      throw new Error(`Không tìm thấy sản phẩm "${identifiers[0]}" trong MongoDB.`);
     }
 
     resolvedItems.push(buildOrderItemFromProduct(product, rawItem));
@@ -6362,6 +6559,10 @@ async function ensureSupportRequestIndexes(supportRequests) {
       { email: 1, createdAt: -1 },
       { name: "support_email_created_at" }
     ),
+    supportRequests.createIndex(
+      { userId: 1, createdAt: -1 },
+      { name: "support_user_created_at" }
+    ),
   ]);
 
   supportRequestIndexesReady = true;
@@ -6407,13 +6608,106 @@ function sanitizeSupportAttachment(input = null) {
   };
 }
 
-function normalizeSupportRequestForPublic(doc = {}) {
+function hashSupportTrackingToken(token = "") {
+  return crypto
+    .createHash("sha256")
+    .update(String(token || ""))
+    .digest("hex");
+}
+
+function getSupportTrackingToken(req) {
+  const headerValue = req.headers["x-support-token"];
+  return cleanLimitedText(Array.isArray(headerValue) ? headerValue[0] : headerValue, 160);
+}
+
+function getSupportRequesterId(req) {
+  const requester = getRequestUser(req);
+  return String(requester?.sub || requester?.id || "").trim();
+}
+
+function canAccessSupportRequest(req, doc = {}) {
+  const requesterId = getSupportRequesterId(req);
+  if (requesterId && requesterId === String(doc.userId || "").trim()) return true;
+
+  const trackingToken = getSupportTrackingToken(req);
+  if (!trackingToken || !doc.trackingTokenHash) return false;
+
+  const suppliedHash = Buffer.from(hashSupportTrackingToken(trackingToken), "hex");
+  const expectedHash = Buffer.from(String(doc.trackingTokenHash), "hex");
+  return suppliedHash.length === expectedHash.length
+    && crypto.timingSafeEqual(suppliedHash, expectedHash);
+}
+
+function normalizeSupportMessages(doc = {}) {
+  const messages = Array.isArray(doc.messages)
+    ? doc.messages
+      .filter((message) => message && message.content)
+      .map((message) => ({
+        id: String(message.id || ""),
+        sender: message.sender === "admin" ? "admin" : "customer",
+        senderName: cleanLimitedText(message.senderName, 120)
+          || (message.sender === "admin" ? "CellphoneS" : doc.fullName || "Khách hàng"),
+        content: cleanLimitedText(message.content, 4000),
+        createdAt: message.createdAt,
+      }))
+    : [];
+
+  if (!messages.length && doc.content) {
+    messages.push({
+      id: "initial",
+      sender: "customer",
+      senderName: doc.fullName || "Khách hàng",
+      content: doc.content,
+      createdAt: doc.createdAt,
+    });
+  }
+
+  if (doc.response && !messages.some((message) => (
+    message.sender === "admin" && message.content === doc.response
+  ))) {
+    messages.push({
+      id: "latest-response",
+      sender: "admin",
+      senderName: "CellphoneS",
+      content: doc.response,
+      createdAt: doc.lastResponseAt || doc.updatedAt,
+    });
+  }
+
+  return messages.sort((left, right) => (
+    new Date(left.createdAt || 0).getTime() - new Date(right.createdAt || 0).getTime()
+  ));
+}
+
+function normalizeSupportRequestForPublic(doc = {}, { includeAttachment = false } = {}) {
+  const attachment = doc.attachment
+    ? {
+      name: doc.attachment.name || "",
+      type: doc.attachment.type || "",
+      size: Number(doc.attachment.size || 0),
+      ...(includeAttachment && doc.attachment.dataUrl
+        ? { dataUrl: doc.attachment.dataUrl }
+        : {}),
+    }
+    : null;
+
   return {
     id: String(doc._id || ""),
     requestCode: doc.requestCode || "",
+    issueType: doc.issueType || "",
+    fullName: doc.fullName || "",
+    phone: doc.phone || "",
+    email: doc.email || "",
+    orderCode: doc.orderCode || "",
+    preferredContact: doc.preferredContact || "email",
+    content: doc.content || "",
+    attachment,
     status: doc.status || "new",
     statusLabel: doc.statusLabel || "Mới tiếp nhận",
+    response: doc.response || "",
+    messages: normalizeSupportMessages(doc),
     createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
   };
 }
 
@@ -6430,6 +6724,9 @@ async function handleCreateSupportRequest(req, res) {
   const email = normalizeEmail(body.email);
   const orderCode = cleanLimitedText(body.orderCode, 80).toUpperCase();
   const content = cleanLimitedText(body.content || body.message || body.description, 4000);
+  const preferredContact = ["email", "phone"].includes(body.preferredContact)
+    ? body.preferredContact
+    : (email ? "email" : "phone");
 
   if (!issueType) {
     sendError(res, 400, "Vui lòng chọn nhóm vấn đề.");
@@ -6481,6 +6778,7 @@ async function handleCreateSupportRequest(req, res) {
   await ensureSupportRequestIndexes(supportRequests);
 
   const now = new Date();
+  const trackingToken = crypto.randomBytes(24).toString("base64url");
   const doc = {
     requestCode: createSupportRequestCode(),
     issueType,
@@ -6488,12 +6786,21 @@ async function handleCreateSupportRequest(req, res) {
     phone,
     email,
     orderCode,
+    preferredContact,
     content,
     attachment,
     status: "new",
     statusLabel: "Mới tiếp nhận",
     adminNote: "",
     response: "",
+    messages: [{
+      id: crypto.randomUUID(),
+      sender: "customer",
+      senderName: fullName,
+      content,
+      createdAt: now,
+    }],
+    trackingTokenHash: hashSupportTrackingToken(trackingToken),
     userId: requester?.sub || requester?.id || "",
     userRole: requester?.role || "guest",
     ip: req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "",
@@ -6508,8 +6815,163 @@ async function handleCreateSupportRequest(req, res) {
   sendJson(res, 201, {
     ok: true,
     message: `Đã gửi yêu cầu hỗ trợ #${doc.requestCode}.`,
-    data: normalizeSupportRequestForPublic(doc),
+    data: {
+      ...normalizeSupportRequestForPublic(doc, { includeAttachment: true }),
+      trackingToken,
+    },
   });
+}
+
+async function handleListMySupportRequests(req, res) {
+  if (req.method !== "GET") {
+    sendError(res, 405, "Method not allowed.");
+    return;
+  }
+
+  const userId = getSupportRequesterId(req);
+  if (!userId) {
+    sendError(res, 401, "Vui lòng đăng nhập để xem yêu cầu hỗ trợ của bạn.");
+    return;
+  }
+
+  const { db } = await getDb();
+  const supportRequests = db.collection(process.env.SUPPORT_REQUESTS_COLLECTION || "support_requests");
+  await ensureSupportRequestIndexes(supportRequests);
+  const docs = await supportRequests
+    .find({ userId })
+    .sort({ updatedAt: -1, createdAt: -1 })
+    .limit(50)
+    .toArray();
+
+  sendJson(res, 200, {
+    ok: true,
+    data: docs.map((doc) => normalizeSupportRequestForPublic(doc)),
+  });
+}
+
+async function findSupportRequestByCode(requestCode) {
+  const { db } = await getDb();
+  const supportRequests = db.collection(process.env.SUPPORT_REQUESTS_COLLECTION || "support_requests");
+  await ensureSupportRequestIndexes(supportRequests);
+  const doc = await supportRequests.findOne({ requestCode });
+  return { supportRequests, doc };
+}
+
+async function handleGetSupportRequest(req, res, requestCode) {
+  if (req.method !== "GET") {
+    sendError(res, 405, "Method not allowed.");
+    return;
+  }
+
+  const { doc } = await findSupportRequestByCode(requestCode);
+  if (!doc) {
+    sendError(res, 404, "Không tìm thấy yêu cầu hỗ trợ.");
+    return;
+  }
+  if (!canAccessSupportRequest(req, doc)) {
+    sendError(res, 403, "Bạn không có quyền xem yêu cầu hỗ trợ này.");
+    return;
+  }
+
+  sendJson(res, 200, {
+    ok: true,
+    data: normalizeSupportRequestForPublic(doc, { includeAttachment: true }),
+  });
+}
+
+async function handleCreateSupportMessage(req, res, requestCode) {
+  if (req.method !== "POST") {
+    sendError(res, 405, "Method not allowed.");
+    return;
+  }
+
+  const { supportRequests, doc } = await findSupportRequestByCode(requestCode);
+  if (!doc) {
+    sendError(res, 404, "Không tìm thấy yêu cầu hỗ trợ.");
+    return;
+  }
+  if (!canAccessSupportRequest(req, doc)) {
+    sendError(res, 403, "Bạn không có quyền phản hồi yêu cầu hỗ trợ này.");
+    return;
+  }
+  if (doc.status === "closed") {
+    sendError(res, 409, "Yêu cầu này đã đóng. Vui lòng tạo yêu cầu mới nếu bạn cần hỗ trợ thêm.");
+    return;
+  }
+
+  const body = await parseJsonBody(req);
+  const content = cleanLimitedText(body.content || body.message, 4000);
+  if (content.length < 2) {
+    sendError(res, 400, "Vui lòng nhập nội dung phản hồi.");
+    return;
+  }
+
+  const requester = getRequestUser(req);
+  const rateIdentifier = requester?.sub
+    || doc.email
+    || doc.phone
+    || req.socket?.remoteAddress
+    || requestCode;
+  if (!rateLimitOrSend({
+    req,
+    res,
+    sendError,
+    scope: "support:message",
+    identifier: rateIdentifier,
+    max: Number(process.env.RATE_LIMIT_SUPPORT_MESSAGE_MAX || 12),
+    message: "Bạn gửi phản hồi quá nhanh. Vui lòng thử lại sau ít phút.",
+  })) return;
+
+  const now = new Date();
+  const message = {
+    id: crypto.randomUUID(),
+    sender: "customer",
+    senderName: doc.fullName || requester?.name || "Khách hàng",
+    content,
+    createdAt: now,
+  };
+  const result = await supportRequests.findOneAndUpdate(
+    { _id: doc._id },
+    {
+      $push: { messages: message },
+      $set: {
+        status: "new",
+        statusLabel: "Mới tiếp nhận",
+        updatedAt: now,
+      },
+    },
+    { returnDocument: "after" }
+  );
+  const updated = result?.value || result;
+
+  sendJson(res, 201, {
+    ok: true,
+    message: "Đã gửi phản hồi tới bộ phận hỗ trợ.",
+    data: normalizeSupportRequestForPublic(updated, { includeAttachment: true }),
+  });
+}
+
+async function handleSupportRequestsRequest(req, res, pathParts) {
+  const resource = decodeURIComponent(pathParts[2] || "");
+  const action = decodeURIComponent(pathParts[3] || "");
+
+  if (!resource) {
+    await handleCreateSupportRequest(req, res);
+    return;
+  }
+
+  if (resource === "mine") {
+    await handleListMySupportRequests(req, res);
+    return;
+  }
+
+  const requestCode = cleanLimitedText(resource, 80).toUpperCase();
+  if (action === "messages") {
+    await handleCreateSupportMessage(req, res, requestCode);
+    return;
+  }
+
+  await handleGetSupportRequest(req, res, requestCode);
 }
 
 async function handleNewsletterSubscribe(req, res) {
@@ -7239,7 +7701,7 @@ async function routeRequest(req, res) {
   }
 
   if (pathParts[1] === "support-requests") {
-    await handleCreateSupportRequest(req, res);
+    await handleSupportRequestsRequest(req, res, pathParts);
     return;
   }
 
@@ -7360,6 +7822,8 @@ async function routeRequest(req, res) {
 }
 
 const server = http.createServer((req, res) => {
+  res.requestStartedAtNs = process.hrtime.bigint();
+  res.requestAcceptEncoding = req.headers["accept-encoding"] || "";
   prepareCorsResponse(req, res);
   routeRequest(req, res).catch((error) => {
     console.error("[api]", error);
@@ -7367,12 +7831,22 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.listen(API_PORT, () => {
+async function startServer() {
   const { dbName, productsCollection, productDetailsCollection } = getMongoConfig();
-  console.log(`API server listening on http://localhost:${API_PORT}`);
-  console.log(`MongoDB source: ${dbName}.${productsCollection}`);
-  console.log(`MongoDB details: ${dbName}.${productDetailsCollection}`);
-});
+  try {
+    await getDb();
+    server.listen(API_PORT, () => {
+      console.log(`API server listening on http://localhost:${API_PORT}`);
+      console.log(`MongoDB source: ${dbName}.${productsCollection}`);
+      console.log(`MongoDB details: ${dbName}.${productDetailsCollection}`);
+    });
+  } catch (error) {
+    console.error("[api:start] MongoDB initialization failed:", error.message);
+    process.exitCode = 1;
+  }
+}
+
+startServer();
 
 async function shutdown() {
   if (mongoClient) await mongoClient.close();

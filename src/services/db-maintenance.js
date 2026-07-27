@@ -354,6 +354,8 @@ async function ensureCommerceDatabase({
   await Promise.all([
     createIndexSafe(productDetails, { slug: 1 }, { unique: strictProductSlug, sparse: true, name: strictProductSlug ? "unique_product_details_slug" : "product_details_slug" }),
     createIndexSafe(productDetails, { sku: 1 }, { sparse: true, name: "product_details_sku" }),
+    createIndexSafe(productDetails, { lookupKeys: 1 }, { sparse: true, name: "product_details_lookup_keys" }),
+    createIndexSafe(productDetails, { effectivePrice: 1 }, { sparse: true, name: "product_details_effective_price" }),
     createIndexSafe(productDetails, { brand: 1, currentPrice: 1 }, { name: "product_details_brand_price" }),
     createIndexSafe(productDetails, { category: 1, currentPrice: 1 }, { name: "product_details_category_price" }),
     createIndexSafe(productDetails, { brandKey: 1, currentPrice: 1 }, { name: "product_details_brand_key_price" }),

@@ -2573,6 +2573,16 @@ function normalizeAdminSupportRequest(doc = {}) {
     statusLabel: doc.statusLabel || SUPPORT_STATUS_LABELS[status] || status,
     adminNote: doc.adminNote || "",
     response: doc.response || "",
+    preferredContact: doc.preferredContact || "email",
+    messages: Array.isArray(doc.messages)
+      ? doc.messages.map((message) => ({
+        id: String(message.id || ""),
+        sender: message.sender === "admin" ? "admin" : "customer",
+        senderName: message.senderName || (message.sender === "admin" ? "CellphoneS" : doc.fullName),
+        content: message.content || "",
+        createdAt: message.createdAt,
+      }))
+      : [],
     userId: doc.userId || "",
     userRole: doc.userRole || "guest",
     createdAt: doc.createdAt,
@@ -2689,9 +2699,30 @@ async function handleUpdateSupportRequest({ req, res, pathParts, parseJsonBody, 
 
   const { supportRequests, auditLogs } = await getCollections(getDb);
   const before = await supportRequests.findOne(query);
+  const responseChanged = Boolean(
+    before
+    && update.response
+    && update.response !== before.response
+  );
+  if (responseChanged) {
+    update.lastResponseAt = new Date();
+  }
+  const actor = getAdminPayload(req);
+  const updateOperations = { $set: update };
+  if (responseChanged) {
+    updateOperations.$push = {
+      messages: {
+        id: new ObjectId().toHexString(),
+        sender: "admin",
+        senderName: actor?.fullName || actor?.name || "CellphoneS",
+        content: update.response,
+        createdAt: update.lastResponseAt,
+      },
+    };
+  }
   const result = await supportRequests.findOneAndUpdate(
     query,
-    { $set: update },
+    updateOperations,
     { returnDocument: "after" }
   );
   const updated = unwrapMongoWriteResult(result);

@@ -1,4 +1,8 @@
+const zlib = require("node:zlib");
+
 const DEFAULT_CORS_ORIGIN = "http://localhost:5173";
+const PRETTY_JSON = String(process.env.API_PRETTY_JSON || "false") === "true";
+const GZIP_MIN_BYTES = Math.max(0, Number(process.env.API_GZIP_MIN_BYTES || 1024));
 
 function getAllowedCorsOrigins() {
   const configured = String(process.env.CORS_ORIGIN || DEFAULT_CORS_ORIGIN)
@@ -23,15 +27,30 @@ function prepareCorsResponse(req, res) {
 }
 
 function sendJson(res, statusCode, payload) {
+  const body = JSON.stringify(payload, null, PRETTY_JSON ? 2 : 0);
+  const shouldGzip = Buffer.byteLength(body) >= GZIP_MIN_BYTES
+    && /\bgzip\b/i.test(String(res.requestAcceptEncoding || ""));
+  const responseBody = shouldGzip
+    ? zlib.gzipSync(body, { level: zlib.constants.Z_BEST_SPEED })
+    : body;
+  const durationMs = typeof res.requestStartedAtNs === "bigint"
+    ? Number(process.hrtime.bigint() - res.requestStartedAtNs) / 1_000_000
+    : 0;
+
   res.writeHead(statusCode, {
     "Content-Type": "application/json; charset=utf-8",
+    "Content-Length": Buffer.byteLength(responseBody),
+    ...(shouldGzip ? { "Content-Encoding": "gzip" } : {}),
     "Access-Control-Allow-Origin": res.corsOrigin || getAllowedCorsOrigins()[0],
     "Access-Control-Allow-Credentials": "true",
-    "Vary": "Origin",
+    "Access-Control-Expose-Headers": "Server-Timing, X-Response-Time-Ms",
+    "Vary": "Origin, Accept-Encoding",
     "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Admin-Api-Key, X-Bank-Webhook-Secret",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Admin-Api-Key, X-Bank-Webhook-Secret, X-Support-Token",
+    "Server-Timing": `app;dur=${durationMs.toFixed(2)}`,
+    "X-Response-Time-Ms": durationMs.toFixed(2),
   });
-  res.end(JSON.stringify(payload, null, 2));
+  res.end(responseBody);
 }
 
 function sendError(res, statusCode, message, details) {

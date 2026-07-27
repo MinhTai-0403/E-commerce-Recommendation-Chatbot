@@ -8,6 +8,16 @@ const { buildProductSpecFacets } = require("../utils/product-spec-facets");
 const gzip = promisify(zlib.gzip);
 const gunzip = promisify(zlib.gunzip);
 const STORAGE_VERSION = 1;
+const HYDRATED_CACHE_MAX_ENTRIES = Math.max(
+  20,
+  Number(process.env.PRODUCT_DETAIL_HYDRATED_CACHE_MAX_ENTRIES || 400)
+);
+const HYDRATED_CACHE_TTL_MS = Math.max(
+  10_000,
+  Number(process.env.PRODUCT_DETAIL_HYDRATED_CACHE_TTL_MS || 15 * 60 * 1000)
+);
+const hydratedDetailCache = new Map();
+const hydratedDetailInflight = new Map();
 
 function getDetailStorageRoot() {
   return path.resolve(process.env.PRODUCT_DETAILS_DIR || "data/product-details");
@@ -53,6 +63,58 @@ function getBinaryBuffer(value) {
   if (value.value) return Buffer.from(value.value);
   if (value.data) return Buffer.from(value.data);
   return null;
+}
+
+function getHydratedDetailCacheKey(manifest = {}) {
+  const identity = manifest._id
+    || manifest.slug
+    || manifest.sku
+    || manifest.productId
+    || manifest.storage?.path;
+  if (!identity) return "";
+
+  const revision = manifest.storage?.updatedAt
+    || manifest.updatedAt
+    || manifest.scrapedAt
+    || manifest.sourceCapturedAt
+    || "";
+  return `${String(identity)}:${String(revision)}`;
+}
+
+function getCachedHydratedDetail(key) {
+  if (!key) return null;
+  const entry = hydratedDetailCache.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    hydratedDetailCache.delete(key);
+    return null;
+  }
+
+  hydratedDetailCache.delete(key);
+  hydratedDetailCache.set(key, entry);
+  return entry.value;
+}
+
+function setCachedHydratedDetail(key, value) {
+  if (!key || !value) return value;
+
+  hydratedDetailCache.delete(key);
+  hydratedDetailCache.set(key, {
+    value,
+    expiresAt: Date.now() + HYDRATED_CACHE_TTL_MS,
+  });
+
+  while (hydratedDetailCache.size > HYDRATED_CACHE_MAX_ENTRIES) {
+    const oldestKey = hydratedDetailCache.keys().next().value;
+    if (!oldestKey) break;
+    hydratedDetailCache.delete(oldestKey);
+  }
+  return value;
+}
+
+function clearHydratedProductDetailCache() {
+  hydratedDetailCache.clear();
+  hydratedDetailInflight.clear();
 }
 
 function stripMongoOnlyFields(detail = {}) {
@@ -130,7 +192,7 @@ async function readProductDetailInline(manifest = {}) {
   return JSON.parse(json.toString("utf8"));
 }
 
-async function hydrateProductDetail(manifest) {
+async function hydrateProductDetailUncached(manifest) {
   if (!manifest) return null;
 
   if (manifest.storage?.type === "inline-gzip") {
@@ -150,6 +212,55 @@ async function hydrateProductDetail(manifest) {
   return null;
 }
 
+async function hydrateProductDetail(manifest) {
+  if (!manifest) return null;
+
+  const cacheKey = getHydratedDetailCacheKey(manifest);
+  const cached = getCachedHydratedDetail(cacheKey);
+  if (cached) return cached;
+
+  if (cacheKey && hydratedDetailInflight.has(cacheKey)) {
+    return hydratedDetailInflight.get(cacheKey);
+  }
+
+  const hydration = hydrateProductDetailUncached(manifest)
+    .then((detail) => setCachedHydratedDetail(cacheKey, detail))
+    .finally(() => {
+      if (cacheKey) hydratedDetailInflight.delete(cacheKey);
+    });
+
+  if (cacheKey) hydratedDetailInflight.set(cacheKey, hydration);
+  return hydration;
+}
+
+function getLookupKeys(detail = {}, sourceUrls = []) {
+  const values = [
+    detail.slug,
+    detail.sku,
+    detail.productId,
+    detail.url,
+    detail.sourceUrl,
+    detail.inputUrl,
+    ...sourceUrls,
+  ];
+
+  for (const sourceUrl of sourceUrls) {
+    try {
+      const pathname = new URL(sourceUrl).pathname;
+      values.push(path.basename(pathname, path.extname(pathname)));
+    } catch {
+      // Keep non-URL identifiers usable without rejecting the manifest.
+    }
+  }
+
+  return [...new Set(values
+    .filter(Boolean)
+    .flatMap((value) => {
+      const raw = String(value).trim();
+      return [raw, raw.toLowerCase()];
+    }))];
+}
+
 function buildProductDetailManifest(detail, storage) {
   const sourceUrls = [
     detail.url,
@@ -157,6 +268,8 @@ function buildProductDetailManifest(detail, storage) {
     detail.inputUrl,
     ...(Array.isArray(detail.sourceUrls) ? detail.sourceUrls : []),
   ].filter(Boolean);
+  const currentPrice = Number(detail.currentPrice || detail.price || 0);
+  const originalPrice = Number(detail.originalPrice || 0);
 
   return {
     source: detail.source || "cellphones",
@@ -164,6 +277,7 @@ function buildProductDetailManifest(detail, storage) {
     inputUrl: detail.inputUrl,
     url: detail.url || detail.sourceUrl,
     sourceUrls: [...new Set(sourceUrls)],
+    lookupKeys: getLookupKeys(detail, sourceUrls),
     slug: detail.slug,
     sku: detail.sku || detail.slug,
     productId: detail.productId,
@@ -175,6 +289,7 @@ function buildProductDetailManifest(detail, storage) {
     category: detail.category,
     categoryTrail: detail.categoryTrail || [],
     currentPrice: detail.currentPrice,
+    effectivePrice: currentPrice > 0 ? currentPrice : (originalPrice > 0 ? originalPrice : null),
     originalPrice: detail.originalPrice,
     discount: detail.discount,
     rating: detail.rating,
@@ -213,6 +328,7 @@ function buildProductDetailManifest(detail, storage) {
 module.exports = {
   buildProductDetailInlineStorage,
   buildProductDetailManifest,
+  clearHydratedProductDetailCache,
   detailAbsolutePath,
   detailRelativePath,
   getDetailStorageRoot,
