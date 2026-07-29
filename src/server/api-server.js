@@ -23,6 +23,13 @@ const {
   sendError,
   sendJson,
 } = require("./http-response");
+const { handleFrontendRequest } = require("./frontend-hosting");
+const {
+  findLatestPageSnapshot,
+  handleContentPage,
+  handleContentRoutes,
+  handleSearchSuggestions,
+} = require("./content-api");
 const {
   computeCouponDiscount,
   getCouponAvailabilityInvalidReason,
@@ -1122,6 +1129,7 @@ function buildListQuery(searchParams) {
   const category = searchParams.get("category");
   const brand = searchParams.get("brand");
   const segment = searchParams.get("segment");
+  const series = searchParams.get("series");
   const inStock = searchParams.get("inStock");
   const filter = searchParams.get("filter");
   const productType = searchParams.get("productType");
@@ -1136,6 +1144,8 @@ function buildListQuery(searchParams) {
   const camera = searchParams.get("camera");
   const refreshRate = searchParams.get("refresh_rate") || searchParams.get("refreshRate");
   const special = searchParams.get("special");
+  const chip = searchParams.get("chip");
+  const nfc = searchParams.get("nfc");
   const selectedFacetValues = {
     ram,
     storage,
@@ -1145,6 +1155,8 @@ function buildListQuery(searchParams) {
     camera,
     "refresh-rate": refreshRate,
     special,
+    chip,
+    nfc,
   };
   const facetKey = normalizeSearchKey(facet).replace(/[^a-z0-9]+/g, "-");
 
@@ -1180,14 +1192,14 @@ function buildListQuery(searchParams) {
     Object.assign(
       query,
       applianceTopicCondition
-        || accessoryTopicCondition
-        || networkTopicCondition
-        || pcTopicCondition
-        || componentTopicCondition
-        || monitorTopicCondition
-        || gamingGearTopicCondition
-        || officeDeviceTopicCondition
-        || buildProductSearchCondition(q)
+      || accessoryTopicCondition
+      || networkTopicCondition
+      || pcTopicCondition
+      || componentTopicCondition
+      || monitorTopicCondition
+      || gamingGearTopicCondition
+      || officeDeviceTopicCondition
+      || buildProductSearchCondition(q)
     );
   }
 
@@ -1213,6 +1225,7 @@ function buildListQuery(searchParams) {
       : buildBrandCondition(brand);
     appendAndCondition(query, brandCondition);
   }
+  if (series) appendAndCondition(query, buildSeriesCondition(series));
   if (segment) appendAndCondition(query, buildSegmentCondition(segment));
   // `facet` identifies the filter group opened by the UI. Once an exact value
   // is selected (for example ram=8GB RAM), the indexed `facets.*` condition
@@ -1232,12 +1245,45 @@ function buildListQuery(searchParams) {
   if (camera) appendAndCondition(query, buildFeatureValueCondition("camera", camera));
   if (refreshRate) appendAndCondition(query, buildFeatureValueCondition("refresh-rate", refreshRate));
   if (special) appendAndCondition(query, buildFeatureValueCondition("special", special));
+  if (chip) appendAndCondition(query, buildFeatureValueCondition("chip", chip));
+  if (nfc) {
+    const nfcCondition = buildFeatureValueCondition("special", "NFC");
+    const wantsNfc = !["khong", "no", "false", "0"].includes(
+      normalizeSearchKey(nfc).replace(/[^a-z0-9]+/g, "")
+    );
+    appendAndCondition(query, wantsNfc ? nfcCondition : { $nor: [nfcCondition] });
+  }
   if (priceMin || priceMax) appendAndCondition(query, buildPriceRangeCondition(priceMin, priceMax));
 
   if (inStock === "true") appendAndCondition(query, buildStockCondition(true));
   if (inStock === "false") appendAndCondition(query, buildStockCondition(false));
 
   return query;
+}
+
+function buildSeriesCondition(series = "") {
+  const key = normalizeSearchKey(series).replace(/[^a-z0-9]+/g, "-");
+  const regexBySeries = {
+    "galaxy-s": /\bgalaxy\s+s\d+/i,
+    "galaxy-a": /\bgalaxy\s+a\d+/i,
+    "galaxy-m": /\bgalaxy\s+m\d+/i,
+    "galaxy-z": /\bgalaxy\s+z\s*(?:fold|flip|tri)/i,
+    "galaxy-z8": /\bgalaxy\s+z\s*(?:fold|flip)\s*8\b/i,
+    "galaxy-z7": /\bgalaxy\s+z\s*(?:fold|flip)\s*7\b/i,
+    "galaxy-s26": /\bgalaxy\s+s26(?:\s|\b)/i,
+    "galaxy-s25": /\bgalaxy\s+s25(?:\s|\b)/i,
+    "oppo-a": /\boppo\s+a\d+/i,
+    "oppo-find-x": /\boppo\s+find\s+x/i,
+    "oppo-find-n": /\boppo\s+find\s+n/i,
+    "oppo-reno": /\boppo\s+reno/i,
+  };
+  const pattern = regexBySeries[key];
+  if (!pattern) return {};
+
+  return regexCondition(
+    ["name", "slug", "trainingLabels.productName", "rawProductJsonLd.name"],
+    pattern
+  );
 }
 
 function buildStockCondition(inStock = true) {
@@ -1336,6 +1382,7 @@ function getFeatureLabelRegex(kind = "", normalizedValue = "") {
   if (kind === "camera") return /camera|camera sau|camera trước|camera truoc|tính năng camera|tinh nang camera|quay video/i;
   if (kind === "refresh-rate") return /tần số quét|tan so quet|tốc độ làm mới|toc do lam moi|refresh|màn hình|man hinh|display|tính năng màn hình|tinh nang man hinh/i;
   if (kind === "usage") return /nhu cầu sử dụng|nhu cau su dung|đối tượng sử dụng|doi tuong su dung|usage/i;
+  if (kind === "chip") return /chip|chipset|cpu|bộ vi xử lý|bo vi xu ly|vi xử lý|vi xu ly|processor|soc/i;
 
   if (kind === "special") {
     if (normalizedValue.includes("nfc")) return /nfc|công nghệ nfc|cong nghe nfc|kết nối|ket noi/i;
@@ -1471,9 +1518,11 @@ function buildFacetFieldCondition(kind = "", value = "") {
       return { "facets.screenSizeInch": { $lt: number } };
     }
     if ((normalized.includes("tren") || normalized.includes("tro len")) && number) {
-      return { "facets.screenSizeInch": normalized.includes("tren")
-        ? { $gt: number }
-        : { $gte: number } };
+      return {
+        "facets.screenSizeInch": normalized.includes("tren")
+          ? { $gt: number }
+          : { $gte: number }
+      };
     }
     if (normalized.includes("khoang") && number) {
       if (number === 13) return { "facets.screenSizeInch": { $gte: 12.5, $lt: 13.75 } };
@@ -1487,6 +1536,21 @@ function buildFacetFieldCondition(kind = "", value = "") {
 
   if (kind === "refresh-rate" && number) {
     return { "facets.refreshRateHz": number };
+  }
+
+  if (kind === "chip") {
+    const chipset = tagKey.includes("snapdragon")
+      ? "snapdragon"
+      : (
+        tagKey.includes("dimensity")
+          ? "dimensity"
+          : (
+            tagKey.includes("exynos")
+              ? "exynos"
+              : (tagKey.includes("helio") ? "helio" : tagKey)
+          )
+      );
+    return { "facets.chipset": chipset };
   }
 
   const tagAliases = {
@@ -1585,6 +1649,7 @@ function buildFeatureValueCondition(kind = "", value = "") {
     camera: "facets.camera",
     "refresh-rate": "facets.refreshRateHz",
     special: "facets.special",
+    chip: "facets.chipset",
   }[kind];
 
   return Object.keys(facetCondition).length
@@ -1990,14 +2055,18 @@ async function findProductByIdentifier(products, identifier) {
       { "general.product_id": { $in: exactProductIds } },
       { "variants.productId": { $in: exactProductIds } },
       { "colors.productId": { $in: exactProductIds } },
-      { lookupKeys: { $in: uniqueStrings([
-        ...exactSlugs,
-        ...exactSlugs.map((value) => value.toLowerCase()),
-        ...exactProductIds.map((value) => `id:${value}`),
-        ...exactProductIds.map((value) => `productid:${value}`),
-        ...exactUrls,
-        ...exactUrls.map((value) => value.toLowerCase()),
-      ]) } },
+      {
+        lookupKeys: {
+          $in: uniqueStrings([
+            ...exactSlugs,
+            ...exactSlugs.map((value) => value.toLowerCase()),
+            ...exactProductIds.map((value) => `id:${value}`),
+            ...exactProductIds.map((value) => `productid:${value}`),
+            ...exactUrls,
+            ...exactUrls.map((value) => value.toLowerCase()),
+          ])
+        }
+      },
     ],
   };
   const exactProduct = await findBestProductForLookup(products, exactLookup, clean, aliases, 60);
@@ -2244,12 +2313,16 @@ async function findProductDetailByIdentifier(productDetails, identifier, product
       ...(ObjectId.isValid(directSlug) ? [{ _id: new ObjectId(directSlug) }] : []),
       { slug: { $in: exactSlugs } },
       { sku: { $in: exactSlugs } },
-      { lookupKeys: { $in: uniqueStrings([
-        ...exactSlugs,
-        ...exactSlugs.map((value) => value.toLowerCase()),
-        ...exactUrls,
-        ...exactUrls.map((value) => value.toLowerCase()),
-      ]) } },
+      {
+        lookupKeys: {
+          $in: uniqueStrings([
+            ...exactSlugs,
+            ...exactSlugs.map((value) => value.toLowerCase()),
+            ...exactUrls,
+            ...exactUrls.map((value) => value.toLowerCase()),
+          ])
+        }
+      },
     ],
   };
   const exactDetail = await findOneBestExactDetail(
@@ -3211,6 +3284,9 @@ async function handleApiIndex(_req, res) {
     endpoints: {
       health: "/api/health",
       stores: "/api/stores",
+      contentRoutes: "/api/content/routes",
+      contentPage: "/api/content/page?path=/mobile.html",
+      searchSuggestions: "/api/search/suggestions?q=iphone",
       products: "/api/products",
       productDetail: "/api/products/:slug",
       productDetails: "/api/products/:slug/details",
@@ -7594,13 +7670,16 @@ async function routeRequest(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const pathParts = url.pathname.split("/").filter(Boolean);
 
-  if (pathParts.length === 0 && req.method === "GET") {
-    await handleApiIndex(req, res);
-    return;
-  }
-
   if (pathParts[0] !== "api") {
-    sendError(res, 404, "Route not found.");
+    const handled = await handleFrontendRequest(req, res, {
+      findPageSnapshot: (pathname) => findLatestPageSnapshot(getDb, pathname),
+      findProduct: async (identifier) => {
+        const { productDetails, products } = await getDb();
+        return (await findProductByIdentifier(productDetails, identifier))
+          || findProductByIdentifier(products, identifier);
+      },
+    });
+    if (!handled) sendError(res, 405, "Method not allowed.");
     return;
   }
 
@@ -7621,6 +7700,21 @@ async function routeRequest(req, res) {
     }
 
     await handleStoresRequest(req, res);
+    return;
+  }
+
+  if (pathParts[1] === "content" && pathParts[2] === "routes" && req.method === "GET") {
+    await handleContentRoutes(req, res, { sendJson, getDb });
+    return;
+  }
+
+  if (pathParts[1] === "content" && pathParts[2] === "page" && req.method === "GET") {
+    await handleContentPage(req, res, { sendJson, sendError, getDb });
+    return;
+  }
+
+  if (pathParts[1] === "search" && pathParts[2] === "suggestions" && req.method === "GET") {
+    await handleSearchSuggestions(req, res, { sendJson, sendError, getDb });
     return;
   }
 

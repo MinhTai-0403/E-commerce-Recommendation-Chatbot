@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { CART_ADD_EVENT } from '../../hooks/useCart';
 import { getAuthToken } from '../../services/apiAuth';
 import './ChatbotWidget.css';
 
@@ -36,6 +35,48 @@ const escapeHtml = (value) => String(value)
   .replaceAll('>', '&gt;')
   .replaceAll('"', '&quot;')
   .replaceAll("'", '&#039;');
+
+const ALLOWED_BOT_TAGS = new Set([
+  'A',
+  'B',
+  'BR',
+  'CODE',
+  'EM',
+  'I',
+  'LI',
+  'OL',
+  'P',
+  'STRONG',
+  'UL',
+]);
+
+const sanitizeBotHtml = (value) => {
+  const source = String(value || '');
+  if (typeof DOMParser === 'undefined') return escapeHtml(source);
+
+  const documentFragment = new DOMParser().parseFromString(source, 'text/html');
+  const sanitizeNode = (node) => {
+    [...node.childNodes].forEach((child) => {
+      if (child.nodeType !== Node.ELEMENT_NODE) return;
+      if (!ALLOWED_BOT_TAGS.has(child.tagName)) {
+        child.replaceWith(documentFragment.createTextNode(child.textContent || ''));
+        return;
+      }
+
+      const href = child.tagName === 'A' ? child.getAttribute('href') || '' : '';
+      [...child.attributes].forEach((attribute) => child.removeAttribute(attribute.name));
+      if (child.tagName === 'A' && /^(https?:\/\/|\/)/i.test(href)) {
+        child.setAttribute('href', href);
+        child.setAttribute('target', '_blank');
+        child.setAttribute('rel', 'noopener noreferrer');
+      }
+      sanitizeNode(child);
+    });
+  };
+
+  sanitizeNode(documentFragment.body);
+  return documentFragment.body.innerHTML;
+};
 
 const extractNameFromObject = (value) => {
   if (!value || typeof value !== 'object') return '';
@@ -531,53 +572,6 @@ function ChatbotWidget({ userName = '' }) {
     }
   };
 
-  const navigateWithinApp = (path) => {
-    const nextPath = String(path || '').trim();
-    if (!nextPath || !nextPath.startsWith('/')) return;
-
-    window.history.pushState(null, '', nextPath);
-    window.dispatchEvent(new Event('popstate'));
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    setIsOpen(false);
-  };
-
-  const handleProductActionClick = (event) => {
-    const actionElement = event.target.closest?.(
-      '[data-chatbot-cart-product], [data-chatbot-checkout-path], [data-chatbot-detail-path], [data-chatbot-contact-path]'
-    );
-    if (!actionElement) return;
-
-    const cartProductValue = actionElement.getAttribute('data-chatbot-cart-product');
-    const checkoutPath = actionElement.getAttribute('data-chatbot-checkout-path') || '/checkout';
-    const detailPath = actionElement.getAttribute('data-chatbot-detail-path');
-    const contactPath = actionElement.getAttribute('data-chatbot-contact-path');
-
-    event.preventDefault();
-    event.stopPropagation();
-
-    if (cartProductValue) {
-      try {
-        const product = JSON.parse(cartProductValue);
-        window.dispatchEvent(new CustomEvent(CART_ADD_EVENT, {
-          detail: { product, quantity: 1 },
-        }));
-        navigateWithinApp(checkoutPath);
-      } catch {
-        addBotMessage('Minh chua doc duoc thong tin san pham nay. Ban thu mo chi tiet san pham nhe.');
-      }
-      return;
-    }
-
-    if (detailPath) {
-      navigateWithinApp(detailPath);
-      return;
-    }
-
-    if (contactPath) {
-      navigateWithinApp(contactPath);
-    }
-  };
-
   const handleKeyDown = (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
@@ -648,7 +642,7 @@ function ChatbotWidget({ userName = '' }) {
             </button>
           </header>
 
-          <div className="chatbot-messages" onClick={handleProductActionClick}>
+          <div className="chatbot-messages">
             {visibleMessages.map((item) => (
               <div
                 key={item.id}
@@ -671,7 +665,7 @@ function ChatbotWidget({ userName = '' }) {
 
                   {item.role === 'bot' ? (
                     <>
-                      <div dangerouslySetInnerHTML={{ __html: item.html }} />
+                      <div dangerouslySetInnerHTML={{ __html: sanitizeBotHtml(item.html) }} />
 
                       {item.suggestions?.length > 0 && (
                         <div

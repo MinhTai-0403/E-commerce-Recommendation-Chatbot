@@ -330,6 +330,16 @@
   color: #1d4ed8;
 }
 
+.smember-order-status.return_completed {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.smember-order-status.return_partial_completed {
+  background: #fef3c7;
+  color: #92400e;
+}
+
 .smember-order-main {
   grid-template-columns: 70px minmax(0, 1fr) auto;
   align-items: center;

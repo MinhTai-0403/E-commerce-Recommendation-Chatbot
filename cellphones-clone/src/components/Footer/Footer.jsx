@@ -47,7 +47,7 @@ export default function Footer() {
   const [newsletterForm, setNewsletterForm] = useState({
     email: '',
     phone: '',
-    accepted: true,
+    accepted: false,
   });
   const [newsletterStatus, setNewsletterStatus] = useState({
     type: '',
@@ -85,7 +85,7 @@ export default function Footer() {
         type: 'success',
         message: payload.message || 'Đăng ký thành công. Mã giảm giá đã được gửi về email của bạn.',
       });
-      setNewsletterForm({ email: '', phone: '', accepted: true });
+      setNewsletterForm({ email: '', phone: '', accepted: false });
     } catch (error) {
       setNewsletterStatus({
         type: 'error',

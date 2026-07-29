@@ -21,7 +21,10 @@ import {
   heroSliderTabs,
   subBanners,
 } from "../../data/mockData";
-import { buildCategoryPath } from "../../utils/linkRoutes";
+import {
+  buildCategoryPath,
+  getRouteForLabel,
+} from "../../utils/linkRoutes";
 
 // BẢNG MAPPING ĐỂ KHỬ SẠCH CÁC LỖI HARDCODE STRING MATCHING
 const CATEGORY_MAP = {
@@ -70,14 +73,36 @@ const getBrandFilter = (brand = "") => {
   return name;
 };
 
-const getCategoryTopicPath = (category = "", label = "", options = {}) => (
-  buildCategoryPath(category, {
+const getCategoryTopicPath = (category = "", label = "", options = {}) => {
+  if (category === "Khuyến mãi") {
+    return getRouteForLabel(label, "promo");
+  }
+  if (category === "Thu cũ đổi mới") {
+    return "/thu-cu-doi-moi";
+  }
+  if (category === "Thiết bị văn phòng") {
+    const officeDevicePaths = {
+      "Phần mềm": "/phu-kien.html?q=Phần%20mềm",
+      "Bảng vẽ điện tử": "/bang-ve-dien-tu.html",
+      "Máy tính cầm tay": "/may-tinh-cam-tay.html",
+      "Decor bàn làm việc": "/phu-kien/decor-setup.html",
+    };
+    if (officeDevicePaths[label]) return officeDevicePaths[label];
+  }
+
+  const effectiveCategory = (
+    category === "Âm thanh" && /^mic(?:ro)?\b/i.test(label)
+  )
+    ? "Micro thu âm"
+    : category;
+
+  return buildCategoryPath(effectiveCategory, {
     keyword: label,
     title: label,
     q: label,
     ...options,
-  })
-);
+  });
+};
 
 const getCategoryBrandPath = (category = "", brand = "", title = "", options = {}) => {
   const name = getBrandName(brand);
@@ -107,10 +132,7 @@ const getSidebarCategoryPath = (cat = {}, slug = "") => {
   };
   const category = categoryByPanel[slug] || cat.name;
 
-  return buildCategoryPath(category, {
-    keyword: cat.name,
-    title: cat.name,
-  });
+  return buildCategoryPath(category);
 };
 
 const getPhoneBrandPath = (brandName = "") => {
@@ -188,6 +210,26 @@ function GraduationCapIcon() {
     >
       <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
       <path d="M6 12v5c0 2 2 3 6 3s6-1 6-3v-5" />
+    </svg>
+  );
+}
+
+function TradeInIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="#d70018"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4 7h13l-3-3" />
+      <path d="m17 7-3 3" />
+      <path d="M20 17H7l3 3" />
+      <path d="m7 17 3-3" />
     </svg>
   );
 }
@@ -799,7 +841,7 @@ export default function HeroSection({
                     {householdDevices.map((item, i) => (
                       <a
                         key={i}
-                        href={getCategoryTopicPath("Đồ gia dụng", item.name)}
+                        href={getCategoryTopicPath("Làm đẹp", item.name)}
                         className="mega-laptop-need-card"
                       >
                         <img
@@ -1213,7 +1255,7 @@ export default function HeroSection({
           {/* 2.8 - PANEL TIVI & ĐIỆN MÁY */}
           {hoveredCategory === "tv" && (
             <div
-              className="mega-menu-panel"
+              className="mega-menu-panel tv-mega-menu-panel"
               onMouseEnter={() => setHoveredCategory("tv")}
             >
               <div className="mega-column">
@@ -1248,7 +1290,9 @@ export default function HeroSection({
                     Xem tất cả tivi
                   </a>
                 </div>
-                <div className="mega-section" style={{ marginTop: "16px" }}>
+              </div>
+              <div className="mega-column">
+                <div className="mega-section">
                   <div className="mega-section-title">Chọn hãng tủ lạnh</div>
                   <div className="mega-brand-logos-grid">
                     {APPLIANCE_LOGOS.filter((l) =>
@@ -1259,6 +1303,8 @@ export default function HeroSection({
                         "Panasonic",
                         "AQUA",
                         "Toshiba",
+                        "Sharp",
+                        "Hitachi",
                       ].includes(l.name),
                     ).map((brand, i) => (
                       <a
@@ -1291,6 +1337,7 @@ export default function HeroSection({
                         "Panasonic",
                         "AQUA",
                         "Toshiba",
+                        "Sharp",
                       ].includes(l.name),
                     ).map((brand, i) => (
                       <a
@@ -1331,7 +1378,7 @@ export default function HeroSection({
                     ).map((brand, i) => (
                       <a
                         key={i}
-                        href={getCategoryBrandPath("Điều hòa - Máy lạnh", brand)}
+                        href={getCategoryBrandPath("Máy lạnh", brand)}
                         className="mega-brand-logo-card-item"
                       >
                         <SafeBrandImage src={brand.logo} alt={brand.name} />
@@ -1339,38 +1386,36 @@ export default function HeroSection({
                     ))}
                   </div>
                   <a
-                    href={buildCategoryPath("Điều hòa - Máy lạnh")}
+                    href={buildCategoryPath("Máy lạnh")}
                     className="mega-pill-item full-width-row-pill"
                     style={{ marginTop: "4px" }}
                   >
                     Xem tất cả máy lạnh
                   </a>
                 </div>
-                <div className="mega-section" style={{ marginTop: "20px" }}>
-                  <div className="mega-section-title">Sản phẩm nổi bật 🔥</div>
-                  <div className="mega-grid-pills-flexible">
-                    {hotTvProducts.map((prod, i) => (
-                      <a
-                        key={i}
-                        href={getCategoryTopicPath(
-                          prod.category,
-                          prod.query || prod.name,
-                          { title: prod.name },
-                        )}
-                        className="mega-pill-item relative-pill"
-                        style={{ gridColumn: `span ${prod.span}` }}
-                      >
-                        <span>{prod.name}</span>
-                        {prod.badge && (
-                          <span
-                            className={`pill-badge-tag ${prod.badge === "Mới" ? "bg-blue" : "bg-red"}`}
-                          >
-                            {prod.badge}
-                          </span>
-                        )}
-                      </a>
-                    ))}
-                  </div>
+              </div>
+              <div className="mega-tv-featured-strip">
+                <div className="mega-section-title">Sản phẩm nổi bật 🔥</div>
+                <div className="mega-tv-featured-grid">
+                  {hotTvProducts.map((prod, i) => (
+                    <a
+                      key={i}
+                      href={getCategoryTopicPath(
+                        prod.category,
+                        prod.query || prod.name,
+                        { title: prod.name },
+                      )}
+                      className="mega-tv-featured-card"
+                    >
+                      <img src={prod.image} alt="" loading="lazy" />
+                      <span>{prod.name}</span>
+                      {prod.badge && (
+                        <small className={prod.badge === "Mới" ? "new" : "hot"}>
+                          {prod.badge}
+                        </small>
+                      )}
+                    </a>
+                  ))}
                 </div>
               </div>
             </div>
@@ -1387,7 +1432,7 @@ export default function HeroSection({
                   <div className="mega-section-title">Chương trình nổi bật</div>
                   <div className="mega-grid-pills-flexible">
                     <a
-                      href={buildCategoryPath("Thu cũ đổi mới")}
+                      href="/thu-cu-doi-moi"
                       className="mega-pill-item relative-pill"
                       style={{ gridColumn: "span 6" }}
                     >
@@ -1764,6 +1809,30 @@ export default function HeroSection({
                       <GraduationCapIcon />
                       <span>
                         Laptop <b>ưu đãi khủng</b>
+                      </span>
+                    </a>
+                  </li>
+                </ul>
+              </div>
+
+              <div className="benefit-scroller-group">
+                <div className="benefit-group-gray-header">
+                  Thu cũ lên đời giá hời
+                </div>
+                <ul className="benefit-scroller-list-items">
+                  <li>
+                    <a href="/thu-cu-doi-moi/trade-in-iphone">
+                      <TradeInIcon />
+                      <span>
+                        iPhone <b>trợ giá đến 3 triệu</b>
+                      </span>
+                    </a>
+                  </li>
+                  <li>
+                    <a href="/thu-cu-doi-moi/trade-in-samsung">
+                      <TradeInIcon />
+                      <span>
+                        Samsung <b>trợ giá đến 4 triệu</b>
                       </span>
                     </a>
                   </li>
@@ -2607,30 +2676,30 @@ const officeDeviceRows = [
 /* --- 8. DANH MỤC: TIVI, ĐIỆN MÁY --- */
 const hotTvProducts = [
   {
-    name: "Máy lạnh Mijia Pro Eco Star 1.5 HP Inverter 2025",
-    query: "Máy lạnh Xiaomi",
-    category: "Điều hòa - Máy lạnh",
+    name: "Máy lạnh Daikin 1.5HP 2025",
+    query: "Máy lạnh Daikin 1.5HP",
+    category: "Máy lạnh",
+    image: "https://cdn2.cellphones.com.vn/x/media/catalog/product/m/_/m_y_l_nh_2__1_1.png",
     badge: "Hot",
-    span: 6,
   },
   {
-    name: "Tủ lạnh Xiaomi Mijia Multidoor 510L 2025",
-    query: "Tủ lạnh Xiaomi",
+    name: "Tủ lạnh Toshiba ngăn đá dưới 325L",
+    query: "Tủ lạnh Toshiba ngăn đá dưới",
     category: "Tủ lạnh",
+    image: "https://cdn2.cellphones.com.vn/x/media/catalog/product/t/u/tu-lanh-toshiba-inverter-325-lit-gr-rb410we-pmv-37-sg_1_.png",
     badge: "Mới",
-    span: 6,
   },
   {
-    name: "Tivi di động LG StanbyME 27 inch",
-    query: "LG Stanby",
-    category: "Tivi",
-    span: 6,
-  },
-  { name: "Giá treo tivi", category: "Tivi", span: 6 },
-  {
-    name: "Tủ chăm sóc quần áo",
+    name: "Máy giặt Panasonic cửa ngang",
+    query: "Máy giặt Panasonic cửa ngang",
     category: "Máy giặt",
-    span: 6,
+    image: "https://cdn2.cellphones.com.vn/insecure/rs:fill:150:0/q:70/plain/https://cellphones.com.vn/media/wysiwyg/may-giat-cua-truoc.png",
+  },
+  {
+    name: "Smart Tivi NanoCell LG 4K 55 inch",
+    query: "Tivi LG 55 inch",
+    category: "Tivi",
+    image: "https://cdn2.cellphones.com.vn/x/media/catalog/product/6/5/65578dfv.png",
   },
 ];
 

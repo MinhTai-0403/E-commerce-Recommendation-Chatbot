@@ -202,6 +202,27 @@ function getDerivedReturnAmount(order, returns = []) {
   }, 0);
 }
 
+function getCompletedReturnSummary(order, returns = []) {
+  const items = Array.isArray(order?.items) ? order.items : [];
+  const completedReturns = returns.filter((request) => (
+    request.orderCode === order?.orderCode && request.status === 'completed'
+  ));
+
+  if (!completedReturns.length) return null;
+
+  const returnedItemKeys = new Set(completedReturns.map((request) => (
+    request.productId || request.productSlug || request.productName || request.returnCode
+  )).filter(Boolean));
+  const totalItems = Math.max(1, items.length);
+  const isFullReturn = returnedItemKeys.size >= totalItems;
+
+  return {
+    status: isFullReturn ? 'return_completed' : 'return_partial_completed',
+    label: isFullReturn ? 'Hoàn trả thành công' : 'Hoàn trả một phần',
+    isFullReturn,
+  };
+}
+
 function getOrderTotal(order, returns = []) {
   const originalTotal = Number(order?.totals?.total || order?.totals?.roundedTotal || 0);
   const explicitNetTotal = Number(order?.totals?.netTotal);
@@ -336,6 +357,20 @@ function OrderCard({ order, returns = [], onCreateReturn, returnSubmitting = fal
     ? order.statusHistory
     : [{ status: order.status, label: order.statusLabel || statusLabels[order.status], changedAt: order.updatedAt }];
   const orderReturns = returns.filter((request) => request.orderCode === order.orderCode);
+  const returnSummary = getCompletedReturnSummary(order, returns);
+  const orderTotalAfterReturns = getOrderTotal(order, returns);
+  const originalOrderTotal = Number(order?.totals?.total || order?.totals?.roundedTotal || 0);
+  const hasFullReturn = returnSummary?.isFullReturn
+    || (returnSummary && originalOrderTotal > 0 && orderTotalAfterReturns <= 0);
+  const displayStatus = hasFullReturn
+    ? 'return_completed'
+    : (returnSummary?.status || order.status || 'pending');
+  const displayStatusLabel = hasFullReturn
+    ? 'Hoàn trả thành công'
+    : (returnSummary?.label || statusLabels[order.status] || order.statusLabel || order.status);
+  const totalLabel = hasFullReturn
+    ? 'Đã hoàn trả'
+    : (orderTotalAfterReturns < originalOrderTotal ? 'Thanh toán sau hoàn trả' : 'Tổng thanh toán');
 
   const findItemReturn = (item) => orderReturns.find((request) => (
     (item.productId && request.productId === item.productId)
@@ -418,8 +453,8 @@ function OrderCard({ order, returns = [], onCreateReturn, returnSubmitting = fal
           <span>Đơn hàng <strong>#{order.orderCode}</strong></span>
           <span>{formatDate(order.createdAt)}</span>
         </div>
-        <em className={`smember-order-status ${order.status || 'pending'}`}>
-          {statusLabels[order.status] || order.statusLabel || order.status}
+        <em className={`smember-order-status ${displayStatus}`}>
+          {displayStatusLabel}
         </em>
       </div>
 
@@ -431,8 +466,8 @@ function OrderCard({ order, returns = [], onCreateReturn, returnSubmitting = fal
           <small>{address || 'Địa chỉ nhận hàng sẽ được cập nhật khi xử lý đơn.'}</small>
         </div>
         <div className="smember-order-total">
-          <span>{getOrderTotal(order, returns) < Number(order?.totals?.total || order?.totals?.roundedTotal || 0) ? 'Thanh toán sau hoàn trả' : 'Tổng thanh toán'}</span>
-          <strong>{formatPrice(getOrderTotal(order, returns))}</strong>
+          <span>{totalLabel}</span>
+          <strong>{formatPrice(orderTotalAfterReturns)}</strong>
           <button type="button" onClick={() => setExpanded((value) => !value)}>
             {expanded ? 'Thu gọn' : 'Xem chi tiết'} <b>{expanded ? '⌃' : '⌄'}</b>
           </button>

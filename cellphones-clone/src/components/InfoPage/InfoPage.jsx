@@ -1,14 +1,19 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import './InfoPage.css';
 import { useApiProducts } from '../../hooks/useApiProducts';
 import ProductCard, { ProductCardSkeleton } from '../ProductCard/ProductCard';
 import { getInfoPageContent, infoNavigationGroups } from '../../data/infoPageContent';
 import { createSupportRequest } from '../../services/apiSupport';
+import { fetchContentPage } from '../../services/apiContent';
+import ContactPage from '../ContactPage/ContactPage';
+import CategoryShowcase from '../CategoryShowcase/CategoryShowcase';
+import CategoryLandingShowcase from '../CategoryLanding/CategoryLandingShowcase';
 import {
   buildCategoryPath,
   buildInfoPageModel,
   buildSearchPath,
 } from '../../utils/linkRoutes';
+import { PUBLIC_EXTERNAL_LINKS } from '../../utils/routeRegistry';
 
 const supportCards = [
   {
@@ -77,9 +82,42 @@ const installmentFaqs = [
 
 const installmentBrandFilters = ['Tất cả', 'Apple', 'Samsung', 'Xiaomi', 'OPPO', 'TECNO', 'Honor', 'Nubia', 'Sony', 'Nokia', 'Infinix', 'Nothing', 'realme'];
 
-const CATEGORY_INITIAL_LIMIT = 30;
+const CATEGORY_INITIAL_LIMIT = 20;
 const CATEGORY_LOAD_MORE_STEP = 20;
 const CATEGORY_MAX_LIMIT = 300;
+
+const sforumFallbackArticles = [
+  {
+    title: 'Tin công nghệ và thiết bị mới',
+    summary: 'Cập nhật các xu hướng sản phẩm, nền tảng và dịch vụ số đáng chú ý.',
+    category: 'Tin công nghệ',
+  },
+  {
+    title: 'Thủ thuật dùng điện thoại hiệu quả',
+    summary: 'Những hướng dẫn ngắn giúp tối ưu pin, bảo mật và trải nghiệm hằng ngày.',
+    category: 'Thủ thuật',
+  },
+  {
+    title: 'Góc đánh giá và tư vấn chọn mua',
+    summary: 'So sánh nhu cầu, tính năng và ngân sách trước khi chọn thiết bị phù hợp.',
+    category: 'Đánh giá',
+  },
+  {
+    title: 'Ứng dụng và trò chơi nổi bật',
+    summary: 'Điểm qua ứng dụng hữu ích, trò chơi mới và các cập nhật đáng quan tâm.',
+    category: 'S-Games',
+  },
+  {
+    title: 'Khuyến mãi công nghệ trong tuần',
+    summary: 'Tổng hợp chương trình ưu đãi và lưu ý điều kiện áp dụng khi mua sắm.',
+    category: 'Khuyến mãi',
+  },
+  {
+    title: 'Hỏi đáp thiết bị và phần mềm',
+    summary: 'Giải đáp các vấn đề thường gặp trong quá trình sử dụng sản phẩm công nghệ.',
+    category: 'Hỏi đáp',
+  },
+];
 
 const makeFooterLandingProfile = ({
   title,
@@ -512,8 +550,8 @@ const knownPhoneBrands = {
   redmi: 'xiaomi',
   poco: 'xiaomi',
   oppo: 'oppo',
-  realme: 'oppo',
-  oneplus: 'oppo',
+  realme: 'realme',
+  oneplus: 'oneplus',
   honor: 'honor',
   tecno: 'tecno',
   nubia: 'nubia',
@@ -541,14 +579,20 @@ const categoryCriteria = [
   { id: 'in-stock', label: 'Sẵn hàng', icon: 'truck', filter: 'in-stock', inStock: true },
   { id: 'new', label: 'Hàng mới về', icon: 'new', filter: 'new', sort: 'latest' },
   { id: 'price', label: 'Xem theo giá', icon: 'price', filter: 'price', sort: 'price_asc', dropdown: true },
-  { id: 'storage', label: 'Bộ nhớ trong', icon: 'storage', facet: 'storage', dropdown: true },
-  { id: 'ram', label: 'Dung lượng RAM', icon: 'ram', facet: 'ram', dropdown: true },
-  { id: 'screen-size', label: 'Kích thước màn hình', icon: 'screenSize', facet: 'screen-size', dropdown: true },
-  { id: 'usage', label: 'Nhu cầu sử dụng', icon: 'usage', facet: 'usage', dropdown: true },
-  { id: 'display', label: 'Kiểu màn hình', icon: 'display', facet: 'display', dropdown: true },
-  { id: 'camera', label: 'Tính năng camera', icon: 'camera', facet: 'camera', dropdown: true },
-  { id: 'refresh-rate', label: 'Tần số quét', icon: 'refresh', facet: 'refresh-rate', dropdown: true },
-  { id: 'special', label: 'Tính năng đặc biệt', icon: 'special', facet: 'special', dropdown: true },
+  { id: 'storage', label: 'Bộ nhớ trong', facet: 'storage', dropdown: true },
+  { id: 'ram', label: 'Dung lượng RAM', facet: 'ram', dropdown: true },
+  { id: 'screen-size', label: 'Kích thước màn hình', facet: 'screen-size', dropdown: true },
+  { id: 'usage', label: 'Nhu cầu sử dụng', facet: 'usage', dropdown: true },
+  { id: 'display', label: 'Kiểu màn hình', facet: 'display', dropdown: true },
+  { id: 'camera', label: 'Tính năng camera', facet: 'camera', dropdown: true },
+  { id: 'refresh-rate', label: 'Tần số quét', facet: 'refresh-rate', dropdown: true },
+  { id: 'special', label: 'Tính năng đặc biệt', facet: 'special', dropdown: true },
+  { id: 'product-line', label: 'Loại sản phẩm', facet: 'product-line', dropdown: true },
+];
+
+const samsungOnlyCriteria = [
+  { id: 'chip', label: 'Chip xử lí', facet: 'chip', dropdown: true },
+  { id: 'nfc', label: 'Công nghệ NFC', facet: 'nfc', dropdown: true },
 ];
 
 const filterParamByFacet = {
@@ -560,6 +604,8 @@ const filterParamByFacet = {
   camera: 'camera',
   'refresh-rate': 'refreshRate',
   special: 'special',
+  chip: 'chip',
+  nfc: 'nfc',
 };
 
 const detailedFilterGroups = {
@@ -614,6 +660,12 @@ const detailedFilterGroups = {
   ],
   special: [
     { title: 'Tính năng đặc biệt', param: 'special', options: ['5G', 'NFC', 'Sạc nhanh', 'Sạc không dây', 'Kháng nước IP68', 'AI tích hợp', 'MagSafe', 'Wi-Fi 6/7', 'Bluetooth 5.3'].map((value) => ({ label: value, value })) },
+  ],
+  chip: [
+    { title: 'Chip xử lí', param: 'chip', options: ['Snapdragon', 'Mediatek Dimensity', 'Exynos', 'Mediatek Helio'].map((value) => ({ label: value, value })) },
+  ],
+  nfc: [
+    { title: 'Công nghệ NFC', param: 'nfc', options: ['Có', 'Không'].map((value) => ({ label: value, value })) },
   ],
 };
 
@@ -683,6 +735,42 @@ const contextualDetailedFilterGroups = {
       '32 inch',
     ]),
   },
+  refrigerator: {
+    'product-line': [{
+      title: 'Kiểu tủ',
+      options: [
+        { label: 'Ngăn đá trên', q: 'Tủ lạnh ngăn đá trên' },
+        { label: 'Ngăn đá dưới', q: 'Tủ lạnh ngăn đá dưới' },
+        { label: 'Nhiều cánh', q: 'Tủ lạnh nhiều cánh' },
+        { label: 'Side by Side', q: 'Tủ lạnh Side By Side' },
+        { label: 'Mini', q: 'Tủ lạnh mini' },
+      ],
+    }],
+  },
+  washingMachine: {
+    'product-line': [{
+      title: 'Loại máy giặt',
+      options: [
+        { label: 'Cửa ngang', q: 'Máy giặt cửa ngang' },
+        { label: 'Cửa trên', q: 'Máy giặt cửa trên' },
+        { label: 'Máy giặt sấy', q: 'Máy giặt sấy' },
+        { label: 'Tháp giặt sấy', q: 'Tháp giặt sấy' },
+        { label: 'Tủ chăm sóc quần áo', q: 'Tủ chăm sóc quần áo' },
+      ],
+    }],
+  },
+  airConditioner: {
+    'product-line': [{
+      title: 'Công suất và kiểu máy',
+      options: [
+        { label: '1 HP', q: 'Máy lạnh 1.0HP' },
+        { label: '1.5 HP', q: 'Máy lạnh 1.5HP' },
+        { label: '2 HP', q: 'Máy lạnh 2.0HP' },
+        { label: 'Inverter', q: 'Máy lạnh Inverter' },
+        { label: 'Máy lạnh treo tường', q: 'Máy lạnh treo tường' },
+      ],
+    }],
+  },
 };
 
 const basicCategoryCriteria = categoryCriteria.slice(0, 4);
@@ -695,8 +783,15 @@ const audioCategoryCriteria = categoryCriteria.filter((item) => (
 const monitorCategoryCriteria = categoryCriteria.filter((item) => (
   ['all', 'in-stock', 'new', 'price', 'screen-size', 'display', 'refresh-rate', 'special'].includes(item.id)
 ));
+const completePhoneCriteria = [...categoryCriteria, ...samsungOnlyCriteria];
 
 const getCategoryCriteriaForPage = (page, apiCategory = '') => {
+  if (page.categoryLanding?.filterIds?.length) {
+    return page.categoryLanding.filterIds
+      .map((id) => completePhoneCriteria.find((item) => item.id === id))
+      .filter(Boolean);
+  }
+
   const key = normalizeLabel([
     apiCategory,
     page.category,
@@ -783,6 +878,9 @@ const getDetailedFilterContext = (page = {}, apiCategory = '') => {
   ].filter(Boolean).join(' '));
 
   if (key.includes('may tinh bang') || key.includes('tablet') || key.includes('ipad')) return 'tablet';
+  if (key.includes('tu lanh')) return 'refrigerator';
+  if (key.includes('may giat')) return 'washingMachine';
+  if (key.includes('may lanh') || key.includes('dieu hoa')) return 'airConditioner';
   if (key.includes('man hinh') || key.includes('monitor')) return 'monitor';
   if (key.includes('laptop') || key.includes('macbook')) return 'laptop';
   return 'phone';
@@ -791,6 +889,18 @@ const getDetailedFilterContext = (page = {}, apiCategory = '') => {
 const getDetailedFilterGroups = (item = {}, page = {}, apiCategory = '') => {
   const id = item.id || item.facet;
   const context = getDetailedFilterContext(page, apiCategory);
+
+  if (id === 'all') {
+    const pageGroups = getCategoryCriteriaForPage(page, apiCategory)
+      .filter((criterion) => criterion.dropdown && !['all', 'price'].includes(criterion.id))
+      .flatMap((criterion) => (
+        contextualDetailedFilterGroups[context]?.[criterion.id]
+        || detailedFilterGroups[criterion.id]
+        || []
+      ));
+    return [...detailedFilterGroups.all, ...pageGroups];
+  }
+
   return contextualDetailedFilterGroups[context]?.[id]
     || detailedFilterGroups[id]
     || [];
@@ -828,6 +938,10 @@ const isDetailedOptionActive = (page, group = {}, option = {}) => {
       && String(page.priceMax || '') === String(option.priceMax || '');
   }
 
+  if (option.q) {
+    return normalizeLabel(page.q || '') === normalizeLabel(option.q);
+  }
+
   const paramKey = group.param;
   if (!paramKey) {
     return Object.entries(option.overrides || {}).some(([key, value]) => String(page[key] || '') === String(value || ''));
@@ -843,6 +957,7 @@ const clearDetailedFilterPath = (page, item = {}) => {
   const shouldClearFacet = item.id === 'all' || item.id === 'price' || itemFilterKeys.includes(page.facet);
 
   return buildCategoryControlPath(page, {
+    q: item.id === 'all' || item.id === 'product-line' ? '' : page.q,
     filter: shouldClearFilter ? '' : page.filter,
     facet: shouldClearFacet ? '' : page.facet,
     inStock: item.id === 'all' || item.id === 'in-stock' ? '' : page.inStock,
@@ -856,6 +971,8 @@ const clearDetailedFilterPath = (page, item = {}) => {
     camera: item.id === 'all' || paramKey === 'camera' ? '' : page.camera,
     refreshRate: item.id === 'all' || paramKey === 'refreshRate' ? '' : page.refreshRate,
     special: item.id === 'all' || paramKey === 'special' ? '' : page.special,
+    chip: item.id === 'all' || paramKey === 'chip' ? '' : page.chip,
+    nfc: item.id === 'all' || paramKey === 'nfc' ? '' : page.nfc,
   });
 };
 
@@ -867,6 +984,43 @@ const buildCategoryControlPath = (page, overrides = {}) => {
   const inferredBrand = currentBrand || (page.root === 'category' && !isAccessoryTopic
     ? getBrandFromText(page.keyword || page.title || page.slug)
     : '');
+
+  if (page.landingPath) {
+    const params = new URLSearchParams();
+    const controlKeys = [
+      'q',
+      'segment',
+      'series',
+      'sort',
+      'filter',
+      'facet',
+      'inStock',
+      'priceMin',
+      'priceMax',
+      'ram',
+      'storage',
+      'screenSize',
+      'usage',
+      'display',
+      'camera',
+      'refreshRate',
+      'special',
+      'chip',
+      'nfc',
+    ];
+
+    controlKeys.forEach((key) => {
+      const value = getOverrideValue(overrides, page, key);
+      const isPresetValue = Object.prototype.hasOwnProperty.call(page.queryPreset || {}, key)
+        && String(value || '') === String(page.queryPreset?.[key] || '');
+      if (!value || isPresetValue) return;
+      params.set(key, String(value));
+    });
+
+    const query = params.toString();
+    return `${page.landingPath}${query ? `?${query}` : ''}`;
+  }
+
   return buildCategoryPath(category, {
     brand: Object.prototype.hasOwnProperty.call(overrides, 'brand')
       ? overrides.brand
@@ -874,6 +1028,7 @@ const buildCategoryControlPath = (page, overrides = {}) => {
     q: getOverrideValue(overrides, page, 'q'),
     keyword: getOverrideValue(overrides, page, 'keyword'),
     segment: getOverrideValue(overrides, page, 'segment'),
+    series: getOverrideValue(overrides, page, 'series'),
     sort: getOverrideValue(overrides, page, 'sort'),
     title: getOverrideValue(overrides, page, 'title'),
     filter: getOverrideValue(overrides, page, 'filter'),
@@ -889,7 +1044,16 @@ const buildCategoryControlPath = (page, overrides = {}) => {
     camera: getOverrideValue(overrides, page, 'camera'),
     refreshRate: getOverrideValue(overrides, page, 'refreshRate'),
     special: getOverrideValue(overrides, page, 'special'),
+    chip: getOverrideValue(overrides, page, 'chip'),
+    nfc: getOverrideValue(overrides, page, 'nfc'),
   });
+};
+
+const buildSearchControlPath = (page, overrides = {}) => {
+  const params = new URLSearchParams();
+  params.set('q', String(overrides.q ?? page.keyword ?? page.q ?? '').trim());
+  if (overrides.sort && overrides.sort !== 'latest') params.set('sort', overrides.sort);
+  return `/catalogsearch/result?${params.toString()}`;
 };
 
 function ChipIcon({ name }) {
@@ -1026,24 +1190,149 @@ function ChipIcon({ name }) {
   }
 }
 
-function InfoForm({ form }) {
-  if (!form) return null;
+const CATEGORY_PRICE_MAX = 71000000;
+const CATEGORY_PRICE_STEP = 500000;
+
+const formatPriceValue = (value = 0) => (
+  `${new Intl.NumberFormat('vi-VN').format(Number(value) || 0)}đ`
+);
+
+function PriceRangePicker({ page, item, groups, onClose }) {
+  const [range, setRange] = useState(() => {
+    const initialMin = Math.max(0, Number(page.priceMin) || 0);
+    const initialMax = Math.min(
+      CATEGORY_PRICE_MAX,
+      Math.max(initialMin, Number(page.priceMax) || CATEGORY_PRICE_MAX),
+    );
+    return { min: initialMin, max: initialMax };
+  });
+
+  const updateMin = (value) => {
+    const nextMin = Math.max(0, Math.min(Number(value) || 0, range.max));
+    setRange((current) => ({ ...current, min: nextMin }));
+  };
+
+  const updateMax = (value) => {
+    const nextMax = Math.min(
+      CATEGORY_PRICE_MAX,
+      Math.max(Number(value) || 0, range.min),
+    );
+    setRange((current) => ({ ...current, max: nextMax }));
+  };
+
+  const minPosition = `${(range.min / CATEGORY_PRICE_MAX) * 100}%`;
+  const maxPosition = `${(range.max / CATEGORY_PRICE_MAX) * 100}%`;
+  const applyPath = buildCategoryControlPath(page, {
+    filter: 'price',
+    facet: '',
+    priceMin: range.min > 0 ? String(range.min) : '',
+    priceMax: range.max < CATEGORY_PRICE_MAX ? String(range.max) : '',
+    sort: page.sort || 'latest',
+  });
 
   return (
-    <form className="info-local-form" onSubmit={(event) => event.preventDefault()}>
-      <h3>{form.title}</h3>
-      {form.fields.map((field) => (
-        <label key={field.label}>
-          <span>{field.label}</span>
-          {field.textarea ? (
-            <textarea placeholder={field.placeholder} rows={4} />
-          ) : (
-            <input placeholder={field.placeholder} />
-          )}
+    <div className="category-price-picker">
+      <p>Hãy chọn mức giá phù hợp với bạn</p>
+      <div className="category-price-inputs">
+        <label>
+          <span>Từ</span>
+          <input
+            type="number"
+            min="0"
+            max={range.max}
+            step={CATEGORY_PRICE_STEP}
+            value={range.min}
+            onChange={(event) => updateMin(event.target.value)}
+            aria-label="Giá thấp nhất"
+          />
+          <strong>{formatPriceValue(range.min)}</strong>
         </label>
-      ))}
-      <button type="submit">{form.button || 'Gửi thông tin'}</button>
-    </form>
+        <span aria-hidden="true">–</span>
+        <label>
+          <span>Đến</span>
+          <input
+            type="number"
+            min={range.min}
+            max={CATEGORY_PRICE_MAX}
+            step={CATEGORY_PRICE_STEP}
+            value={range.max}
+            onChange={(event) => updateMax(event.target.value)}
+            aria-label="Giá cao nhất"
+          />
+          <strong>{formatPriceValue(range.max)}</strong>
+        </label>
+      </div>
+      <div
+        className="category-price-slider"
+        style={{
+          '--price-min-position': minPosition,
+          '--price-max-position': maxPosition,
+        }}
+      >
+        <div className="category-price-slider-track" />
+        <input
+          type="range"
+          min="0"
+          max={CATEGORY_PRICE_MAX}
+          step={CATEGORY_PRICE_STEP}
+          value={range.min}
+          onChange={(event) => updateMin(event.target.value)}
+          aria-label="Điều chỉnh giá thấp nhất"
+        />
+        <input
+          type="range"
+          min="0"
+          max={CATEGORY_PRICE_MAX}
+          step={CATEGORY_PRICE_STEP}
+          value={range.max}
+          onChange={(event) => updateMax(event.target.value)}
+          aria-label="Điều chỉnh giá cao nhất"
+        />
+      </div>
+      <div className="category-price-actions">
+        <button type="button" onClick={onClose}>Đóng</button>
+        <a href={applyPath}>Xem kết quả</a>
+      </div>
+      <div className="category-price-presets">
+        <span>Mức giá nhanh</span>
+        <div>
+          {groups.flatMap((group) => group.options).map((option) => (
+            <a
+              href={buildDetailedFilterPath(page, item, groups[0], option)}
+              className={isDetailedOptionActive(page, groups[0], option) ? 'active' : ''}
+              key={option.label}
+            >
+              {option.label}
+            </a>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InfoForm({ form }) {
+  if (!form) return null;
+  const targetByType = {
+    order: PUBLIC_EXTERNAL_LINKS.smemberOrder,
+    smember: PUBLIC_EXTERNAL_LINKS.smemberPoints,
+    warranty: PUBLIC_EXTERNAL_LINKS.smemberWarranty,
+    invoice: PUBLIC_EXTERNAL_LINKS.invoice,
+    recruitment: PUBLIC_EXTERNAL_LINKS.recruitment,
+    store: '/dia-chi-cua-hang',
+  };
+  const target = targetByType[form.type] || '/support';
+
+  return (
+    <section className="info-local-form" aria-label={form.title}>
+      <h3>{form.title}</h3>
+      <p>
+        Thông tin được tiếp nhận tại hệ thống có chức năng xử lý và bảo vệ dữ liệu phù hợp.
+      </p>
+      <a className="info-local-form-link" href={target}>
+        {form.button || 'Tiếp tục'}
+      </a>
+    </section>
   );
 }
 
@@ -1095,6 +1384,160 @@ function InfoSection({ section }) {
           </table>
         </div>
       )}
+    </section>
+  );
+}
+
+function SnapshotContent({ content }) {
+  if (!content?.sections?.length) return null;
+  return (
+    <div className="info-content-main" aria-label="Nội dung đồng bộ">
+      {content.sections.map((section, index) => (
+        <section className="info-section-card" key={section.id || `${section.title}-${index}`}>
+          {section.title && <h2>{section.title}</h2>}
+          {section.text && section.text.split('\n').filter(Boolean).map((paragraph) => (
+            <p key={paragraph}>{paragraph}</p>
+          ))}
+          {section.links?.length > 0 && (
+            <div className="info-snapshot-links">
+              {section.links.map((link) => {
+                const href = getSafeSnapshotHref(link.href);
+                return href ? (
+                  <a href={href} rel="noreferrer" key={`${href}-${link.label}`}>{link.label}</a>
+                ) : null;
+              })}
+            </div>
+          )}
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function getSafeSnapshotHref(value) {
+  const rawValue = String(value || '').trim();
+  if (!rawValue || rawValue.startsWith('#')) return rawValue;
+  try {
+    const parsed = new URL(rawValue, window.location.origin);
+    if (!['http:', 'https:'].includes(parsed.protocol)) return '';
+    return parsed.origin === window.location.origin
+      ? `${parsed.pathname}${parsed.search}${parsed.hash}`
+      : parsed.href;
+  } catch {
+    return '';
+  }
+}
+
+function SforumLandingPage({ snapshotContent }) {
+  const snapshotArticles = (snapshotContent?.sections || [])
+    .filter((section) => section?.title)
+    .slice(0, 9)
+    .map((section, index) => ({
+      title: section.title,
+      summary: section.text || 'Mở bài viết để xem nội dung chi tiết.',
+      category: index % 3 === 0 ? 'Tin công nghệ' : (index % 3 === 1 ? 'Thủ thuật' : 'Đánh giá'),
+      href: getSafeSnapshotHref(section.links?.[0]?.href) || '#tin-moi',
+    }));
+  const articles = snapshotArticles.length >= 3 ? snapshotArticles : sforumFallbackArticles;
+  const featured = articles[0];
+  const secondary = articles.slice(1, 4);
+  const latest = [...articles, ...sforumFallbackArticles]
+    .filter((article, index, list) => list.findIndex((item) => item.title === article.title) === index)
+    .slice(0, 8);
+  const topics = ['Tin công nghệ', 'S-Games', 'Tư vấn', 'Trên tay', 'Đánh giá', 'Thủ thuật', 'Khuyến mãi'];
+
+  return (
+    <section className="sforum-page">
+      <header className="sforum-header">
+        <div className="container sforum-header-inner">
+          <a className="sforum-logo" href="/sforum" aria-label="Sforum">
+            <span>S</span>forum
+            <small>MẠNG XÃ HỘI</small>
+          </a>
+          <form action="/catalogsearch/result" className="sforum-search">
+            <input name="q" aria-label="Tìm bài viết" placeholder="Tìm kiếm tin tức, thủ thuật..." />
+          </form>
+          <a className="sforum-member-link" href="/dang-nhap">Đăng nhập</a>
+        </div>
+      </header>
+
+      <div className="container sforum-layout">
+        <aside className="sforum-navigation" aria-label="Chuyên mục Sforum">
+          <strong>Chuyên mục</strong>
+          {topics.map((topic, index) => (
+            <a href={`#${index === 0 ? 'tin-moi' : 'chu-de-hot'}`} key={topic}>{topic}<span>›</span></a>
+          ))}
+        </aside>
+
+        <main className="sforum-main">
+          <section className="sforum-topic-strip" id="chu-de-hot">
+            <h1>CHỦ ĐỀ HOT</h1>
+            <div>
+              {topics.slice(0, 6).map((topic, index) => (
+                <a href="#tin-moi" key={topic} style={{ '--topic-index': index }}>
+                  <span>{topic.charAt(0)}</span>
+                  <strong>#{topic.replace(/\s+/g, '')}</strong>
+                </a>
+              ))}
+            </div>
+          </section>
+
+          <section className="sforum-featured">
+            <h2>NỔI BẬT NHẤT</h2>
+            <div className="sforum-featured-grid">
+              <a className="sforum-lead-card" href={featured.href || '#tin-moi'}>
+                <div aria-hidden="true">S</div>
+                <span>{featured.category}</span>
+                <h3>{featured.title}</h3>
+                <p>{featured.summary}</p>
+              </a>
+              <div className="sforum-secondary-list">
+                {secondary.map((article, index) => (
+                  <a href={article.href || '#tin-moi'} key={article.title}>
+                    <div style={{ '--article-index': index }} aria-hidden="true">{article.category.charAt(0)}</div>
+                    <span>
+                      <strong>{article.title}</strong>
+                      <small>{article.category}</small>
+                    </span>
+                  </a>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          <section className="sforum-latest" id="tin-moi">
+            <div>
+              <h2>TIN TỨC MỚI NHẤT</h2>
+              <div className="sforum-article-list">
+                {latest.map((article, index) => (
+                  <a href={article.href || '#tin-moi'} key={`${article.title}-${index}`}>
+                    <div style={{ '--article-index': index }} aria-hidden="true">{article.category.charAt(0)}</div>
+                    <article>
+                      <span>{article.category}</span>
+                      <h3>{article.title}</h3>
+                      <p>{article.summary}</p>
+                    </article>
+                  </a>
+                ))}
+              </div>
+            </div>
+            <aside>
+              <h2>GÓC CHỌN & MUA</h2>
+              {sforumFallbackArticles.slice(0, 3).map((article) => (
+                <a href="/catalogsearch/result?q=tu-van" key={article.title}>{article.title}</a>
+              ))}
+            </aside>
+          </section>
+        </main>
+      </div>
+
+      <footer className="sforum-footer">
+        <div className="container">
+          <a className="sforum-logo" href="/sforum"><span>S</span>forum</a>
+          <p>Kênh nội dung công nghệ, thủ thuật, đánh giá và tư vấn chọn mua.</p>
+          <a href="/">Trở lại CellphoneS</a>
+        </div>
+      </footer>
     </section>
   );
 }
@@ -1599,6 +2042,7 @@ function ListingContent({ page }) {
     normalizeLabel(page.title).includes('iphone') ||
     normalizeLabel(page.keyword).includes('iphone')
   );
+  const showLegacyIphoneControls = isIphonePage && !page.categoryLanding;
   const [visibleLimit, setVisibleLimit] = useState(CATEGORY_INITIAL_LIMIT);
   const [openFilterId, setOpenFilterId] = useState('');
   const openDropdownRef = useRef(null);
@@ -1645,10 +2089,13 @@ function ListingContent({ page }) {
     source: 'all',
     displayLimit: visibleLimit,
     fetchLimit: Math.min(CATEGORY_MAX_LIMIT, Math.max(visibleLimit + CATEGORY_LOAD_MORE_STEP, visibleLimit * 2)),
-    sort: page.sort || 'latest',
+    sort: !isCategoryPage && (!page.sort || page.sort === 'latest')
+      ? 'popular'
+      : (page.sort || 'latest'),
   };
 
   if (page.inStock === 'true' || page.inStock === true) query.inStock = true;
+  if (page.series) query.series = page.series;
   if (page.inStock === 'false' || page.inStock === false) query.inStock = false;
 
   const flexibleTopicCategories = new Set([
@@ -1703,6 +2150,7 @@ function ListingContent({ page }) {
     && !page.refreshRate
     && !page.special
     && !shouldSuppressLooseKeyword
+    && !page.categoryLanding?.isRoot
     && normalizeLabel(page.keyword) !== normalizeLabel(apiCategory)
   ) {
     query.q = page.keyword;
@@ -1720,6 +2168,8 @@ function ListingContent({ page }) {
   if (page.camera) query.camera = page.camera;
   if (page.refreshRate) query.refreshRate = page.refreshRate;
   if (page.special) query.special = page.special;
+  if (page.chip) query.chip = page.chip;
+  if (page.nfc) query.nfc = page.nfc;
   if (isPromotionLanding) {
     query.filter = 'hot-deal';
     query.sort = 'hot_deal';
@@ -1735,11 +2185,42 @@ function ListingContent({ page }) {
     setVisibleLimit((value) => Math.min(value + CATEGORY_LOAD_MORE_STEP, CATEGORY_MAX_LIMIT));
   };
 
+  const searchSuggestions = normalizedKeyword.includes('iphone 17')
+    ? [
+      'iPhone 17 Series',
+      'Dán màn hình, kính cường lực iPhone',
+      'Ốp lưng điện thoại | Bao da',
+      'Phụ kiện điện thoại, máy tính',
+      'iPhone 17 cũ',
+      'Dán màn hình điện thoại',
+    ]
+    : [
+      `${page.keyword} chính hãng`,
+      `Phụ kiện ${page.keyword}`,
+      `${page.keyword} cũ`,
+    ];
+
   return (
-    <section className={`info-listing-panel ${isCategoryPage ? 'category-listing-panel' : ''}`}>
+    <section className={`info-listing-panel ${isCategoryPage ? 'category-listing-panel' : 'search-listing-panel'}`}>
+      {!isCategoryPage && (
+        <div className="search-parity-controls">
+          <div className="search-related-chips" aria-label="Gợi ý tìm kiếm">
+            <a className="active" href={buildSearchControlPath(page)}>Tất cả</a>
+            {searchSuggestions.map((label) => (
+              <a href={buildSearchControlPath(page, { q: label })} key={label}>{label}</a>
+            ))}
+          </div>
+          <h2>Sắp xếp theo</h2>
+          <div className="search-sort-chips">
+            <a className={!page.sort || page.sort === 'latest' ? 'active' : ''} href={buildSearchControlPath(page)}>Liên quan</a>
+            <a className={page.sort === 'price_desc' ? 'active' : ''} href={buildSearchControlPath(page, { sort: 'price_desc' })}>⇣ Giá cao</a>
+            <a className={page.sort === 'price_asc' ? 'active' : ''} href={buildSearchControlPath(page, { sort: 'price_asc' })}>⇣ Giá thấp</a>
+          </div>
+        </div>
+      )}
       {isCategoryPage && (
         <div className="category-listing-controls">
-          {isIphonePage && (
+          {showLegacyIphoneControls && (
             <>
               <div className="category-series-pills" aria-label="Dòng iPhone">
                 {iPhoneSeries.map((item) => (
@@ -1779,7 +2260,8 @@ function ListingContent({ page }) {
                 const detailedValue = getActiveDetailedValue(page, item);
                 const hasAnyDetailedFilter = Boolean(
                   page.priceMin || page.priceMax || page.ram || page.storage || page.screenSize ||
-                  page.usage || page.display || page.camera || page.refreshRate || page.special
+                  page.usage || page.display || page.camera || page.refreshRate || page.special ||
+                  page.chip || page.nfc
                 );
                 const isDetailedDropdown = item.id === 'price' || Boolean(item.facet);
                 const isActive = item.id === 'all'
@@ -1802,6 +2284,8 @@ function ListingContent({ page }) {
                     camera: '',
                     refreshRate: '',
                     special: '',
+                    chip: '',
+                    nfc: '',
                     q: '',
                     sort: 'latest',
                   })
@@ -1822,7 +2306,9 @@ function ListingContent({ page }) {
                       className={isActive ? 'active' : ''}
                       key={item.id}
                     >
-                      <span className="category-chip-icon"><ChipIcon name={item.icon} /></span>
+                      {item.icon && (
+                        <span className="category-chip-icon"><ChipIcon name={item.icon} /></span>
+                      )}
                       {item.label}
                     </a>
                   );
@@ -1836,7 +2322,9 @@ function ListingContent({ page }) {
                       aria-expanded={openFilterId === item.id}
                       onClick={() => setOpenFilterId((value) => (value === item.id ? '' : item.id))}
                     >
-                      <span className="category-chip-icon"><ChipIcon name={item.icon} /></span>
+                      {item.icon && (
+                        <span className="category-chip-icon"><ChipIcon name={item.icon} /></span>
+                      )}
                       <span>{detailedValue || item.label}</span>
                       <span className="category-chip-caret">⌄</span>
                     </button>
@@ -1847,22 +2335,31 @@ function ListingContent({ page }) {
                           <strong>{item.label}</strong>
                           <a href={clearDetailedFilterPath(page, item)}>Xóa lọc</a>
                         </div>
-                        {groups.map((group) => (
-                          <section key={group.title}>
-                            <h3>{group.title}</h3>
-                            <div className="category-filter-option-grid">
-                              {group.options.map((option) => (
-                                <a
-                                  key={`${group.title}-${option.label}`}
-                                  href={buildDetailedFilterPath(page, item, group, option)}
-                                  className={isDetailedOptionActive(page, group, option) ? 'active' : ''}
-                                >
-                                  {option.label}
-                                </a>
-                              ))}
-                            </div>
-                          </section>
-                        ))}
+                        {item.id === 'price' ? (
+                          <PriceRangePicker
+                            page={page}
+                            item={item}
+                            groups={groups}
+                            onClose={() => setOpenFilterId('')}
+                          />
+                        ) : (
+                          groups.map((group) => (
+                            <section key={group.title}>
+                              <h3>{group.title}</h3>
+                              <div className="category-filter-option-grid">
+                                {group.options.map((option) => (
+                                  <a
+                                    key={`${group.title}-${option.label}`}
+                                    href={buildDetailedFilterPath(page, item, group, option)}
+                                    className={isDetailedOptionActive(page, group, option) ? 'active' : ''}
+                                  >
+                                    {option.label}
+                                  </a>
+                                ))}
+                              </div>
+                            </section>
+                          ))
+                        )}
                       </div>
                     )}
                   </div>
@@ -1912,23 +2409,43 @@ function ListingContent({ page }) {
           camera: '',
           refreshRate: '',
           special: '',
+          chip: '',
+          nfc: '',
           sort: 'latest',
         }) : buildSearchPath(page.keyword)}>
           Làm mới kết quả
         </a>
       </div>
 
-      <div className="info-product-grid" aria-busy={loading}>
-        {loading ? (
-          Array.from({ length: 8 }).map((_, index) => (
-            <ProductCardSkeleton key={`info-skeleton-${index}`} />
-          ))
-        ) : products.length ? (
-          products.map((product) => <ProductCard product={product} key={product.id || product.slug || product.name} />)
-        ) : (
-          <div className="info-empty-result">
-            Chưa có sản phẩm khớp chính xác. Bạn có thể thử từ khóa khác hoặc quay lại trang chủ.
-          </div>
+      <div className={isCategoryPage ? '' : 'search-results-layout'}>
+        <div className="info-product-grid" aria-busy={loading}>
+          {loading ? (
+            Array.from({ length: 8 }).map((_, index) => (
+              <ProductCardSkeleton key={`info-skeleton-${index}`} />
+            ))
+          ) : products.length ? (
+            products.map((product) => <ProductCard product={product} key={product.id || product.slug || product.name} />)
+          ) : (
+            <div className="info-empty-result">
+              Chưa có sản phẩm khớp chính xác. Bạn có thể thử từ khóa khác hoặc quay lại trang chủ.
+            </div>
+          )}
+        </div>
+        {!isCategoryPage && (
+          <aside className="search-related-sidebar">
+            <section>
+              <h2>Thông tin liên quan</h2>
+              <a href="/thu-cu-doi-moi">Thu cũ lên đời {page.keyword}</a>
+              <a href="/danh-sach-khuyen-mai">Ưu đãi thanh toán và trả góp</a>
+              <a href="/chinh-sach-giao-hang">Chính sách giao hàng nhanh</a>
+              <a href="/uu-dai-smember">Quyền lợi Smember khi mua hàng</a>
+            </section>
+            <section>
+              <h2>Bài viết liên quan</h2>
+              <a href={buildSearchControlPath(page, { q: `đánh giá ${page.keyword}` })}>Đánh giá và tư vấn chọn {page.keyword}</a>
+              <a href={buildSearchControlPath(page, { q: `so sánh ${page.keyword}` })}>So sánh các phiên bản {page.keyword}</a>
+            </section>
+          </aside>
         )}
       </div>
 
@@ -1950,13 +2467,48 @@ function ListingContent({ page }) {
   );
 }
 
-export default function InfoPage({ pathname = window.location.pathname, search = window.location.search, onGoHome }) {
+export default function InfoPage({
+  pathname = window.location.pathname,
+  search = window.location.search,
+  onGoHome,
+  currentUser,
+}) {
   const page = useMemo(() => buildInfoPageModel(pathname, search), [pathname, search]);
+  const [snapshotState, setSnapshotState] = useState({ path: '', data: null });
+  const snapshotContent = snapshotState.path === pathname ? snapshotState.data : null;
   const footerLandingKey = getFooterLandingKey(page);
   const footerLandingProfile = footerLandingProfiles[footerLandingKey];
+  const categoryLanding = page.categoryLanding;
+  const showPhoneCategoryShowcase = page.root === 'category'
+    && page.path === '/mobile.html'
+    && !page.brand;
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const requestTimer = window.setTimeout(() => {
+      fetchContentPage(pathname, controller.signal)
+        .then((payload) => setSnapshotState({ path: pathname, data: payload.data || null }))
+        .catch((error) => {
+          if (error.name !== 'AbortError') setSnapshotState({ path: pathname, data: null });
+        });
+    }, 0);
+
+    return () => {
+      window.clearTimeout(requestTimer);
+      controller.abort();
+    };
+  }, [pathname]);
 
   if (page.path === '/tra-gop') {
     return <InstallmentLandingPage />;
+  }
+
+  if (page.path === '/lien-he') {
+    return <ContactPage currentUser={currentUser} onGoHome={onGoHome} />;
+  }
+
+  if (page.path === '/sforum') {
+    return <SforumLandingPage snapshotContent={snapshotContent} />;
   }
 
   if (footerLandingProfile) {
@@ -1964,7 +2516,7 @@ export default function InfoPage({ pathname = window.location.pathname, search =
   }
 
   return (
-    <section className="info-page">
+    <section className={`info-page ${page.root === 'category' ? 'category-info-page' : ''} ${page.root === 'search' ? 'search-info-page' : ''} ${categoryLanding ? 'has-category-landing' : ''}`}>
       <div className="container">
         <nav className="info-breadcrumb" aria-label="Breadcrumb">
           <a href="/" onClick={(event) => {
@@ -1975,18 +2527,54 @@ export default function InfoPage({ pathname = window.location.pathname, search =
             Trang chủ
           </a>
           <span>/</span>
-          <strong>{page.title}</strong>
+          {categoryLanding ? (
+            categoryLanding.isRoot && categoryLanding.parentPath === categoryLanding.path ? (
+              <strong>{categoryLanding.breadcrumbTitle || categoryLanding.title}</strong>
+            ) : (
+              <>
+                <a href={categoryLanding.parentPath}>{categoryLanding.parentTitle}</a>
+                <span>/</span>
+                {categoryLanding.isSeries ? (
+                  <>
+                    <a href={categoryLanding.brandPath}>
+                      {categoryLanding.breadcrumbTitle || categoryLanding.brand}
+                    </a>
+                    <span>/</span>
+                    <strong>{categoryLanding.title}</strong>
+                  </>
+                ) : (
+                  <strong>{categoryLanding.breadcrumbTitle || categoryLanding.title}</strong>
+                )}
+              </>
+            )
+          ) : (
+            <strong>{page.title}</strong>
+          )}
         </nav>
 
-        <header className={`info-hero-card ${page.root === 'category' ? 'category-title-card' : ''}`}>
-          {page.root !== 'category' && <span>{page.eyebrow}</span>}
-          <h1>{page.title}</h1>
-          {page.root !== 'category' && <p>{page.description}</p>}
-        </header>
+        {showPhoneCategoryShowcase && <CategoryShowcase page={page} />}
+        {categoryLanding && (
+          <CategoryLandingShowcase key={categoryLanding.id} profile={categoryLanding} />
+        )}
 
-        {page.isListing
-          ? <ListingContent key={`${pathname}${search}`} page={page} />
-          : <InfoContent page={page} />}
+        {!showPhoneCategoryShowcase && !categoryLanding && (
+          <header className={`info-hero-card ${page.root === 'category' ? 'category-title-card' : ''}`}>
+            {page.root !== 'category' && <span>{page.eyebrow}</span>}
+            <h1>{page.title}</h1>
+            {page.root !== 'category' && <p>{page.description}</p>}
+          </header>
+        )}
+
+        {page.isListing ? (
+          <>
+            <ListingContent key={`${pathname}${search}`} page={page} />
+            <SnapshotContent content={snapshotContent} />
+          </>
+        ) : (
+          snapshotContent?.sections?.length
+            ? <SnapshotContent content={snapshotContent} />
+            : <InfoContent page={page} />
+        )}
 
         <div className="info-support-grid">
           {supportCards.map((card) => (

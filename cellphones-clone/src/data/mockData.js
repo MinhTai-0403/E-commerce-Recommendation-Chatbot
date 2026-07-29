@@ -82,40 +82,56 @@ export const homeApplianceShowcases = [
 
 // ============ HERO SLIDER ============
 export const heroSliderTabs = [
-  { id: 1, line1: 'MỪNG KHAI TRƯƠNG', line2: 'Ưu đãi cực khủng' },
-  { id: 2, line1: 'GALAXY S26 ULTRA', line2: 'Siêu Phẩm AI Galaxy' },
-  { id: 3, line1: 'IPHONE 17 PRO MAX', line2: 'Nâng cấp êm. Thêm khác biệt' },
-  { id: 4, line1: 'OPPO FIND X9 ULTRA', line2: 'Mở bán tặng quà 12 triệu' },
+  { id: 1, line1: 'GALAXY Z8 SERIES', line2: 'Đặt trước nhận quà khủng' },
+  { id: 2, line1: 'IPHONE 17 PRO MAX', line2: 'Lướt mượt ghê. Lên đời dễ' },
+  { id: 3, line1: 'OPPO RENO16 F 5G', line2: 'Mở bán tặng quà khủng' },
+  { id: 4, line1: 'SAMSUNG GALAXY WATCH', line2: 'Giá tốt chốt ngay' },
+  { id: 5, line1: 'GALAXY S26 ULTRA', line2: 'Siêu phẩm AI Galaxy' },
+  { id: 6, line1: 'NUBIA NEO 5 GT', line2: 'Chiến là thắng' },
 ];
 
 export const heroSlides = [
   {
     id: 1,
-    image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:1036:450/q:100/plain/https://media-asset.cellphones.com.vn/dashboard-v1/manage-banner/Home_s26_0626_2.png',
-    bgColor: '#f0f0f0',
-    href: '/category/khuyen-mai?keyword=Khai+tr%C6%B0%C6%A1ng&category=Khuy%E1%BA%BFn+m%C3%A3i&title=%C6%AFu+%C4%91%C3%A3i+khai+tr%C6%B0%C6%A1ng',
-    title: 'Xem ưu đãi khai trương',
+    image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:1036:450/q:100/plain/https://media-asset.cellphones.com.vn/dashboard-v1/manage-banner/Z8_home_3.png',
+    bgColor: '#111827',
+    href: '/dien-thoai-samsung-galaxy-z-fold-8-ultra.html',
+    title: 'Xem Samsung Galaxy Z Fold8 Ultra',
   },
   {
     id: 2,
-    image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:1036:450/q:100/plain/https://media-asset.cellphones.com.vn/dashboard-v1/manage-banner/Home_s26_0626_2.png',
-    bgColor: '#0c0c0c',
-    href: '/dien-thoai-samsung-galaxy-s26-ultra-16gb-1tb.html',
-    title: 'Xem Samsung Galaxy S26 Ultra',
-  },
-  {
-    id: 3,
-    image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:1036:450/q:100/plain/https://media-asset.cellphones.com.vn/dashboard-v1/manage-banner/690x300_iPhone17ProMax_0626.png',
+    image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:1036:450/q:100/plain/https://media-asset.cellphones.com.vn/dashboard-v1/manage-banner/690x300_iPhone17ProMax_072026.png',
     bgColor: '#f5f5f7',
     href: '/iphone-17-pro-max.html',
     title: 'Xem iPhone 17 Pro Max',
   },
   {
+    id: 3,
+    image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:1036:450/q:100/plain/https://media-asset.cellphones.com.vn/dashboard-v1/manage-banner/oppo-reno-16-f-home.png',
+    bgColor: '#e5e7eb',
+    href: '/dien-thoai-oppo-reno16-f.html',
+    title: 'Xem OPPO Reno16 F 5G',
+  },
+  {
     id: 4,
-    image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:1036:450/q:100/plain/https://media-asset.cellphones.com.vn/dashboard-v1/manage-banner/Oppofin%20x9%20ultra_oppen-home.png',
-    bgColor: '#1a1a1a',
-    href: '/oppo-find-x9-ultra.html',
-    title: 'Xem OPPO Find X9 Ultra',
+    image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:1036:450/q:100/plain/https://media-asset.cellphones.com.vn/dashboard-v1/manage-banner/htttth.png',
+    bgColor: '#f3f4f6',
+    href: '/dong-ho-thong-minh-samsung-galaxy-watch-9.html',
+    title: 'Xem Samsung Galaxy Watch',
+  },
+  {
+    id: 5,
+    image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:1036:450/q:100/plain/https://media-asset.cellphones.com.vn/dashboard-v1/manage-banner/Homes2622.png',
+    bgColor: '#111827',
+    href: '/dien-thoai-samsung-galaxy-s26-ultra.html',
+    title: 'Xem Samsung Galaxy S26 Ultra',
+  },
+  {
+    id: 6,
+    image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:1036:450/q:100/plain/https://media-asset.cellphones.com.vn/dashboard-v1/manage-banner/home_nubia-special-edition.jpg',
+    bgColor: '#111827',
+    href: '/dien-thoai-nubia-neo-5-gt-special-edition.html',
+    title: 'Xem Nubia Neo 5 GT Special Edition',
   },
 ];
 
@@ -129,7 +145,7 @@ export const subBanners = [
   {
     id: 2,
     alt: 'Samsung Galaxy A37',
-    image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:690:300/q:50/plain/https://media-asset.cellphones.com.vn/dashboard-v1/manage-banner/a3757-0626.png',
+    image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:690:300/q:50/plain/https://media-asset.cellphones.com.vn/dashboard-v1/manage-banner/a37-0726.png',
     href: '/samsung-galaxy-a37.html',
   },
   {
@@ -142,7 +158,7 @@ export const subBanners = [
 
 // ============ PROMO STRIP (below hero) ============
 export const promoStripBanners = [
-  { id: 1, image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:1200:75/q:100/plain/https://media-asset.cellphones.com.vn/dashboard-v1/manage-banner/Special-banner-1-Sau-13.gif' },
+  { id: 1, image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:1200:75/q:100/plain/https://media-asset.cellphones.com.vn/dashboard-v1/manage-banner/Special-banner-1-D2---2.gif' },
   { id: 2, image: 'https://cdn2.cellphones.com.vn/insecure/rs:fill:800:150/q:100/plain/https://media-asset.cellphones.com.vn/dashboard-v1/manage-banner/SpecialBanner_Mobile_Sau-13.gif' },
 ];
 

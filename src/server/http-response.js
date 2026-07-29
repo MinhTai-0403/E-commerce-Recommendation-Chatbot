@@ -5,7 +5,11 @@ const PRETTY_JSON = String(process.env.API_PRETTY_JSON || "false") === "true";
 const GZIP_MIN_BYTES = Math.max(0, Number(process.env.API_GZIP_MIN_BYTES || 1024));
 
 function getAllowedCorsOrigins() {
-  const configured = String(process.env.CORS_ORIGIN || DEFAULT_CORS_ORIGIN)
+  const configured = String(
+    process.env.CORS_ALLOWED_ORIGINS
+    || process.env.CORS_ORIGIN
+    || DEFAULT_CORS_ORIGIN
+  )
     .split(/[;,\s]+/)
     .map((origin) => origin.trim().replace(/\/$/, ""))
     .filter(Boolean);

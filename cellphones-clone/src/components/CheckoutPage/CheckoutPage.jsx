@@ -138,7 +138,7 @@ const initialForm = {
   addressLine: '',
   shippingType: 'express',
   note: '',
-  marketingOptIn: true,
+  marketingOptIn: false,
   companyInvoice: false,
   companyName: '',
   taxCode: '',
@@ -146,7 +146,7 @@ const initialForm = {
   invoiceEmail: '',
   educationOffer: false,
   paymentMethod: 'bank_qr',
-  termsAccepted: true,
+  termsAccepted: false,
 };
 
 function createInitialForm(currentUser) {

@@ -490,7 +490,7 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
               (data.data || []).map((item) => [item.id, {
                 status: item.status || 'new',
                 adminNote: item.adminNote || '',
-                response: item.response || '',
+                response: '',
               }])
             ));
           }
@@ -1164,9 +1164,11 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
       await updateAdminSupportRequest(supportItem.id || supportItem.requestCode, {
         status: draft.status || supportItem.status || 'new',
         adminNote: draft.adminNote || '',
-        response: draft.response || '',
+        response: draft.response?.trim() || supportItem.response || '',
       });
-      setMessage('Đã cập nhật yêu cầu hỗ trợ.');
+      setMessage(draft.response?.trim()
+        ? 'Đã gửi phản hồi cho khách hàng.'
+        : 'Đã cập nhật yêu cầu hỗ trợ.');
       refresh();
     } catch (updateError) {
       setError(updateError.message || 'Không thể cập nhật yêu cầu hỗ trợ.');
@@ -2627,6 +2629,26 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
               <div className="admin-order-list">
                 {supportRequests.map((supportItem) => {
                   const draft = supportDrafts[supportItem.id] || {};
+                  const conversation = supportItem.messages?.length
+                    ? supportItem.messages
+                    : [
+                      {
+                        id: 'initial',
+                        sender: 'customer',
+                        senderName: supportItem.fullName || 'Khách hàng',
+                        content: supportItem.content,
+                        createdAt: supportItem.createdAt,
+                      },
+                      ...(supportItem.response
+                        ? [{
+                          id: 'legacy-response',
+                          sender: 'admin',
+                          senderName: 'CellphoneS',
+                          content: supportItem.response,
+                          createdAt: supportItem.updatedAt,
+                        }]
+                        : []),
+                    ];
 
                   return (
                     <article className="admin-order-row admin-support-row" key={supportItem.id || supportItem.requestCode}>
@@ -2648,10 +2670,26 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                           <span>{supportItem.phone || 'Không có SĐT'}</span>
                           <span>{supportItem.email || 'Không có email'}</span>
                           {supportItem.orderCode && <span>Đơn hàng: #{supportItem.orderCode}</span>}
+                          <span>
+                            Ưu tiên: {supportItem.preferredContact === 'phone' ? 'Điện thoại' : 'Email'}
+                          </span>
                         </div>
-                        <div className="admin-support-message">
-                          <strong>Nội dung khách gửi</strong>
-                          <p>{supportItem.content}</p>
+                        <div className="admin-support-thread">
+                          <strong>Trao đổi với khách hàng</strong>
+                          <div className="admin-support-thread-list">
+                            {conversation.map((item, index) => (
+                              <div
+                                className={`admin-support-bubble ${item.sender === 'admin' ? 'admin' : 'customer'}`}
+                                key={item.id || `${item.sender}-${index}`}
+                              >
+                                <div>
+                                  <strong>{item.senderName || (item.sender === 'admin' ? 'CellphoneS' : 'Khách hàng')}</strong>
+                                  <time>{formatDate(item.createdAt)}</time>
+                                </div>
+                                <p>{item.content}</p>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                         {supportItem.attachment?.dataUrl && (
                           <a
@@ -2683,12 +2721,12 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                           </select>
                         </label>
                         <label className="admin-order-note">
-                          Phản hồi cho khách hàng
+                          Phản hồi mới cho khách hàng
                           <textarea
                             rows="3"
                             value={draft.response || ''}
                             onChange={(event) => updateSupportDraft(supportItem.id, 'response', event.target.value)}
-                            placeholder="Nhập nội dung phản hồi hoặc kết quả xử lý..."
+                            placeholder="Nội dung này sẽ xuất hiện ngay trong trang Liên hệ của khách..."
                           />
                         </label>
                         <label className="admin-order-note">
@@ -2701,7 +2739,7 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                           />
                         </label>
                         <button type="button" onClick={() => handleSaveSupportRequest(supportItem)}>
-                          Lưu xử lý
+                          {draft.response?.trim() ? 'Gửi phản hồi & lưu' : 'Lưu xử lý'}
                         </button>
                         <button
                           type="button"

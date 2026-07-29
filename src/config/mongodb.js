@@ -15,7 +15,7 @@ function getMongoConfig() {
 
   if (!uri) {
     throw new Error(
-      "Missing MONGODB_URI. Create a .env file from .env.example first."
+      "Missing MONGODB_URI."
     );
   }
 
