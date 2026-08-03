@@ -8,11 +8,7 @@ export const emptyProductForm = {
   categories: '',
   primaryImage: '',
   description: '',
-  stock: '100',
-  reservedStock: '0',
-  soldCount: '0',
-  inventoryStatus: 'in_stock',
-  inventoryNote: '',
+  manageInventory: true,
 };
 
 export const emptyCouponForm = {
@@ -24,18 +20,32 @@ export const emptyCouponForm = {
   maxDiscount: '',
   minSubtotal: '',
   usageLimit: '',
-  userLimit: '',
+  userLimit: '1',
   startsAt: '',
   expiresAt: '',
   status: 'active',
   audiences: ['all'],
   allowWithEducationOffer: true,
+  distributionMode: 'manual_claim',
 };
 
 export const couponTypeOptions = [
   { value: 'fixed', label: 'Giảm tiền cố định' },
   { value: 'percent', label: 'Giảm theo %' },
   { value: 'free_shipping', label: 'Miễn phí vận chuyển' },
+];
+
+export const couponDistributionOptions = [
+  {
+    value: 'manual_claim',
+    label: 'Người dùng nhập mã để nhận',
+    hint: 'Mã chỉ vào kho voucher sau khi người dùng nhập tại Smember hoặc thanh toán.',
+  },
+  {
+    value: 'checkout_only',
+    label: 'Chỉ nhập khi thanh toán',
+    hint: 'Mã được nhận và áp dụng trực tiếp ở bước thanh toán.',
+  },
 ];
 
 export const couponStatusOptions = [
@@ -96,6 +106,15 @@ export const returnStatusOptions = [
   { value: 'cancelled', label: 'Đã hủy' },
 ];
 
+export const returnStatusTransitions = {
+  pending: ['received', 'approved', 'rejected', 'cancelled'],
+  received: ['approved', 'rejected', 'cancelled'],
+  approved: ['completed', 'cancelled'],
+  rejected: [],
+  completed: [],
+  cancelled: [],
+};
+
 export const supportStatusOptions = [
   { value: 'new', label: 'Mới tiếp nhận' },
   { value: 'in_progress', label: 'Đang xử lý' },
@@ -114,6 +133,15 @@ export function formatCurrency(value) {
   }).format(price);
 }
 
+export function formatMoney(value) {
+  const amount = Number(value);
+  return new Intl.NumberFormat('vi-VN', {
+    style: 'currency',
+    currency: 'VND',
+    maximumFractionDigits: 0,
+  }).format(Number.isFinite(amount) ? amount : 0);
+}
+
 export function formatDate(value) {
   if (!value) return '—';
   const date = new Date(value);
@@ -129,25 +157,51 @@ function splitTextList(value) {
 }
 
 export function findInventoryForProduct(product = {}, inventoryItems = []) {
-  const identifiers = [
+  const identifiers = new Set([
     product.id,
     product.mongoId,
     product.slug,
     product.sku,
     product.name,
-  ].filter(Boolean).map((value) => String(value).toLowerCase());
+  ].filter(Boolean).map((value) => String(value).toLowerCase()));
 
-  return inventoryItems.find((item) => [
-    item.id,
+  const matches = inventoryItems.filter((item) => [
     item.productId,
     item.productSlug,
     item.productSku,
     item.productName,
-    item.key,
-  ].filter(Boolean).some((value) => identifiers.includes(String(value).toLowerCase())));
+    item.slug,
+    item.sku,
+    item.name,
+  ].filter(Boolean).some((value) => identifiers.has(String(value).toLowerCase())));
+
+  if (!matches.length) return null;
+
+  const stock = matches.reduce((sum, item) => sum + Number(item.stock || 0), 0);
+  const reservedStock = matches.reduce((sum, item) => sum + Number(item.reservedStock || 0), 0);
+  const soldCount = matches.reduce((sum, item) => sum + Number(item.soldCount || 0), 0);
+  const availableStock = Math.max(0, stock - reservedStock);
+  const allInactive = matches.every((item) => item.status === 'inactive');
+  const status = allInactive
+    ? 'inactive'
+    : availableStock <= 0
+      ? 'out_of_stock'
+      : availableStock <= 5
+        ? 'low_stock'
+        : 'in_stock';
+
+  return {
+    stock,
+    reservedStock,
+    availableStock,
+    soldCount,
+    status,
+    itemCount: matches.length,
+    items: matches,
+  };
 }
 
-export function productToForm(product, inventoryItem = null) {
+export function productToForm(product) {
   return {
     name: product.name || '',
     slug: product.slug || '',
@@ -158,11 +212,7 @@ export function productToForm(product, inventoryItem = null) {
     categories: Array.isArray(product.categories) ? product.categories.join(', ') : '',
     primaryImage: product.primaryImage || product.thumbnail || product.image || '',
     description: product.description || '',
-    stock: inventoryItem?.stock ?? product.stock ?? '100',
-    reservedStock: inventoryItem?.reservedStock ?? product.reservedStock ?? '0',
-    soldCount: inventoryItem?.soldCount ?? product.soldCount ?? '0',
-    inventoryStatus: inventoryItem?.status || product.inventoryStatus || 'in_stock',
-    inventoryNote: inventoryItem?.note || '',
+    manageInventory: product.manageInventory !== false,
   };
 }
 
@@ -185,33 +235,10 @@ export function buildProductPayload(form) {
     primaryImage,
     images: primaryImage ? [primaryImage] : [],
     description: form.description.trim(),
-    availability: {
-      status: form.inventoryStatus === 'out_of_stock' ? 'OutOfStock' : 'InStock',
-      raw: form.inventoryStatus === 'out_of_stock' ? 'Hết hàng' : 'Còn hàng',
-    },
-    stock: Number(form.stock || 0),
+    manageInventory: form.manageInventory !== false,
   };
 }
 
-export function buildProductInventoryPayload(form, savedProduct = {}) {
-  const productSlug = savedProduct.slug || form.slug.trim();
-  const productSku = savedProduct.sku || form.sku.trim();
-  const productName = savedProduct.name || form.name.trim();
-  const productId = savedProduct.mongoId || savedProduct.id || productSlug || productSku || productName;
-
-  return {
-    key: productSlug || productSku || productId,
-    productId: String(productId || ''),
-    productSlug,
-    productSku,
-    productName,
-    stock: Number(form.stock || 0),
-    reservedStock: Number(form.reservedStock || 0),
-    soldCount: Number(form.soldCount || 0),
-    status: form.inventoryStatus || 'in_stock',
-    note: form.inventoryNote || '',
-  };
-}
 
 function toDatetimeLocalValue(value) {
   if (!value) return '';
@@ -237,6 +264,7 @@ export function couponToForm(coupon = {}) {
     status: coupon.status || 'active',
     audiences: Array.isArray(coupon.audiences) && coupon.audiences.length ? coupon.audiences : ['all'],
     allowWithEducationOffer: coupon.allowWithEducationOffer !== false,
+    distributionMode: coupon.distributionMode || 'manual_claim',
   };
 }
 
@@ -266,6 +294,7 @@ export function buildCouponPayload(form) {
     status: form.status || 'active',
     audiences: Array.isArray(form.audiences) && form.audiences.length ? form.audiences : ['all'],
     allowWithEducationOffer: Boolean(form.allowWithEducationOffer),
+    distributionMode: form.distributionMode || 'manual_claim',
   };
 
   Object.keys(payload).forEach((key) => {

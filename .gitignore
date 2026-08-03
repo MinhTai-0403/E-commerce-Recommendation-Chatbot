@@ -10,6 +10,13 @@ node_modules/
 npm-debug.log*
 logs/
 data/product-details/
+output/
+.playwright-cli/
+.tmp/
+reports/api-audit/*/
+!reports/api-audit/.gitkeep
+cellphones-clone/output/
+multimodal-chatbox/static/uploads/
 
 *.pt
 *.pth
@@ -28,6 +35,8 @@ multimodal-chatbox/data/products/_downloaded/
 .env
 **/.venv/
 **/__pycache__/
+.pytest_cache/
+**/.pytest_cache/
 *.pyc
 
 # Test folder

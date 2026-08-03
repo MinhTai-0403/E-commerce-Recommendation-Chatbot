@@ -16,18 +16,25 @@ function parseArgs(argv) {
   const args = {
     target: DEFAULT_TARGET,
     startSitemap: 0,
-    endSitemap: 59,
+    endSitemap: 61,
     batchSize: 1000,
     timeoutMs: 20000,
+    urls: [],
   };
 
   for (const arg of argv) {
     const [name, value] = arg.split("=");
     if (name === "--target") args.target = Number(value || DEFAULT_TARGET);
     else if (name === "--start-sitemap") args.startSitemap = Number(value || 0);
-    else if (name === "--end-sitemap") args.endSitemap = Number(value || 59);
+    else if (name === "--end-sitemap") args.endSitemap = Number(value || 61);
     else if (name === "--batch-size") args.batchSize = Number(value || 1000);
     else if (name === "--timeout-ms") args.timeoutMs = Number(value || 20000);
+    else if (name === "--urls") {
+      args.urls = String(value || "")
+        .split(",")
+        .map((url) => url.trim())
+        .filter((url) => url.startsWith(`${SITE_ORIGIN}/`) && url.endsWith(".html"));
+    }
   }
 
   return args;
@@ -254,6 +261,26 @@ async function main() {
 
     console.log(`[seed] Current ${productsCollection}: ${total}`);
     console.log(`[seed] Target: ${args.target}`);
+
+    if (args.urls.length) {
+      const entries = args.urls.map((url, index) => ({
+        url,
+        sitemapUrl: "manual-route-manifest",
+        sitemapRank: null,
+        sitemapProductRank: index,
+        sitemapSortRank: null,
+        sitemapLastmod: null,
+        sitemapImages: [],
+      }));
+      const existing = await getExistingUrlSet(collection, args.urls);
+      const docs = entries.filter((entry) => !existing.has(entry.url)).map(createSeedDoc);
+      if (docs.length) {
+        const result = await collection.bulkWrite(productUpsertOps(docs), { ordered: false });
+        inserted = result.upsertedCount || 0;
+      }
+      console.log(`[seed] Explicit URLs=${args.urls.length}, inserted=${inserted}`);
+      return;
+    }
 
     for (
       let sitemapRank = args.startSitemap;

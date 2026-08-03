@@ -1,9 +1,22 @@
 import { createProductSlug, extractProductSlug } from '../data/productCatalog';
 import { buildCategoryPath } from '../utils/linkRoutes';
 
-const DEFAULT_API_BASE_URL = 'http://localhost:5050';
+const DEFAULT_API_BASE_URL = import.meta.env.DEV ? 'http://localhost:5050' : '';
+const API_REQUEST_TIMEOUT_MS = Math.max(
+  3_000,
+  Number(import.meta.env.VITE_API_REQUEST_TIMEOUT_MS || 15_000),
+);
+const API_GET_CACHE_MAX_ENTRIES = Math.max(
+  20,
+  Number(import.meta.env.VITE_API_GET_CACHE_MAX_ENTRIES || 300),
+);
+const apiGetCache = new Map();
+const apiGetInflight = new Map();
 const PRODUCT_IMAGE_FALLBACK =
   'https://cdn2.cellphones.com.vn/insecure/rs:fill:300:300/q:90/plain/https://cellphones.com.vn/media/wysiwyg/no-product.png';
+const DEAD_PRODUCT_IMAGE_PATHS = new Set([
+  '/x/media/catalog/product/s/d/sder54_3__1.jpg',
+]);
 
 export const API_BASE_URL = (
   import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL
@@ -65,8 +78,17 @@ const stripHtml = (value = '') => (
     .trim()
 );
 
+const getImagePath = (src = '') => {
+  try {
+    return new URL(String(src), 'https://cellphones.local').pathname;
+  } catch {
+    return String(src).split('?')[0];
+  }
+};
+
 const hasUsableImage = (src) => (
   Boolean(src) &&
+  !DEAD_PRODUCT_IMAGE_PATHS.has(getImagePath(src)) &&
   !String(src).toLowerCase().includes('no_selection') &&
   !String(src).toLowerCase().includes('no-product') &&
   !String(src).toLowerCase().includes('placeholder') &&
@@ -342,19 +364,103 @@ export const buildApiUrl = (path, params = {}) => {
   return url.toString();
 };
 
-export async function fetchApiJson(path, params = {}, signal) {
-  const response = await fetch(buildApiUrl(path, params), {
-    headers: { Accept: 'application/json' },
-    signal,
-  });
+const getApiCacheTtl = (path = '') => {
+  if (/\/reviews(?:\/|$)|\/questions(?:\/|$)/.test(path)) return 0;
+  if (/\/details(?:\/|$)/.test(path)) return 5 * 60_000;
+  if (/\/related(?:\/|$)/.test(path)) return 2 * 60_000;
+  if (/^\/api\/products(?:\/|$)/.test(path)) return 60_000;
+  return 0;
+};
 
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || payload.ok === false) {
-    const message = payload.message || payload.error?.message || payload.error;
-    throw new Error(message || `API request failed: ${response.status}`);
+const getCachedApiPayload = (key) => {
+  const entry = apiGetCache.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    apiGetCache.delete(key);
+    return null;
   }
 
+  apiGetCache.delete(key);
+  apiGetCache.set(key, entry);
+  return entry.payload;
+};
+
+const cacheApiPayload = (key, payload, ttlMs) => {
+  if (!ttlMs) return payload;
+  apiGetCache.delete(key);
+  apiGetCache.set(key, {
+    payload,
+    expiresAt: Date.now() + ttlMs,
+  });
+
+  while (apiGetCache.size > API_GET_CACHE_MAX_ENTRIES) {
+    const oldestKey = apiGetCache.keys().next().value;
+    if (!oldestKey) break;
+    apiGetCache.delete(oldestKey);
+  }
   return payload;
+};
+
+const waitForApiPayload = (promise, signal) => {
+  if (!signal) return promise;
+  if (signal.aborted) {
+    return Promise.reject(new DOMException('The operation was aborted.', 'AbortError'));
+  }
+
+  return new Promise((resolve, reject) => {
+    const handleAbort = () => reject(new DOMException('The operation was aborted.', 'AbortError'));
+    const cleanup = () => signal.removeEventListener('abort', handleAbort);
+    signal.addEventListener('abort', handleAbort, { once: true });
+    promise.then(
+      (payload) => {
+        cleanup();
+        resolve(payload);
+      },
+      (error) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
+};
+
+export async function fetchApiJson(path, params = {}, signal) {
+  const requestUrl = buildApiUrl(path, params);
+  const cacheTtl = getApiCacheTtl(path);
+  const cached = cacheTtl ? getCachedApiPayload(requestUrl) : null;
+  if (cached) return waitForApiPayload(Promise.resolve(cached), signal);
+
+  let request = cacheTtl ? apiGetInflight.get(requestUrl) : null;
+  if (!request) {
+    request = (async () => {
+      const timeoutController = new AbortController();
+      const timeoutId = window.setTimeout(
+        () => timeoutController.abort(),
+        API_REQUEST_TIMEOUT_MS,
+      );
+
+      try {
+        const response = await fetch(requestUrl, {
+          credentials: 'include',
+          headers: { Accept: 'application/json' },
+          signal: timeoutController.signal,
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload.ok === false) {
+          const message = payload.message || payload.error?.message || payload.error;
+          throw new Error(message || `API request failed: ${response.status}`);
+        }
+        return cacheApiPayload(requestUrl, payload, cacheTtl);
+      } finally {
+        window.clearTimeout(timeoutId);
+        if (cacheTtl) apiGetInflight.delete(requestUrl);
+      }
+    })();
+
+    if (cacheTtl) apiGetInflight.set(requestUrl, request);
+  }
+
+  return waitForApiPayload(request, signal);
 }
 
 export async function fetchProducts(params = {}, signal) {

@@ -1,3 +1,14 @@
+import {
+  getCategoryRouteModel,
+  PUBLIC_EXTERNAL_LINKS,
+  PUBLIC_ROUTES,
+  resolvePublicRoute,
+} from './routeRegistry';
+import {
+  getCategoryLandingPath,
+  resolveCategoryLandingProfile,
+} from '../data/categoryLandingProfiles';
+
 export const createSiteSlug = (value = '') => {
   const normalized = String(value || 'cellphones')
     .trim()
@@ -11,8 +22,44 @@ export const createSiteSlug = (value = '') => {
   return normalized || 'cellphones';
 };
 
+export const AUDIO_CATEGORY_PATHS = Object.freeze({
+  root: '/thiet-bi-am-thanh.html',
+  headphones: '/thiet-bi-am-thanh/tai-nghe.html',
+  speakers: '/thiet-bi-am-thanh/loa.html',
+  recordingMicrophone: '/thiet-bi-am-thanh/micro-thu-am.html',
+  microphone: '/thiet-bi-am-thanh/micro.html',
+  turntable: '/thiet-bi-am-thanh/dia-than.html',
+  airPods: '/thiet-bi-am-thanh/tai-nghe/apple.html',
+  bluetoothHeadphones: '/thiet-bi-am-thanh/tai-nghe/tai-nghe-bluetooth.html',
+});
+
+export const getAudioCategoryPath = (label = '') => {
+  const slug = createSiteSlug(label);
+
+  if (slug === 'am-thanh') return AUDIO_CATEGORY_PATHS.root;
+  if (slug === 'tai-nghe') return AUDIO_CATEGORY_PATHS.headphones;
+  if (slug === 'loa') return AUDIO_CATEGORY_PATHS.speakers;
+  if (slug === 'airpods') return AUDIO_CATEGORY_PATHS.airPods;
+  if (['bluetooth', 'tai-khong-day', 'tai-nghe-khong-day', 'tai-nghe-bluetooth'].includes(slug)) {
+    return AUDIO_CATEGORY_PATHS.bluetoothHeadphones;
+  }
+  if (
+    ['mic-thu-am', 'micro-thu-am', 'mic-cai-ao', 'mic-livestream'].includes(slug)
+    || slug.startsWith('mic-phong-thu')
+    || slug.startsWith('microphone-thu-am')
+  ) {
+    return AUDIO_CATEGORY_PATHS.recordingMicrophone;
+  }
+  if (['mic', 'micro', 'mic-khong-day', 'micro-khong-day', 'mic-karaoke', 'micro-karaoke'].includes(slug)) {
+    return AUDIO_CATEGORY_PATHS.microphone;
+  }
+  if (['dia-than', 'dau-dia-than'].includes(slug)) return AUDIO_CATEGORY_PATHS.turntable;
+
+  return '';
+};
+
 export const buildSearchPath = (keyword = '') => (
-  `/search?keyword=${encodeURIComponent(String(keyword || '').trim())}`
+  `/catalogsearch/result?q=${encodeURIComponent(String(keyword || '').trim())}`
 );
 
 const appendTruthyParam = (params, key, value) => {
@@ -20,18 +67,111 @@ const appendTruthyParam = (params, key, value) => {
   if (text) params.set(key, text);
 };
 
+const catalogTopicRouteBySlug = {
+  'micro-thu-am': '/thiet-bi-am-thanh/micro-thu-am.html',
+  microphone: '/thiet-bi-am-thanh/micro-thu-am.html',
+  mic: '/thiet-bi-am-thanh/micro.html',
+  micro: '/thiet-bi-am-thanh/micro.html',
+  'mic-khong-day': '/thiet-bi-am-thanh/micro.html',
+  'micro-khong-day': '/thiet-bi-am-thanh/micro.html',
+  'mic-karaoke': '/thiet-bi-am-thanh/micro.html',
+  'micro-karaoke': '/thiet-bi-am-thanh/micro.html',
+  'dia-than': '/thiet-bi-am-thanh/dia-than.html',
+  'dau-dia-than': '/thiet-bi-am-thanh/dia-than.html',
+  'tai-nghe': '/thiet-bi-am-thanh/tai-nghe.html',
+  'tai-khong-day': '/thiet-bi-am-thanh/tai-nghe/tai-nghe-bluetooth.html',
+  'tai-nghe-khong-day': '/thiet-bi-am-thanh/tai-nghe/tai-nghe-bluetooth.html',
+  'tai-nghe-bluetooth': '/thiet-bi-am-thanh/tai-nghe/tai-nghe-bluetooth.html',
+  'tai-nghe-chup-tai': '/thiet-bi-am-thanh/tai-nghe/headphones.html',
+  'tai-nghe-nhet-tai': '/thiet-bi-am-thanh/tai-nghe/tai-nghe-nhet-tai.html',
+  'tai-nghe-co-day': '/thiet-bi-am-thanh/tai-nghe/co-day.html',
+  'tai-nghe-gaming': '/thiet-bi-am-thanh/tai-nghe/gaming.html',
+  'loa': '/thiet-bi-am-thanh/loa.html',
+  'loa-bluetooth': '/thiet-bi-am-thanh/loa/loa-bluetooth.html',
+  'loa-karaoke': '/thiet-bi-am-thanh/loa/loa-karaoke.html',
+  'loa-keo': '/thiet-bi-am-thanh/loa/loa-keo.html',
+  'loa-soundbar': '/thiet-bi-am-thanh/loa/loa-soundbar.html',
+  'loa-vi-tinh': '/thiet-bi-am-thanh/loa/loa-vi-tinh.html',
+  'thiet-bi-mang': '/phu-kien/thiet-bi-mang.html',
+  'linh-kien-may-tinh': '/linh-kien.html',
+  'gaming-gear': '/phu-kien/gaming-gear.html',
+  'day-dong-ho-thong-minh': '/do-choi-cong-nghe/day-deo-dong-ho.html',
+  camera: '/phu-kien/camera.html',
+  'lam-dep': '/nha-thong-minh/suc-khoe-lam-dep.html',
+  'suc-khoe-lam-dep': '/nha-thong-minh/suc-khoe-lam-dep.html',
+  'may-in': '/may-in.html',
+  'man-hinh-may-tinh': '/man-hinh.html',
+  'tu-lanh': '/tu-lanh.html',
+  'may-giat': '/may-giat.html',
+  'may-lanh': '/may-lanh.html',
+  'dieu-hoa': '/may-lanh.html',
+  'dieu-hoa-may-lanh': '/may-lanh.html',
+};
+
+const catalogTopicRouteByCategory = {
+  'tai-nghe:bluetooth': '/thiet-bi-am-thanh/tai-nghe/tai-nghe-bluetooth.html',
+  'tai-nghe:co-day': '/thiet-bi-am-thanh/tai-nghe/co-day.html',
+  'tai-nghe:chup-tai': '/thiet-bi-am-thanh/tai-nghe/headphones.html',
+  'tai-nghe:nhet-tai': '/thiet-bi-am-thanh/tai-nghe/tai-nghe-nhet-tai.html',
+  'tai-nghe:gaming': '/thiet-bi-am-thanh/tai-nghe/gaming.html',
+  'tai-nghe:the-thao': '/thiet-bi-am-thanh/tai-nghe/the-thao.html',
+  'tai-nghe:kiem-am': '/thiet-bi-am-thanh/tai-nghe/kiem-am.html',
+  'tai-nghe:phien-dich': '/thiet-bi-am-thanh/tai-nghe/phien-dich.html',
+  'loa:loa-bluetooth': '/thiet-bi-am-thanh/loa/loa-bluetooth.html',
+  'loa:loa-karaoke': '/thiet-bi-am-thanh/loa/loa-karaoke.html',
+  'loa:loa-keo': '/thiet-bi-am-thanh/loa/loa-keo.html',
+  'loa:loa-soundbar': '/thiet-bi-am-thanh/loa/loa-soundbar.html',
+  'loa:loa-vi-tinh': '/thiet-bi-am-thanh/loa/loa-vi-tinh.html',
+  'linh-kien-may-tinh:cpu': '/linh-kien/cpu.html',
+  'linh-kien-may-tinh:main': '/linh-kien/mainboard.html',
+  'linh-kien-may-tinh:mainboard': '/linh-kien/mainboard.html',
+  'linh-kien-may-tinh:ram': '/linh-kien/ram.html',
+  'linh-kien-may-tinh:o-cung': '/linh-kien/o-cung.html',
+  'linh-kien-may-tinh:nguon': '/linh-kien/nguon.html',
+  'linh-kien-may-tinh:vga': '/linh-kien/vga.html',
+  'linh-kien-may-tinh:tan-nhiet': '/linh-kien/tan-nhiet.html',
+  'linh-kien-may-tinh:case': '/linh-kien/case.html',
+  'thiet-bi-mang:thiet-bi-phat-song-wifi': '/phu-kien/thiet-bi-mang/thiet-bi-phat-wifi.html',
+  'thiet-bi-mang:bo-phat-wifi-di-dong': '/phu-kien/thiet-bi-mang/bo-phat-wifi-di-dong.html',
+  'thiet-bi-mang:bo-kich-song-wifi': '/phu-kien/thiet-bi-mang/bo-kich-song-wifi.html',
+  'thiet-bi-mang:hub-switch': '/phu-kien/thiet-bi-mang/hub-switch.html',
+  'thiet-bi-mang:usb-wifi': '/phu-kien/thiet-bi-mang/usb-wifi.html',
+  'thiet-bi-mang:card-mang': '/phu-kien/thiet-bi-mang/card-mang.html',
+  'gaming-gear:playstation': '/phu-kien/gaming-gear/may-choi-game.html',
+  'gaming-gear:tay-cam-choi-game': '/phu-kien/gaming-gear/tay-cam.html',
+};
+
 export const buildCategoryPath = (category = '', options = {}) => {
   const params = new URLSearchParams();
   const categoryText = String(category || '').trim();
   const keyword = options.keyword ?? options.title ?? categoryText;
+  const categorySlug = createSiteSlug(categoryText || keyword);
+  const topicSlug = createSiteSlug(keyword);
+  const directTopicPath = catalogTopicRouteByCategory[`${categorySlug}:${topicSlug}`]
+    || catalogTopicRouteBySlug[topicSlug]
+    || '';
+  const canonicalRoute = PUBLIC_ROUTES.find((route) => (
+    route.pageType === 'category'
+    && [route.id, route.keyword, route.category, ...(route.aliases || [])]
+      .some((value) => {
+        const candidate = createSiteSlug(value);
+        return candidate === categorySlug
+          || candidate.includes(categorySlug)
+          || categorySlug.includes(candidate);
+      })
+  ));
+  const categoryLandingPath = options.brand
+    ? getCategoryLandingPath(categoryText, options.brand)
+    : '';
 
-  appendTruthyParam(params, 'keyword', keyword);
-  appendTruthyParam(params, 'category', options.category ?? categoryText);
-  appendTruthyParam(params, 'brand', options.brand);
-  appendTruthyParam(params, 'q', options.q);
+  if (!categoryLandingPath) appendTruthyParam(params, 'brand', options.brand);
+  const redundantDirectQuery = directTopicPath
+    && createSiteSlug(options.q) === topicSlug;
+  if (!redundantDirectQuery) appendTruthyParam(params, 'q', options.q);
   appendTruthyParam(params, 'segment', options.segment);
+  appendTruthyParam(params, 'series', options.series);
   appendTruthyParam(params, 'sort', options.sort);
-  appendTruthyParam(params, 'title', options.title);
+  if (!categoryLandingPath && !directTopicPath) appendTruthyParam(params, 'title', options.title);
   appendTruthyParam(params, 'filter', options.filter);
   appendTruthyParam(params, 'facet', options.facet);
   appendTruthyParam(params, 'inStock', options.inStock);
@@ -45,9 +185,13 @@ export const buildCategoryPath = (category = '', options = {}) => {
   appendTruthyParam(params, 'camera', options.camera);
   appendTruthyParam(params, 'refreshRate', options.refreshRate);
   appendTruthyParam(params, 'special', options.special);
+  appendTruthyParam(params, 'chip', options.chip);
+  appendTruthyParam(params, 'nfc', options.nfc);
 
+  if (!canonicalRoute && !directTopicPath && !params.has('q')) appendTruthyParam(params, 'q', keyword);
   const query = params.toString();
-  return `/category/${createSiteSlug(categoryText || keyword || 'san-pham')}${query ? `?${query}` : ''}`;
+  const basePath = categoryLandingPath || directTopicPath || canonicalRoute?.path || '/catalogsearch/result';
+  return `${basePath}${query ? `?${query}` : ''}`;
 };
 
 export const buildBrandCategoryPath = (category = '', brand = '', title = '') => (
@@ -63,9 +207,9 @@ export const buildInfoPath = (label = '', group = 'info') => (
 );
 
 export const externalLinks = {
-  app: 'https://cellphones.com.vn/smember',
-  android: 'https://play.google.com/store/search?q=CellphoneS&c=apps',
-  ios: 'https://apps.apple.com/vn/search?term=cellphones',
+  app: PUBLIC_EXTERNAL_LINKS.smember,
+  android: PUBLIC_EXTERNAL_LINKS.android,
+  ios: PUBLIC_EXTERNAL_LINKS.ios,
   youtube: 'https://www.youtube.com/@CellphoneS',
   facebook: 'https://www.facebook.com/CellphoneSVietnam',
   instagram: 'https://www.instagram.com/cellphones.official',
@@ -238,6 +382,8 @@ export function getRouteForDeadAnchor(anchor) {
 export function getInfoRouteKind(pathname = '') {
   const cleaned = pathname.replace(/\/+$/g, '') || '/';
   if (cleaned === '/') return '';
+  const resolved = resolvePublicRoute(cleaned);
+  if (resolved.handling === 'internal' && resolved.appPage === 'info') return 'info';
   if (
     directInfoRoutes[cleaned] ||
     cleaned === '/search' ||
@@ -269,29 +415,67 @@ export function getInfoRouteKind(pathname = '') {
 
 export function buildInfoPageModel(pathname = '', search = '') {
   const params = new URLSearchParams(search);
-  const keyword = params.get('keyword') || '';
-  const categoryParam = params.get('category') || '';
-  const brand = params.get('brand') || '';
-  const q = params.get('q') || '';
+  const categoryLanding = resolveCategoryLandingProfile(pathname);
+  const categoryRoute = getCategoryRouteModel(pathname);
+  const resolvedRoute = resolvePublicRoute(pathname, search);
+  const officialRefrigeratorType = params.get('tulanh_kieu_tu_filter') || '';
+  const officialRefrigeratorQuery = {
+    'ngan-da-tren': 'Tủ lạnh ngăn đá trên',
+    'ngan-da-duoi': 'Tủ lạnh ngăn đá dưới',
+    'nhieu-canh': 'Tủ lạnh nhiều cánh',
+    'side-by-side': 'Tủ lạnh Side By Side',
+  }[officialRefrigeratorType] || '';
+  const keyword = params.get('key')
+    || params.get('keyword')
+    || categoryLanding?.title
+    || categoryRoute?.keyword
+    || '';
+  const categoryParam = params.get('category')
+    || categoryLanding?.apiCategory
+    || categoryLanding?.queryPreset?.category
+    || categoryLanding?.category
+    || categoryRoute?.category
+    || '';
+  const brand = params.get('brand') || categoryLanding?.brand || '';
+  const q = params.get('q')
+    || officialRefrigeratorQuery
+    || categoryLanding?.queryPreset?.q
+    || '';
   const segment = params.get('segment') || '';
+  const series = params.get('series') || categoryLanding?.queryPreset?.series || '';
   const sort = params.get('sort') || 'latest';
   const filter = params.get('filter') || '';
   const facet = params.get('facet') || '';
-  const inStock = params.get('inStock') || '';
-  const priceMin = params.get('priceMin') || '';
-  const priceMax = params.get('priceMax') || '';
-  const ram = params.get('ram') || '';
-  const storage = params.get('storage') || '';
-  const screenSize = params.get('screenSize') || params.get('screen_size') || '';
-  const usage = params.get('usage') || '';
-  const display = params.get('display') || '';
-  const camera = params.get('camera') || '';
-  const refreshRate = params.get('refreshRate') || params.get('refresh_rate') || '';
-  const special = params.get('special') || '';
+  const inStock = params.get('inStock') || categoryLanding?.queryPreset?.inStock || '';
+  const priceMin = params.get('priceMin') || categoryLanding?.queryPreset?.priceMin || '';
+  const priceMax = params.get('priceMax') || categoryLanding?.queryPreset?.priceMax || '';
+  const ram = params.get('ram') || categoryLanding?.queryPreset?.ram || '';
+  const storage = params.get('storage') || categoryLanding?.queryPreset?.storage || '';
+  const screenSize = params.get('screenSize')
+    || params.get('screen_size')
+    || categoryLanding?.queryPreset?.screenSize
+    || '';
+  const usage = params.get('usage') || categoryLanding?.queryPreset?.usage || '';
+  const display = params.get('display') || categoryLanding?.queryPreset?.display || '';
+  const camera = params.get('camera') || categoryLanding?.queryPreset?.camera || '';
+  const refreshRate = params.get('refreshRate')
+    || params.get('refresh_rate')
+    || categoryLanding?.queryPreset?.refreshRate
+    || '';
+  const special = params.get('special') || categoryLanding?.queryPreset?.special || '';
+  const chip = params.get('chip') || categoryLanding?.queryPreset?.chip || '';
+  const nfc = params.get('nfc') || categoryLanding?.queryPreset?.nfc || '';
+  const categoryMode = params.get('categoryMode')
+    || categoryLanding?.queryPreset?.categoryMode
+    || '';
   const titleParam = params.get('title') || '';
   const segments = pathname.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean);
-  const root = segments[0] || 'info';
-  const slug = segments[1] || createSiteSlug(keyword || root);
+  const root = resolvedRoute.pageType === 'search'
+    ? 'search'
+    : (categoryRoute ? 'category' : (segments[0] || 'info'));
+  const slug = categoryRoute
+    ? createSiteSlug(categoryRoute.keyword)
+    : (segments[1] || createSiteSlug(keyword || root));
   const cleanedPath = pathname.replace(/\/+$/g, '') || '/';
   const tosPart = cleanedPath === '/tos' ? params.get('part') : '';
   const tosTitleByPart = {
@@ -305,7 +489,12 @@ export function buildInfoPageModel(pathname = '', search = '') {
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ');
 
-  const categoryTitle = titleParam || keyword || categoryParam || titleFromSlug || 'Danh mục sản phẩm';
+  const categoryTitle = titleParam
+    || categoryLanding?.title
+    || keyword
+    || categoryParam
+    || titleFromSlug
+    || 'Danh mục sản phẩm';
   const baseTitle = directTitle || keyword || titleParam || titleFromSlug || 'CellphoneS';
   const isListing = root === 'search' || root === 'category';
 
@@ -347,6 +536,7 @@ export function buildInfoPageModel(pathname = '', search = '') {
     categoryParam,
     category: listingCategory,
     segment,
+    series,
     sort,
     filter,
     facet,
@@ -361,6 +551,12 @@ export function buildInfoPageModel(pathname = '', search = '') {
     camera,
     refreshRate,
     special,
+    chip,
+    nfc,
+    categoryMode,
+    categoryLanding,
+    landingPath: categoryLanding?.landingPath || '',
+    queryPreset: categoryLanding?.queryPreset || null,
     isBrandCategory: root === 'category' && Boolean(brand),
     isListing,
     title,

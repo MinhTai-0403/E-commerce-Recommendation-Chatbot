@@ -62,6 +62,28 @@ const couponAudienceSchema = z.enum([
   "business",
 ]);
 
+const couponDistributionSchema = z.enum([
+  "manual_claim",
+  "checkout_only",
+]);
+
+function validateCouponValue(data, context) {
+  if (data.type === "percent" && (Number(data.value) <= 0 || Number(data.value) > 100)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["value"],
+      message: "Mức giảm phần trăm phải lớn hơn 0 và không vượt quá 100%.",
+    });
+  }
+  if (data.type === "fixed" && Number(data.value) <= 0) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["value"],
+      message: "Số tiền giảm cố định phải lớn hơn 0.",
+    });
+  }
+}
+
 const couponSchema = z
   .object({
     code: z.string().trim().min(2).max(80),
@@ -72,14 +94,16 @@ const couponSchema = z
     maxDiscount: z.coerce.number().min(0).optional(),
     minSubtotal: z.coerce.number().min(0).default(0),
     usageLimit: z.coerce.number().int().min(0).optional(),
-    userLimit: z.coerce.number().int().min(0).optional(),
+    userLimit: z.coerce.number().int().min(1).optional(),
     audiences: z.array(couponAudienceSchema).min(1).max(6).default(["all"]),
     allowWithEducationOffer: z.coerce.boolean().optional().default(true),
+    distributionMode: couponDistributionSchema.optional().default("manual_claim"),
     startsAt: z.coerce.date().optional(),
     expiresAt: z.coerce.date().optional(),
     status: z.enum(["active", "inactive", "expired"]).default("active"),
   })
-  .passthrough();
+  .passthrough()
+  .superRefine(validateCouponValue);
 
 const couponUpdateSchema = z
   .object({
@@ -91,14 +115,19 @@ const couponUpdateSchema = z
     maxDiscount: z.coerce.number().min(0).optional(),
     minSubtotal: z.coerce.number().min(0).optional(),
     usageLimit: z.coerce.number().int().min(0).optional(),
-    userLimit: z.coerce.number().int().min(0).optional(),
+    userLimit: z.coerce.number().int().min(1).optional(),
     audiences: z.array(couponAudienceSchema).min(1).max(6).optional(),
     allowWithEducationOffer: z.coerce.boolean().optional(),
+    distributionMode: couponDistributionSchema.optional(),
     startsAt: z.coerce.date().optional(),
     expiresAt: z.coerce.date().optional(),
     status: z.enum(["active", "inactive", "expired"]).optional(),
   })
-  .passthrough();
+  .passthrough()
+  .superRefine((data, context) => {
+    if (data.type === "percent" && data.value !== undefined) validateCouponValue(data, context);
+    if (data.type === "fixed" && data.value !== undefined) validateCouponValue(data, context);
+  });
 
 const addressSchema = z
   .object({
@@ -143,8 +172,6 @@ const shipmentUpdateSchema = shipmentSchema.partial().passthrough();
 const inventoryUpdateSchema = z
   .object({
     stock: z.coerce.number().int().min(0).optional(),
-    reservedStock: z.coerce.number().int().min(0).optional(),
-    soldCount: z.coerce.number().int().min(0).optional(),
     status: z.enum(["in_stock", "low_stock", "out_of_stock", "inactive"]).optional(),
     note: safeString(1000),
   })
@@ -152,7 +179,7 @@ const inventoryUpdateSchema = z
 
 const paymentUpdateSchema = z
   .object({
-    status: z.enum(["pending", "paid", "unmatched", "failed", "refunded"]).optional(),
+    status: z.enum(["unpaid", "pending", "paid", "unmatched", "failed", "refunded"]).optional(),
     orderCode: safeString(80),
     amount: z.coerce.number().min(0).optional(),
     bankReference: safeString(180),

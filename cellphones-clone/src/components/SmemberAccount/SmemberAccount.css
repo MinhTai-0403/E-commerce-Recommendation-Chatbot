@@ -330,6 +330,16 @@
   color: #1d4ed8;
 }
 
+.smember-order-status.return_completed {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.smember-order-status.return_partial_completed {
+  background: #fef3c7;
+  color: #92400e;
+}
+
 .smember-order-main {
   grid-template-columns: 70px minmax(0, 1fr) auto;
   align-items: center;
@@ -2014,5 +2024,96 @@
 
   .smember-return-image-preview {
     grid-template-columns: repeat(3, minmax(72px, 1fr));
+  }
+}
+
+.smember-voucher-claim {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, .9fr);
+  gap: 18px;
+  align-items: center;
+  margin: 14px 0 18px;
+  padding: 16px;
+  border: 1px solid #ffd0d5;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #fff7f8, #fff);
+}
+
+.smember-voucher-claim > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.smember-voucher-claim strong {
+  color: #111827;
+  font-size: 14px;
+}
+
+.smember-voucher-claim span {
+  color: #667085;
+  font-size: 12px;
+}
+
+.smember-voucher-claim-control {
+  display: flex;
+  gap: 8px;
+}
+
+.smember-voucher-claim-control input {
+  min-width: 0;
+  flex: 1;
+  height: 42px;
+  padding: 0 13px;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  background: #fff;
+  color: #101828;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  outline: none;
+}
+
+.smember-voucher-claim-control input:focus {
+  border-color: #d70018;
+  box-shadow: 0 0 0 3px rgba(215, 0, 24, .1);
+}
+
+.smember-voucher-claim-control button {
+  min-width: 128px;
+  height: 42px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: #d70018;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.smember-voucher-claim-control button:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+.smember-voucher-benefit {
+  display: block;
+  margin-top: 3px;
+  color: #d70018;
+  font-size: 12px;
+}
+
+@media (max-width: 760px) {
+  .smember-voucher-claim {
+    grid-template-columns: 1fr;
+  }
+
+  .smember-voucher-claim-control {
+    flex-direction: column;
+  }
+
+  .smember-voucher-claim-control button {
+    width: 100%;
   }
 }

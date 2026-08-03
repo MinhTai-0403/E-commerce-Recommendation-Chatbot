@@ -26,12 +26,41 @@ const ORDER_STATUS_LABELS = {
 };
 
 const ORDER_STATUS_FLOW = Object.keys(ORDER_STATUS_LABELS);
+const ORDER_STATUS_TRANSITIONS = {
+  pending: ["confirmed", "cancelled"],
+  confirmed: ["packing", "ready_for_pickup", "cancelled"],
+  packing: ["shipping", "ready_for_pickup", "cancelled"],
+  ready_for_pickup: ["completed", "cancelled"],
+  shipping: ["completed", "cancelled"],
+  completed: [],
+  cancelled: [],
+  refunded: [],
+};
 const PAYMENT_STATUS_LABELS = {
   unpaid: "Chưa thanh toán",
   pending: "Chờ chuyển khoản",
   paid: "Đã thanh toán",
   refunded: "Đã hoàn tiền",
   failed: "Thanh toán lỗi",
+};
+
+const SHIPMENT_STATUS_LABELS = {
+  pending: "Chờ tạo vận đơn",
+  ready: "Sẵn sàng giao",
+  shipping: "Đang giao",
+  delivered: "Đã giao",
+  failed: "Giao thất bại",
+  cancelled: "Đã hủy",
+  returned: "Hoàn về",
+};
+const SHIPMENT_STATUS_TRANSITIONS = {
+  pending: ["ready", "shipping", "cancelled"],
+  ready: ["shipping", "delivered", "cancelled"],
+  shipping: ["delivered", "failed", "cancelled", "returned"],
+  failed: ["ready", "shipping", "cancelled", "returned"],
+  delivered: ["returned"],
+  cancelled: [],
+  returned: [],
 };
 
 const SUPPORT_STATUS_LABELS = {
@@ -55,6 +84,14 @@ const RETURN_STATUS_LABELS = {
   rejected: "Từ chối",
   completed: "Hoàn trả thành công",
   cancelled: "Đã hủy",
+};
+const RETURN_STATUS_TRANSITIONS = {
+  pending: ["received", "approved", "rejected", "cancelled"],
+  received: ["approved", "rejected", "cancelled"],
+  approved: ["completed", "cancelled"],
+  rejected: [],
+  completed: [],
+  cancelled: [],
 };
 
 function toPositiveInt(value, fallback, max = Number.MAX_SAFE_INTEGER) {
@@ -127,6 +164,7 @@ async function getCollections(getDb) {
     payments,
     inventory,
     coupons,
+    userVouchers: db.collection(process.env.USER_VOUCHERS_COLLECTION || "user_vouchers"),
     shipments,
     wishlists,
     notifications,
@@ -349,9 +387,59 @@ function normalizeAdminQuestion(doc = {}) {
   };
 }
 
+function getNextOrderStatuses(order = {}) {
+  const currentStatus = order.status || "pending";
+  const candidates = ORDER_STATUS_TRANSITIONS[currentStatus] || [];
+  const pickup = isPickupOrder(order);
+
+  return candidates.filter((status) => {
+    if (status === "ready_for_pickup") return pickup;
+    if (status === "shipping") return !pickup;
+    return true;
+  });
+}
+
+function getOrderAttentionFlags(order = {}) {
+  const flags = [];
+  const status = order.status || "pending";
+  const paymentStatus = order.payment?.status || "unpaid";
+  const shipmentStatus = order.shippingChoice?.shipmentStatus || "pending";
+  const pickup = isPickupOrder(order);
+  const createdAt = new Date(order.createdAt || 0).getTime();
+
+  if (status === "completed" && paymentStatus !== "paid") {
+    flags.push({ code: "completed_unpaid", severity: "critical", label: "Hoàn tất nhưng chưa thu tiền" });
+  }
+  if (status === "completed" && !pickup && shipmentStatus !== "delivered") {
+    flags.push({ code: "completed_not_delivered", severity: "critical", label: "Hoàn tất nhưng chưa xác nhận giao" });
+  }
+  if (status === "shipping" && (!order.shippingChoice?.carrier || !order.shippingChoice?.trackingCode)) {
+    flags.push({ code: "shipping_without_tracking", severity: "critical", label: "Đang giao nhưng thiếu vận đơn" });
+  }
+  if (status === "pending" && Number.isFinite(createdAt) && Date.now() - createdAt > 24 * 60 * 60 * 1000) {
+    flags.push({ code: "pending_sla", severity: "warning", label: "Chờ xác nhận quá 24 giờ" });
+  }
+  if (!order.inventoryState && !["cancelled", "refunded"].includes(status)) {
+    flags.push({ code: "inventory_unknown", severity: "warning", label: "Chưa đồng bộ trạng thái tồn kho" });
+  }
+
+  const history = Array.isArray(order.statusHistory) ? order.statusHistory : [];
+  const hasTerminalRegression = history.some((entry, index) => {
+    if (index === 0) return false;
+    const previous = history[index - 1]?.status;
+    return ["completed", "cancelled", "refunded"].includes(previous) && entry?.status !== previous;
+  });
+  if (hasTerminalRegression) {
+    flags.push({ code: "invalid_history", severity: "critical", label: "Lịch sử có bước quay ngược" });
+  }
+
+  return flags;
+}
+
 function normalizeAdminOrder(doc = {}) {
   const status = doc.status || "pending";
   const paymentStatus = doc.payment?.status || "unpaid";
+  const attentionFlags = getOrderAttentionFlags(doc);
 
   return {
     id: String(doc._id || doc.id),
@@ -368,6 +456,8 @@ function normalizeAdminOrder(doc = {}) {
     shippingAddress: doc.shippingAddress || {},
     shippingChoice: doc.shippingChoice || {},
     items: Array.isArray(doc.items) ? doc.items : [],
+    inventoryReservations: Array.isArray(doc.inventoryReservations) ? doc.inventoryReservations : [],
+    inventoryState: doc.inventoryState || "",
     gifts: Array.isArray(doc.gifts) ? doc.gifts : [],
     totals: doc.totals || {},
     payment: {
@@ -377,6 +467,9 @@ function normalizeAdminOrder(doc = {}) {
     },
     paymentStatus,
     paymentMethod: doc.payment?.method || "cod",
+    nextStatuses: getNextOrderStatuses(doc),
+    attentionFlags,
+    attentionCount: attentionFlags.length,
     marketingOptIn: Boolean(doc.marketingOptIn),
     educationOffer: Boolean(doc.educationOffer),
     companyInvoice: doc.companyInvoice || {},
@@ -386,15 +479,17 @@ function normalizeAdminOrder(doc = {}) {
   };
 }
 
-function buildOrderAdminQuery(searchParams) {
+function buildOrderAdminQuery(searchParams, options = {}) {
   const q = searchParams.get("q");
   const status = searchParams.get("status");
   const paymentStatus = searchParams.get("paymentStatus");
-  const query = {};
+  const shipmentStatus = searchParams.get("shipmentStatus");
+  const attention = searchParams.get("attention");
+  const conditions = [];
 
   if (q) {
     const regex = new RegExp(escapeRegex(q), "i");
-    query.$or = [
+    conditions.push({ $or: [
       { orderCode: regex },
       { "customer.fullName": regex },
       { "customer.email": regex },
@@ -405,31 +500,79 @@ function buildOrderAdminQuery(searchParams) {
       { "items.name": regex },
       { "items.slug": regex },
       { "items.sku": regex },
-    ];
+    ] });
   }
 
-  if (status && status !== "all") query.status = status;
-  if (paymentStatus && paymentStatus !== "all") query["payment.status"] = paymentStatus;
+  if (!options.ignoreStatus && status && status !== "all") conditions.push({ status });
+  if (paymentStatus && paymentStatus !== "all") conditions.push({ "payment.status": paymentStatus });
+  if (shipmentStatus && shipmentStatus !== "all") {
+    conditions.push({ "shippingChoice.shipmentStatus": shipmentStatus });
+  }
+  if (attention === "true" || attention === "1") {
+    const stalePendingAt = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    conditions.push({ $or: [
+      { status: "completed", "payment.status": { $ne: "paid" } },
+      {
+        status: "completed",
+        "shippingChoice.shipmentStatus": { $ne: "delivered" },
+        $nor: [
+          { "shippingChoice.type": /store|pickup/i },
+          { "shippingChoice.method": /store|pickup|nhận tại cửa hàng/i },
+          { "shippingChoice.label": /store|pickup|nhận tại cửa hàng/i },
+        ],
+      },
+      {
+        status: "shipping",
+        $or: [
+          { "shippingChoice.carrier": { $in: [null, ""] } },
+          { "shippingChoice.trackingCode": { $in: [null, ""] } },
+        ],
+      },
+      { status: "pending", createdAt: { $lt: stalePendingAt } },
+      { inventoryState: { $in: [null, ""] }, status: { $nin: ["cancelled", "refunded"] } },
+    ] });
+  }
 
-  return query;
+  if (!conditions.length) return {};
+  if (conditions.length === 1) return conditions[0];
+  return { $and: conditions };
 }
 
 function sanitizeOrderUpdate(input = {}, req) {
   const update = {};
   const set = {};
   const push = {};
-  const status = cleanLimitedText(input.status, 40);
+  const requestedStatus = cleanLimitedText(input.status, 40);
+  const requestedShipmentStatus = cleanLimitedText(
+    input.shipmentStatus || input.shippingChoice?.shipmentStatus,
+    40
+  );
   const paymentStatus = cleanLimitedText(input.paymentStatus || input.payment?.status, 40);
   const now = new Date();
+  let effectiveStatus = ORDER_STATUS_FLOW.includes(requestedStatus) ? requestedStatus : "";
+  let effectiveShipmentStatus = requestedShipmentStatus;
 
-  if (ORDER_STATUS_FLOW.includes(status)) {
-    const label = ORDER_STATUS_LABELS[status];
-    set.status = status;
+  if (!effectiveStatus && requestedShipmentStatus === "shipping") effectiveStatus = "shipping";
+  if (!effectiveStatus && requestedShipmentStatus === "delivered") effectiveStatus = "completed";
+  if (!effectiveShipmentStatus && ["pending", "confirmed", "packing"].includes(effectiveStatus)) {
+    effectiveShipmentStatus = "pending";
+  }
+  if (!effectiveShipmentStatus && effectiveStatus === "shipping") effectiveShipmentStatus = "shipping";
+  if (!effectiveShipmentStatus && effectiveStatus === "completed") effectiveShipmentStatus = "delivered";
+  if (!effectiveShipmentStatus && effectiveStatus === "cancelled") effectiveShipmentStatus = "cancelled";
+  if (!effectiveShipmentStatus && effectiveStatus === "ready_for_pickup") effectiveShipmentStatus = "ready";
+
+  if (effectiveStatus) {
+    const label = ORDER_STATUS_LABELS[effectiveStatus];
+    set.status = effectiveStatus;
     set.statusLabel = label;
     push.statusHistory = {
-      status,
+      status: effectiveStatus,
       label,
-      note: cleanLimitedText(input.statusNote || input.note || input.adminNote, 400),
+      note: cleanLimitedText(
+        input.statusNote || input.shippingNote || input.note || input.adminNote,
+        400
+      ),
       changedBy: "admin",
       changedByRole: "admin",
       changedAt: now,
@@ -442,12 +585,33 @@ function sanitizeOrderUpdate(input = {}, req) {
     if (paymentStatus === "paid") set["payment.paidAt"] = now;
   }
 
+  if (Object.prototype.hasOwnProperty.call(input, "bankReference")) {
+    set["payment.bankReference"] = cleanLimitedText(input.bankReference, 180);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(input, "paymentNote")) {
+    set["payment.adminNote"] = cleanLimitedText(input.paymentNote, 1000);
+  }
+
   if (Object.prototype.hasOwnProperty.call(input, "adminNote")) {
     set.adminNote = cleanLimitedText(input.adminNote, 1000);
   }
 
-  if (input.trackingCode !== undefined) {
-    set["shippingChoice.trackingCode"] = cleanLimitedText(input.trackingCode, 80);
+  if (Object.prototype.hasOwnProperty.call(input, "carrier")) {
+    set["shippingChoice.carrier"] = cleanLimitedText(input.carrier, 120);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(input, "trackingCode")) {
+    set["shippingChoice.trackingCode"] = cleanLimitedText(input.trackingCode, 120);
+  }
+
+  if (effectiveShipmentStatus && SHIPMENT_STATUS_LABELS[effectiveShipmentStatus]) {
+    set["shippingChoice.shipmentStatus"] = effectiveShipmentStatus;
+    set["shippingChoice.shipmentStatusLabel"] = SHIPMENT_STATUS_LABELS[effectiveShipmentStatus];
+  }
+
+  if (Object.prototype.hasOwnProperty.call(input, "shippingNote")) {
+    set["shippingChoice.adminNote"] = cleanLimitedText(input.shippingNote, 1000);
   }
 
   if (input.etaText !== undefined) {
@@ -459,6 +623,88 @@ function sanitizeOrderUpdate(input = {}, req) {
   if (Object.keys(push).length) update.$push = push;
 
   return update;
+}
+
+function isPickupOrder(order = {}) {
+  const shippingText = [
+    order.shippingChoice?.label,
+    order.shippingChoice?.method,
+    order.shippingChoice?.type,
+  ].filter(Boolean).join(" ");
+  return /nhận tại cửa hàng|pickup|store/i.test(shippingText);
+}
+
+function getShipmentStatusFromOrder(order = {}) {
+  if (order.status === "completed") return "delivered";
+  if (order.status === "cancelled") return "cancelled";
+  const explicitStatus = order.shippingChoice?.shipmentStatus;
+  if (explicitStatus && SHIPMENT_STATUS_LABELS[explicitStatus]) return explicitStatus;
+  if (order.status === "shipping") return "shipping";
+  if (["packing", "ready_for_pickup"].includes(order.status)) return "ready";
+  return "pending";
+}
+
+async function syncPaymentRecordFromOrder(payments, order = {}) {
+  if (!payments || !order.orderCode) return;
+
+  const now = new Date();
+  const paymentStatus = order.payment?.status || "unpaid";
+  const transactionId = cleanLimitedText(
+    order.payment?.transactionId || `ORDER-${order.orderCode}`,
+    180
+  );
+
+  await payments.updateOne(
+    { orderCode: order.orderCode },
+    {
+      $set: {
+        orderCode: order.orderCode,
+        amount: Number(order.totals?.total || order.totals?.roundedTotal || 0),
+        method: order.payment?.method || "cod",
+        methodLabel: order.payment?.methodLabel || "Thanh toán khi nhận hàng",
+        status: ["unpaid", "pending", "paid", "unmatched", "failed", "refunded"].includes(paymentStatus)
+          ? paymentStatus
+          : "unpaid",
+        bankReference: order.payment?.bankReference || "",
+        note: order.payment?.adminNote || "",
+        customer: order.customer || {},
+        updatedAt: now,
+      },
+      $setOnInsert: {
+        transactionId,
+        source: "order-admin",
+        createdAt: order.createdAt || now,
+      },
+    },
+    { upsert: true }
+  );
+}
+
+async function syncShipmentRecordFromOrder(shipments, order = {}) {
+  if (!shipments || !order.orderCode || isPickupOrder(order)) return;
+
+  const now = new Date();
+  await shipments.updateOne(
+    { orderCode: order.orderCode },
+    {
+      $set: {
+        orderCode: order.orderCode,
+        carrier: order.shippingChoice?.carrier || "",
+        trackingCode: order.shippingChoice?.trackingCode || "",
+        status: getShipmentStatusFromOrder(order),
+        receiverName: order.receiver?.fullName || order.customer?.fullName || "",
+        receiverPhone: order.receiver?.phone || order.customer?.phone || "",
+        shippingAddress: order.shippingAddress || {},
+        note: order.shippingChoice?.adminNote || "",
+        updatedAt: now,
+      },
+      $setOnInsert: {
+        source: "order-admin",
+        createdAt: order.createdAt || now,
+      },
+    },
+    { upsert: true }
+  );
 }
 
 function slugifyAuditKey(value = "") {
@@ -475,36 +721,87 @@ function slugifyAuditKey(value = "") {
 function buildInventoryKeyFromOrderItem(item = {}) {
   return [
     item.productId || item.mongoId || item.slug || item.sku,
-    item.selectedOptions?.variantId || item.selectedOptions?.variantName || "",
-    item.selectedOptions?.colorId || item.selectedOptions?.colorName || "",
+    item.selectedOptions?.variantId || item.selectedOptions?.variantName || "default",
+    item.selectedOptions?.colorId || item.selectedOptions?.colorName || "default",
   ].map(slugifyAuditKey).filter(Boolean).join("::");
+}
+
+function getInventoryStatus({ stock = 0, reservedStock = 0, currentStatus = "" } = {}) {
+  if (currentStatus === "inactive") return "inactive";
+  const available = Math.max(0, Number(stock || 0) - Number(reservedStock || 0));
+  if (available <= 0) return "out_of_stock";
+  if (available <= 5) return "low_stock";
+  return "in_stock";
 }
 
 async function settleInventoryForOrder(inventory, order = {}, mode = "release") {
   if (!inventory || !Array.isArray(order.items)) return;
 
+  const savedReservations = Array.isArray(order.inventoryReservations)
+    ? order.inventoryReservations
+    : [];
   const updates = order.items
-    .map((item) => ({
-      key: buildInventoryKeyFromOrderItem(item),
-      quantity: Math.max(1, Math.round(Number(item.quantity || 1))),
-    }))
-    .filter((item) => item.key);
-
-  await Promise.all(
-    updates.map((item) => {
-      const inc = mode === "complete"
-        ? { reservedStock: -item.quantity, soldCount: item.quantity }
-        : { reservedStock: -item.quantity };
-
-      return inventory.updateOne(
-        { key: item.key },
-        {
-          $inc: inc,
-          $set: { updatedAt: new Date() },
-        }
-      );
+    .map((item) => {
+      const itemAliases = [item.id, item.productId, item.mongoId, item.slug, item.sku]
+        .filter(Boolean)
+        .map(String);
+      const reservation = savedReservations.find((entry) => [
+        entry.itemId,
+        entry.productId,
+        entry.productSlug,
+        entry.productSku,
+      ].filter(Boolean).map(String).some((value) => itemAliases.includes(value)));
+      if (!reservation && (item.manageInventory === false || item.productSnapshot?.manageInventory === false)) {
+        return null;
+      }
+      return {
+        key: reservation?.key || buildInventoryKeyFromOrderItem(item),
+        inventoryId: reservation?.inventoryId || "",
+        quantity: Math.max(1, Math.round(Number(reservation?.quantity || item.quantity || 1))),
+      };
     })
-  );
+    .filter((item) => item?.key);
+
+  for (const item of updates) {
+    const existing = item.inventoryId && ObjectId.isValid(item.inventoryId)
+      ? await inventory.findOne({ _id: new ObjectId(item.inventoryId) })
+      : await inventory.findOne({ key: item.key });
+    if (!existing) continue;
+
+    const stock = Number(existing.stock || 0);
+    const reservedStock = Number(existing.reservedStock || 0);
+    const soldCount = Number(existing.soldCount || 0);
+    const releasedQuantity = Math.min(reservedStock, item.quantity);
+    let nextStock = stock;
+    let nextReserved = Math.max(0, reservedStock - releasedQuantity);
+    let nextSold = soldCount;
+
+    if (mode === "complete") {
+      nextStock = Math.max(0, stock - item.quantity);
+      nextSold = soldCount + item.quantity;
+    } else if (mode === "restock") {
+      nextStock = stock + item.quantity;
+      nextSold = Math.max(0, soldCount - item.quantity);
+      nextReserved = reservedStock;
+    }
+
+    await inventory.updateOne(
+      { _id: existing._id },
+      {
+        $set: {
+          stock: nextStock,
+          reservedStock: nextReserved,
+          soldCount: nextSold,
+          status: getInventoryStatus({
+            stock: nextStock,
+            reservedStock: nextReserved,
+            currentStatus: existing.status,
+          }),
+          updatedAt: new Date(),
+        },
+      }
+    );
+  }
 }
 
 async function handleListOrders({ req, res, sendJson, sendError, getDb }) {
@@ -519,8 +816,12 @@ async function handleListOrders({ req, res, sendJson, sendError, getDb }) {
   const limit = toPositiveInt(url.searchParams.get("limit"), 30, MAX_ADMIN_LIMIT);
   const skip = (page - 1) * limit;
   const query = buildOrderAdminQuery(url.searchParams);
+  const statusCountQuery = buildOrderAdminQuery(url.searchParams, { ignoreStatus: true });
+  const attentionParams = new URLSearchParams(url.searchParams);
+  attentionParams.set("attention", "true");
+  const attentionQuery = buildOrderAdminQuery(attentionParams, { ignoreStatus: true });
 
-  const [total, docs, statusCounts] = await Promise.all([
+  const [total, docs, statusCounts, attentionCount] = await Promise.all([
     orders.countDocuments(query),
     orders
       .find(query)
@@ -529,9 +830,10 @@ async function handleListOrders({ req, res, sendJson, sendError, getDb }) {
       .limit(limit)
       .toArray(),
     orders.aggregate([
-      { $match: query },
+      { $match: statusCountQuery },
       { $group: { _id: "$status", count: { $sum: 1 } } },
     ]).toArray(),
+    orders.countDocuments(attentionQuery),
   ]);
 
   sendJson(res, 200, {
@@ -547,6 +849,7 @@ async function handleListOrders({ req, res, sendJson, sendError, getDb }) {
       label: ORDER_STATUS_LABELS[status],
     })),
     statusCounts: Object.fromEntries(statusCounts.map((item) => [item._id || "pending", item.count])),
+    attentionCount,
     data: docs.map(normalizeAdminOrder),
   });
 }
@@ -564,7 +867,6 @@ async function handleUpdateOrder({ req, res, pathParts, parseJsonBody, sendJson,
   }
 
   const body = await parseJsonBody(req);
-  const update = sanitizeOrderUpdate(body, req);
   const query = {
     $or: [
       { orderCode: orderId },
@@ -572,28 +874,234 @@ async function handleUpdateOrder({ req, res, pathParts, parseJsonBody, sendJson,
     ],
   };
 
-  const { orders, inventory, auditLogs } = await getCollections(getDb);
+  const {
+    orders,
+    payments,
+    shipments,
+    inventory,
+    coupons,
+    userVouchers,
+    auditLogs,
+  } = await getCollections(getDb);
   const before = await orders.findOne(query);
-  const result = await orders.findOneAndUpdate(
-    query,
-    update,
-    { returnDocument: "after" }
-  );
-  const updatedOrder = unwrapMongoWriteResult(result);
 
-  if (!updatedOrder) {
+  if (!before) {
     sendError(res, 404, "Không tìm thấy đơn hàng.");
     return;
   }
 
+  const expectedUpdatedAt = body.expectedUpdatedAt ? new Date(body.expectedUpdatedAt) : null;
+  if (body.expectedUpdatedAt && !Number.isFinite(expectedUpdatedAt.getTime())) {
+    sendError(res, 400, "Mốc đồng bộ đơn hàng không hợp lệ. Vui lòng tải lại dữ liệu.");
+    return;
+  }
+  if (
+    expectedUpdatedAt
+    && Number.isFinite(expectedUpdatedAt.getTime())
+    && new Date(before.updatedAt || 0).getTime() !== expectedUpdatedAt.getTime()
+  ) {
+    sendError(res, 409, "Đơn hàng vừa được người khác cập nhật. Vui lòng tải lại dữ liệu trước khi lưu.");
+    return;
+  }
+
+  const requestedStatus = cleanLimitedText(body.status, 40);
+  if (requestedStatus === before.status) delete body.status;
+  if (requestedStatus && requestedStatus !== before.status) {
+    const allowedStatuses = getNextOrderStatuses(before);
+    if (!allowedStatuses.includes(requestedStatus)) {
+      sendError(
+        res,
+        409,
+        `Không thể chuyển đơn từ "${ORDER_STATUS_LABELS[before.status] || before.status}" sang "${ORDER_STATUS_LABELS[requestedStatus] || requestedStatus}".`
+      );
+      return;
+    }
+  }
+
+  const requestedShipmentStatus = cleanLimitedText(
+    body.shipmentStatus || body.shippingChoice?.shipmentStatus,
+    40
+  );
+  const impliedOrderStatus = requestedShipmentStatus === "shipping"
+    ? "shipping"
+    : requestedShipmentStatus === "delivered"
+      ? "completed"
+      : "";
+  if (impliedOrderStatus && impliedOrderStatus !== before.status) {
+    const allowedStatuses = getNextOrderStatuses(before);
+    if (!allowedStatuses.includes(impliedOrderStatus)) {
+      sendError(
+        res,
+        409,
+        `Không thể cập nhật giao nhận khi đơn đang ở bước "${ORDER_STATUS_LABELS[before.status] || before.status}".`
+      );
+      return;
+    }
+  }
+  const currentShipmentStatus = before.shippingChoice?.shipmentStatus || "pending";
+  if (requestedShipmentStatus && requestedShipmentStatus !== currentShipmentStatus) {
+    const allowedShipmentStatuses = SHIPMENT_STATUS_TRANSITIONS[currentShipmentStatus] || [];
+    if (!allowedShipmentStatuses.includes(requestedShipmentStatus)) {
+      sendError(res, 409, "Bước giao nhận không hợp lệ. Vui lòng tải lại trạng thái mới nhất.");
+      return;
+    }
+  }
+
+  if (requestedStatus === "ready_for_pickup" && !isPickupOrder(before)) {
+    sendError(res, 409, "Chỉ đơn nhận tại cửa hàng mới được chuyển sang sẵn sàng nhận.");
+    return;
+  }
+  if (requestedStatus === "shipping" && isPickupOrder(before)) {
+    sendError(res, 409, "Đơn nhận tại cửa hàng không thể chuyển sang đang giao hàng.");
+    return;
+  }
+
+  const willComplete = body.status === "completed" || requestedShipmentStatus === "delivered";
+  if (willComplete && before.payment?.method === "cod") {
+    body.paymentStatus = "paid";
+  }
+  if (willComplete && before.payment?.method !== "cod") {
+    const nextPaymentStatus = body.paymentStatus || before.payment?.status || "unpaid";
+    if (nextPaymentStatus !== "paid") {
+      sendError(res, 409, "Cần xác nhận thanh toán trước khi hoàn tất đơn hàng.");
+      return;
+    }
+  }
+
+  const willShip = ["shipping", "delivered"].includes(requestedShipmentStatus)
+    || ["shipping", "completed"].includes(body.status);
+  if (willShip && !isPickupOrder(before)) {
+    const carrier = cleanLimitedText(body.carrier ?? before.shippingChoice?.carrier, 120);
+    const trackingCode = cleanLimitedText(body.trackingCode ?? before.shippingChoice?.trackingCode, 120);
+    if (!carrier || !trackingCode) {
+      sendError(res, 409, "Vui lòng nhập đơn vị vận chuyển và mã vận đơn trước khi giao hàng.");
+      return;
+    }
+  }
+
+  if (body.paymentStatus === "refunded" && !cleanLimitedText(body.paymentNote || body.adminNote, 1000)) {
+    sendError(res, 409, "Cần nhập ghi chú hoặc lý do trước khi xác nhận hoàn tiền.");
+    return;
+  }
+
+  const update = sanitizeOrderUpdate(body, req);
+  const updateQuery = { _id: before._id };
+  if (expectedUpdatedAt && Number.isFinite(expectedUpdatedAt.getTime())) {
+    updateQuery.updatedAt = expectedUpdatedAt;
+  }
+  const result = await orders.findOneAndUpdate(
+    updateQuery,
+    update,
+    { returnDocument: "after" }
+  );
+  let updatedOrder = unwrapMongoWriteResult(result);
+
+  if (!updatedOrder) {
+    sendError(
+      res,
+      expectedUpdatedAt ? 409 : 404,
+      expectedUpdatedAt
+        ? "Đơn hàng đã thay đổi trong lúc bạn chỉnh sửa. Vui lòng tải lại."
+        : "Không tìm thấy đơn hàng."
+    );
+    return;
+  }
+
+  if (
+    updatedOrder.status === "completed"
+    && updatedOrder.payment?.method === "cod"
+    && updatedOrder.payment?.status !== "paid"
+  ) {
+    const paidAt = new Date();
+    await orders.updateOne(
+      { _id: updatedOrder._id },
+      {
+        $set: {
+          "payment.status": "paid",
+          "payment.statusLabel": PAYMENT_STATUS_LABELS.paid,
+          "payment.paidAt": paidAt,
+          updatedAt: paidAt,
+        },
+      }
+    );
+    updatedOrder = {
+      ...updatedOrder,
+      payment: {
+        ...(updatedOrder.payment || {}),
+        status: "paid",
+        statusLabel: PAYMENT_STATUS_LABELS.paid,
+        paidAt,
+      },
+      updatedAt: paidAt,
+    };
+  }
+
+  const inventoryState = before.inventoryState
+    || (!["completed", "cancelled", "refunded"].includes(before.status) ? "reserved" : "unknown");
+  let nextInventoryState = inventoryState;
+
+  if (updatedOrder.status === "completed" && inventoryState === "reserved") {
+    await settleInventoryForOrder(inventory, updatedOrder, "complete");
+    nextInventoryState = "fulfilled";
+  } else if (updatedOrder.status === "cancelled" && inventoryState === "reserved") {
+    await settleInventoryForOrder(inventory, updatedOrder, "release");
+    nextInventoryState = "released";
+  } else if (updatedOrder.status === "cancelled" && inventoryState === "fulfilled") {
+    await settleInventoryForOrder(inventory, updatedOrder, "restock");
+    nextInventoryState = "restocked";
+  }
+
+  if (nextInventoryState !== inventoryState) {
+    const inventoryUpdatedAt = new Date();
+    await orders.updateOne(
+      { _id: updatedOrder._id },
+      { $set: { inventoryState: nextInventoryState, inventoryUpdatedAt } }
+    );
+    updatedOrder.inventoryState = nextInventoryState;
+    updatedOrder.inventoryUpdatedAt = inventoryUpdatedAt;
+  }
+
+  if (
+    before.status !== "cancelled"
+    && updatedOrder.status === "cancelled"
+    && before.coupon?.walletId
+    && ObjectId.isValid(before.coupon.walletId)
+  ) {
+    const restoredWallet = unwrapMongoWriteResult(await userVouchers.findOneAndUpdate(
+      {
+        _id: new ObjectId(before.coupon.walletId),
+        orderCode: before.orderCode,
+        status: "used",
+      },
+      {
+        $set: { status: "available", updatedAt: new Date() },
+        $inc: { usedCount: -1 },
+        $unset: { orderId: "", orderCode: "", usedAt: "" },
+      },
+      { returnDocument: "after" }
+    ));
+
+    if (restoredWallet && before.coupon.couponId && ObjectId.isValid(before.coupon.couponId)) {
+      await coupons.updateOne(
+        { _id: new ObjectId(before.coupon.couponId), usedCount: { $gt: 0 } },
+        { $inc: { usedCount: -1 }, $set: { updatedAt: new Date() } }
+      );
+    }
+  }
+
+  await Promise.all([
+    syncPaymentRecordFromOrder(payments, updatedOrder),
+    syncShipmentRecordFromOrder(shipments, updatedOrder),
+  ]);
+
   await writeAdminAuditLog(auditLogs, req, "update", "order", updatedOrder._id || orderId, {
     before,
     after: updatedOrder,
+    meta: {
+      paymentSynced: true,
+      shipmentSynced: !isPickupOrder(updatedOrder),
+    },
   });
-
-  if (before?.status !== updatedOrder.status && ["completed", "cancelled"].includes(updatedOrder.status)) {
-    await settleInventoryForOrder(inventory, updatedOrder, updatedOrder.status === "completed" ? "complete" : "release");
-  }
 
   sendJson(res, 200, {
     ok: true,
@@ -761,8 +1269,23 @@ function sanitizeReviewUpdate(input = {}, req) {
   }
 
   if (input.clearReply === true) update.adminReply = null;
-  update.updatedAt = new Date();
+  if (Object.keys(update).length) update.updatedAt = new Date();
   return update;
+}
+
+async function wouldRemoveLastActiveAdmin(users, user, update = null) {
+  const removesAdminAccess = user?.role === "admin"
+    && user?.status !== "blocked"
+    && (!update || update.role === "customer" || update.status === "blocked");
+
+  if (!removesAdminAccess) return false;
+
+  const remainingAdmins = await users.countDocuments({
+    _id: { $ne: user._id },
+    role: "admin",
+    status: { $ne: "blocked" },
+  });
+  return remainingAdmins === 0;
 }
 
 function sanitizeQuestionUpdate(input = {}, req) {
@@ -1294,8 +1817,31 @@ async function handleUpdateUser({ req, res, pathParts, parseJsonBody, sendJson, 
   const body = await parseJsonBody(req);
   const update = sanitizeUserUpdate(body);
 
+  if (!Object.keys(update).length) {
+    sendError(res, 400, "Không có trường người dùng hợp lệ để cập nhật.");
+    return;
+  }
+
   const { users, auditLogs } = await getCollections(getDb);
   const before = await users.findOne({ _id: new ObjectId(userId) }, { projection: { passwordHash: 0 } });
+
+  if (!before) {
+    sendError(res, 404, "Không tìm thấy người dùng.");
+    return;
+  }
+
+  const actor = getAdminPayload(req);
+  const isSelf = actor?.sub && String(actor.sub) === String(userId);
+  if (isSelf && (update.role === "customer" || update.status === "blocked")) {
+    sendError(res, 409, "Bạn không thể tự hạ quyền hoặc khóa tài khoản admin đang đăng nhập.");
+    return;
+  }
+
+  if (await wouldRemoveLastActiveAdmin(users, before, update)) {
+    sendError(res, 409, "Hệ thống phải còn ít nhất một admin đang hoạt động.");
+    return;
+  }
+
   const result = await users.findOneAndUpdate(
     { _id: new ObjectId(userId) },
     { $set: update },
@@ -1332,6 +1878,26 @@ async function handleDeleteUser({ req, res, pathParts, sendJson, sendError, getD
   }
 
   const { users, auditLogs } = await getCollections(getDb);
+  const actor = getAdminPayload(req);
+  if (actor?.sub && String(actor.sub) === String(userId)) {
+    sendError(res, 409, "Bạn không thể tự xóa tài khoản admin đang đăng nhập.");
+    return;
+  }
+
+  const before = await users.findOne(
+    { _id: new ObjectId(userId) },
+    { projection: { passwordHash: 0 } }
+  );
+  if (!before) {
+    sendError(res, 404, "Không tìm thấy người dùng.");
+    return;
+  }
+
+  if (await wouldRemoveLastActiveAdmin(users, before)) {
+    sendError(res, 409, "Hệ thống phải còn ít nhất một admin đang hoạt động.");
+    return;
+  }
+
   const result = await users.findOneAndDelete(
     { _id: new ObjectId(userId) },
     { projection: { passwordHash: 0 } }
@@ -1367,6 +1933,7 @@ function normalizeCoupon(doc = {}) {
     userLimit: doc.userLimit ?? null,
     audiences: Array.isArray(doc.audiences) && doc.audiences.length ? doc.audiences : ["all"],
     allowWithEducationOffer: doc.allowWithEducationOffer !== false,
+    distributionMode: doc.distributionMode || "manual_claim",
     usedCount: Number(doc.usedCount || 0),
     status: doc.status || "active",
     startsAt: doc.startsAt || null,
@@ -1426,6 +1993,7 @@ async function handleCreateCoupon({ req, res, parseJsonBody, sendJson, sendError
   const coupon = {
     ...parsed.data,
     code: String(parsed.data.code).trim().toUpperCase(),
+    distributionMode: parsed.data.distributionMode || "manual_claim",
     usedCount: 0,
     createdAt: now,
     updatedAt: now,
@@ -1468,6 +2036,22 @@ async function handleUpdateCoupon({ req, res, pathParts, parseJsonBody, sendJson
 
   const { coupons, auditLogs } = await getCollections(getDb);
   const before = await coupons.findOne({ _id: new ObjectId(couponId) });
+  if (!before) {
+    sendError(res, 404, "Không tìm thấy mã giảm giá.");
+    return;
+  }
+
+  const mergedType = update.type || before.type;
+  const mergedValue = update.value ?? before.value;
+  if (mergedType === "percent" && (Number(mergedValue) <= 0 || Number(mergedValue) > 100)) {
+    sendError(res, 400, "Mức giảm phần trăm phải lớn hơn 0 và không vượt quá 100%.");
+    return;
+  }
+  if (mergedType === "fixed" && Number(mergedValue) <= 0) {
+    sendError(res, 400, "Số tiền giảm cố định phải lớn hơn 0.");
+    return;
+  }
+
   const result = await coupons.findOneAndUpdate(
     { _id: new ObjectId(couponId) },
     { $set: update },
@@ -1500,7 +2084,7 @@ async function handleDeleteCoupon({ req, res, pathParts, sendJson, sendError, ge
     return;
   }
 
-  const { coupons, auditLogs } = await getCollections(getDb);
+  const { coupons, userVouchers, auditLogs } = await getCollections(getDb);
   const result = await coupons.findOneAndDelete({ _id: new ObjectId(couponId) });
   const deletedCoupon = unwrapMongoWriteResult(result);
 
@@ -1509,6 +2093,7 @@ async function handleDeleteCoupon({ req, res, pathParts, sendJson, sendError, ge
     return;
   }
 
+  await userVouchers.deleteMany({ couponId });
   await writeAdminAuditLog(auditLogs, req, "delete", "coupon", couponId, {
     before: deletedCoupon,
   });
@@ -1517,26 +2102,32 @@ async function handleDeleteCoupon({ req, res, pathParts, sendJson, sendError, ge
 }
 
 function normalizeInventory(doc = {}) {
-  const stock = Number(doc.stock || 0);
-  const reservedStock = Number(doc.reservedStock || 0);
+  const stock = Math.max(0, Number(doc.stock || 0));
+  const reservedStock = Math.max(0, Number(doc.reservedStock || 0));
   const availableStock = Math.max(0, stock - reservedStock);
+  const status = getInventoryStatus({
+    stock,
+    reservedStock,
+    currentStatus: doc.status,
+  });
 
   return {
     id: String(doc._id || ""),
     key: doc.key || "",
-    productId: doc.productId || "",
-    productSlug: doc.productSlug || "",
-    productSku: doc.productSku || "",
-    productName: doc.productName || "",
+    productId: String(doc.productId || ""),
+    productSlug: doc.productSlug || doc.slug || "",
+    productSku: doc.productSku || doc.sku || "",
+    productName: doc.productName || doc.name || "",
     variantId: doc.variantId || "",
     variantName: doc.variantName || "",
     colorId: doc.colorId || "",
     colorName: doc.colorName || "",
+    locationId: doc.locationId || "main",
     stock,
     reservedStock,
     availableStock,
-    soldCount: Number(doc.soldCount || 0),
-    status: doc.status || (availableStock > 0 ? "in_stock" : "out_of_stock"),
+    soldCount: Math.max(0, Number(doc.soldCount || 0)),
+    status,
     note: doc.note || "",
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
@@ -1556,6 +2147,11 @@ function buildInventoryAdminQuery(searchParams) {
       { productSlug: regex },
       { productSku: regex },
       { productName: regex },
+      { slug: regex },
+      { sku: regex },
+      { name: regex },
+      { variantName: regex },
+      { colorName: regex },
     ];
   }
 
@@ -1564,19 +2160,20 @@ function buildInventoryAdminQuery(searchParams) {
 }
 
 function buildInventoryKeyFromBody(input = {}) {
-  return cleanLimitedText(
-    input.key ||
-    [input.productId || input.productSlug || input.productSku, input.variantId || input.variantName, input.colorId || input.colorName]
-      .filter(Boolean)
-      .join("::"),
-    320
-  );
+  const productIdentity = input.productId || input.productSlug || input.productSku;
+  if (!productIdentity) return "";
+
+  return cleanLimitedText([
+    productIdentity,
+    input.variantId || input.variantName || "default",
+    input.colorId || input.colorName || "default",
+  ].map(slugifyAuditKey).filter(Boolean).join("::"), 320);
 }
 
 function sanitizeInventoryCreate(input = {}) {
-  const stock = toPositiveInt(input.stock, 0, 1_000_000);
-  const reservedStock = toPositiveInt(input.reservedStock, 0, 1_000_000);
-  const soldCount = toPositiveInt(input.soldCount, 0, 1_000_000);
+  const stock = Math.max(0, Math.min(1_000_000, Math.round(Number(input.stock || 0))));
+  const reservedStock = 0;
+  const soldCount = 0;
   const key = buildInventoryKeyFromBody(input);
 
   return {
@@ -1589,16 +2186,80 @@ function sanitizeInventoryCreate(input = {}) {
     variantName: cleanLimitedText(input.variantName, 240),
     colorId: cleanLimitedText(input.colorId, 120),
     colorName: cleanLimitedText(input.colorName, 240),
+    locationId: cleanLimitedText(input.locationId || "main", 120),
     stock,
     reservedStock,
     soldCount,
-    status: ["in_stock", "low_stock", "out_of_stock", "inactive"].includes(input.status)
-      ? input.status
-      : stock - reservedStock > 0
-        ? "in_stock"
-        : "out_of_stock",
+    status: input.status === "inactive"
+      ? "inactive"
+      : getInventoryStatus({ stock, reservedStock }),
     note: cleanLimitedText(input.note, 1000),
   };
+}
+
+async function ensureInventoryRowsForProducts(inventory, productDocs = []) {
+  const now = new Date();
+
+  for (const product of productDocs) {
+    const productId = String(product._id || product.slug || product.sku || "");
+    if (!productId) continue;
+
+    const key = [productId, "default", "default"].map(slugifyAuditKey).join("::");
+    const aliases = [productId, product.slug, product.sku].filter(Boolean);
+    const linkQuery = {
+      $or: [
+        { key },
+        { productId: { $in: aliases } },
+        { productSlug: { $in: aliases } },
+        { productSku: { $in: aliases } },
+        { slug: { $in: aliases } },
+        { sku: { $in: aliases } },
+      ],
+    };
+    const hasInventory = await inventory.findOne(linkQuery, { projection: { _id: 1 } });
+
+    if (hasInventory) {
+      await inventory.updateMany(linkQuery, {
+        $set: {
+          productId,
+          productSlug: product.slug || "",
+          productSku: product.sku || "",
+          productName: product.name || "",
+          updatedAt: now,
+        },
+      });
+      continue;
+    }
+
+    await inventory.updateOne(
+      { key },
+      {
+        $setOnInsert: {
+          key,
+          variantId: "",
+          variantName: "Mặc định",
+          colorId: "",
+          colorName: "Mặc định",
+          locationId: "main",
+          stock: 100,
+          reservedStock: 0,
+          soldCount: 0,
+          status: "in_stock",
+          note: "Khởi tạo mặc định 100 sản phẩm.",
+          autoCreated: true,
+          createdAt: now,
+        },
+        $set: {
+          productId,
+          productSlug: product.slug || "",
+          productSku: product.sku || "",
+          productName: product.name || "",
+          updatedAt: now,
+        },
+      },
+      { upsert: true }
+    );
+  }
 }
 
 async function handleListInventory({ req, res, sendJson, sendError, getDb }) {
@@ -1607,20 +2268,85 @@ async function handleListInventory({ req, res, sendJson, sendError, getDb }) {
     return;
   }
 
-  const { inventory } = await getCollections(getDb);
+  const { inventory, products } = await getCollections(getDb);
   const url = new URL(req.url, `http://${req.headers.host}`);
   const page = toPositiveInt(url.searchParams.get("page"), 1);
-  const limit = toPositiveInt(url.searchParams.get("limit"), 30, MAX_ADMIN_LIMIT);
+  const limit = toPositiveInt(url.searchParams.get("limit"), 20, MAX_ADMIN_LIMIT);
   const skip = (page - 1) * limit;
-  const query = buildInventoryAdminQuery(url.searchParams);
-  const [total, docs] = await Promise.all([
-    inventory.countDocuments(query),
-    inventory.find(query).sort({ updatedAt: -1, _id: -1 }).skip(skip).limit(limit).toArray(),
+  const keyword = cleanLimitedText(url.searchParams.get("q"), 240);
+  const requestedStatus = cleanLimitedText(url.searchParams.get("status"), 40);
+  const productQuery = { manageInventory: { $ne: false } };
+
+  if (keyword) {
+    const regex = new RegExp(escapeRegex(keyword), "i");
+    productQuery.$or = [
+      { name: regex },
+      { slug: regex },
+      { sku: regex },
+      { brand: regex },
+      { category: regex },
+    ];
+  }
+
+  const [totalProducts, productDocs] = await Promise.all([
+    products.countDocuments(productQuery),
+    products
+      .find(
+        productQuery,
+        {
+          projection: {
+            name: 1,
+            slug: 1,
+            sku: 1,
+            brand: 1,
+            category: 1,
+            manageInventory: 1,
+            updatedAt: 1,
+            scrapedAt: 1,
+          },
+        }
+      )
+      .sort({ updatedAt: -1, scrapedAt: -1, _id: -1 })
+      .skip(skip)
+      .limit(limit)
+      .toArray(),
   ]);
+
+  await ensureInventoryRowsForProducts(inventory, productDocs);
+
+  const productIds = productDocs.map((product) => String(product._id)).filter(Boolean);
+  const productSlugs = productDocs.map((product) => product.slug).filter(Boolean);
+  const productSkus = productDocs.map((product) => product.sku).filter(Boolean);
+  const pageAliases = [...new Set([...productIds, ...productSlugs, ...productSkus])];
+  const inventoryQuery = productDocs.length
+    ? {
+        $or: [
+          { productId: { $in: pageAliases } },
+          { productSlug: { $in: pageAliases } },
+          { productSku: { $in: pageAliases } },
+          { slug: { $in: pageAliases } },
+          { sku: { $in: pageAliases } },
+        ],
+      }
+    : { _id: { $exists: false } };
+
+  if (requestedStatus && requestedStatus !== "all") {
+    inventoryQuery.status = requestedStatus;
+  }
+
+  const docs = await inventory
+    .find(inventoryQuery)
+    .sort({ productName: 1, variantName: 1, colorName: 1, _id: 1 })
+    .toArray();
 
   sendJson(res, 200, {
     ok: true,
-    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    pagination: {
+      page,
+      limit,
+      total: totalProducts,
+      totalPages: Math.ceil(totalProducts / limit),
+    },
     data: docs.map(normalizeInventory),
   });
 }
@@ -1641,6 +2367,24 @@ async function handleCreateInventory({ req, res, parseJsonBody, sendJson, sendEr
   const { inventory, auditLogs } = await getCollections(getDb);
   const now = new Date();
   const payload = { ...doc, createdAt: now, updatedAt: now };
+
+  const claimedResult = await inventory.findOneAndUpdate(
+    { key: doc.key, autoCreated: true },
+    {
+      $set: { ...doc, updatedAt: now },
+      $unset: { autoCreated: "" },
+    },
+    { returnDocument: "after" }
+  );
+  const claimedInventory = unwrapMongoWriteResult(claimedResult);
+  if (claimedInventory) {
+    await writeAdminAuditLog(auditLogs, req, "create", "inventory", claimedInventory._id, {
+      after: claimedInventory,
+      meta: { claimedAutoCreatedRow: true },
+    });
+    sendJson(res, 201, { ok: true, data: normalizeInventory(claimedInventory) });
+    return;
+  }
 
   try {
     const result = await inventory.insertOne(payload);
@@ -1669,22 +2413,58 @@ async function handleUpdateInventory({ req, res, pathParts, parseJsonBody, sendJ
     return;
   }
 
-  const update = {};
-  for (const key of ["stock", "reservedStock", "soldCount", "status", "note"]) {
-    if (parsed.data[key] !== undefined && parsed.data[key] !== "") update[key] = parsed.data[key];
-  }
-  update.updatedAt = new Date();
-
   const { inventory, auditLogs } = await getCollections(getDb);
   const query = {
     $or: [
       { key: identifier },
       { productId: identifier },
+      { productSlug: identifier },
+      { productSku: identifier },
+      { slug: identifier },
+      { sku: identifier },
       ...(ObjectId.isValid(identifier) ? [{ _id: new ObjectId(identifier) }] : []),
     ],
   };
   const before = await inventory.findOne(query);
-  const result = await inventory.findOneAndUpdate(query, { $set: update }, { returnDocument: "after" });
+
+  if (!before) {
+    sendError(res, 404, "Không tìm thấy tồn kho.");
+    return;
+  }
+
+  const update = {};
+  if (parsed.data.stock !== undefined && parsed.data.stock !== "") {
+    const stock = Math.max(0, Math.round(Number(parsed.data.stock || 0)));
+    const reservedStock = Math.max(0, Number(before.reservedStock || 0));
+    if (stock < reservedStock) {
+      sendError(
+        res,
+        409,
+        `Tồn thực tế không thể thấp hơn ${reservedStock} sản phẩm đang giữ chỗ.`
+      );
+      return;
+    }
+    update.stock = stock;
+  }
+  if (parsed.data.note !== undefined) update.note = cleanLimitedText(parsed.data.note, 1000);
+
+  const nextStock = update.stock ?? Number(before.stock || 0);
+  const nextReserved = Math.max(0, Number(before.reservedStock || 0));
+  const requestedStatus = parsed.data.status;
+  update.status = requestedStatus === "inactive"
+    ? "inactive"
+    : getInventoryStatus({
+      stock: nextStock,
+      reservedStock: nextReserved,
+      currentStatus: requestedStatus === "inactive" ? "inactive" : "",
+    });
+  update.updatedAt = new Date();
+
+  const result = await inventory.findOneAndUpdate(
+    { _id: before._id },
+    { $set: update },
+    { returnDocument: "after" }
+  );
   const updated = unwrapMongoWriteResult(result);
 
   if (!updated) {
@@ -1714,6 +2494,12 @@ async function handleDeleteInventory({ req, res, pathParts, sendJson, sendError,
       ...(ObjectId.isValid(identifier) ? [{ _id: new ObjectId(identifier) }] : []),
     ],
   };
+  const existing = await inventory.findOne(query);
+  if (existing && Number(existing.reservedStock || 0) > 0) {
+    sendError(res, 409, "Không thể xóa tồn kho đang có sản phẩm giữ chỗ cho đơn hàng.");
+    return;
+  }
+
   const result = await inventory.findOneAndDelete(query);
   const deleted = unwrapMongoWriteResult(result);
 
@@ -1884,14 +2670,20 @@ async function handleListShipments({ req, res, sendJson, sendError, getDb }) {
   });
 }
 
-async function syncOrderShipmentFields({ orders, shipment }) {
+async function syncOrderShipmentFields({ orders, inventory, payments, shipment }) {
   if (!orders || !shipment?.orderCode) return;
 
+  const order = await orders.findOne({ orderCode: shipment.orderCode });
+  if (!order) return;
+
+  const now = new Date();
   const set = {
     "shippingChoice.carrier": shipment.carrier || "",
     "shippingChoice.trackingCode": shipment.trackingCode || "",
     "shippingChoice.shipmentStatus": shipment.status || "",
-    updatedAt: new Date(),
+    "shippingChoice.shipmentStatusLabel": SHIPMENT_STATUS_LABELS[shipment.status] || shipment.status || "",
+    "shippingChoice.adminNote": shipment.note || "",
+    updatedAt: now,
   };
 
   if (shipment.status === "shipping") {
@@ -1901,10 +2693,26 @@ async function syncOrderShipmentFields({ orders, shipment }) {
   if (shipment.status === "delivered") {
     set.status = "completed";
     set.statusLabel = ORDER_STATUS_LABELS.completed;
+
+    const inventoryState = order.inventoryState
+      || (!["completed", "cancelled", "refunded"].includes(order.status) ? "reserved" : "unknown");
+    if (inventoryState === "reserved") {
+      await settleInventoryForOrder(inventory, order, "complete");
+      set.inventoryState = "fulfilled";
+      set.inventoryUpdatedAt = now;
+    }
+
+    if (order.payment?.method === "cod") {
+      set["payment.status"] = "paid";
+      set["payment.statusLabel"] = PAYMENT_STATUS_LABELS.paid;
+      set["payment.paidAt"] = now;
+    }
   }
   if (shipment.estimatedDeliveryAt) set["shippingChoice.estimatedDeliveryAt"] = shipment.estimatedDeliveryAt;
 
-  await orders.updateOne({ orderCode: shipment.orderCode }, { $set: set });
+  await orders.updateOne({ _id: order._id }, { $set: set });
+  const updatedOrder = await orders.findOne({ _id: order._id });
+  if (updatedOrder) await syncPaymentRecordFromOrder(payments, updatedOrder);
 }
 
 async function handleCreateShipment({ req, res, parseJsonBody, sendJson, sendError, getDb }) {
@@ -1919,7 +2727,7 @@ async function handleCreateShipment({ req, res, parseJsonBody, sendJson, sendErr
     return;
   }
 
-  const { shipments, orders, auditLogs } = await getCollections(getDb);
+  const { shipments, orders, inventory, payments, auditLogs } = await getCollections(getDb);
   const now = new Date();
   const doc = {
     ...parsed.data,
@@ -1935,7 +2743,7 @@ async function handleCreateShipment({ req, res, parseJsonBody, sendJson, sendErr
 
   const result = await shipments.insertOne(doc);
   doc._id = result.insertedId;
-  await syncOrderShipmentFields({ orders, shipment: doc });
+  await syncOrderShipmentFields({ orders, inventory, payments, shipment: doc });
   await writeAdminAuditLog(auditLogs, req, "create", "shipment", doc._id, { after: doc });
   sendJson(res, 201, { ok: true, data: normalizeShipment(doc) });
 }
@@ -1960,7 +2768,7 @@ async function handleUpdateShipment({ req, res, pathParts, parseJsonBody, sendJs
   if (update.orderCode) update.orderCode = cleanLimitedText(update.orderCode, 80).toUpperCase();
   update.updatedAt = new Date();
 
-  const { shipments, orders, auditLogs } = await getCollections(getDb);
+  const { shipments, orders, inventory, payments, auditLogs } = await getCollections(getDb);
   const query = {
     $or: [
       { orderCode: identifier },
@@ -1977,7 +2785,7 @@ async function handleUpdateShipment({ req, res, pathParts, parseJsonBody, sendJs
     return;
   }
 
-  await syncOrderShipmentFields({ orders, shipment: updated });
+  await syncOrderShipmentFields({ orders, inventory, payments, shipment: updated });
   await writeAdminAuditLog(auditLogs, req, "update", "shipment", updated._id || identifier, { before, after: updated });
   sendJson(res, 200, { ok: true, data: normalizeShipment(updated) });
 }
@@ -2435,6 +3243,18 @@ async function handleUpdateReturn({ req, res, pathParts, parseJsonBody, sendJson
     return;
   }
 
+  if (update.status && update.status !== before.status) {
+    const allowedStatuses = RETURN_STATUS_TRANSITIONS[before.status] || [];
+    if (!allowedStatuses.includes(update.status)) {
+      sendError(
+        res,
+        409,
+        `Không thể chuyển đổi trả từ "${RETURN_STATUS_LABELS[before.status] || before.status}" sang "${RETURN_STATUS_LABELS[update.status] || update.status}".`
+      );
+      return;
+    }
+  }
+
   const shouldApplyRefund = update.status === "completed" && before.status !== "completed";
   const actor = getAdminPayload(req);
 
@@ -2538,6 +3358,16 @@ async function handleDeleteReturn({ req, res, pathParts, sendJson, sendError, ge
     ],
   };
 
+  const before = await returns.findOne(query);
+  if (!before) {
+    sendError(res, 404, "Không tìm thấy yêu cầu đổi trả.");
+    return;
+  }
+  if (!["pending", "cancelled"].includes(before.status)) {
+    sendError(res, 409, "Yêu cầu đã xử lý cần được giữ lại để đối soát.");
+    return;
+  }
+
   const result = await returns.findOneAndDelete(query);
   const deleted = unwrapMongoWriteResult(result);
 
@@ -2626,6 +3456,8 @@ async function handleListSupportRequests({ req, res, sendJson, sendError, getDb 
   const limit = toPositiveInt(url.searchParams.get("limit"), 30, MAX_ADMIN_LIMIT);
   const skip = (page - 1) * limit;
   const query = buildSupportAdminQuery(url.searchParams);
+  const countQuery = { ...query };
+  delete countQuery.status;
 
   const [total, docs, statusCounts] = await Promise.all([
     supportRequests.countDocuments(query),
@@ -2636,7 +3468,7 @@ async function handleListSupportRequests({ req, res, sendJson, sendError, getDb 
       .limit(limit)
       .toArray(),
     supportRequests.aggregate([
-      { $match: query },
+      { $match: countQuery },
       { $group: { _id: "$status", count: { $sum: 1 } } },
     ]).toArray(),
   ]);
@@ -2759,6 +3591,16 @@ async function handleDeleteSupportRequest({ req, res, pathParts, sendJson, sendE
   };
 
   const { supportRequests, auditLogs } = await getCollections(getDb);
+  const before = await supportRequests.findOne(query);
+  if (!before) {
+    sendError(res, 404, "Không tìm thấy yêu cầu hỗ trợ.");
+    return;
+  }
+  if (before.status !== "new") {
+    sendError(res, 409, "Yêu cầu đã xử lý cần được giữ lại trong lịch sử hỗ trợ.");
+    return;
+  }
+
   const result = await supportRequests.findOneAndDelete(query);
   const deleted = unwrapMongoWriteResult(result);
 

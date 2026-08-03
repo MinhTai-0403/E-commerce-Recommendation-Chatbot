@@ -123,9 +123,9 @@ const genericMegaGroups = {
       'Loa Bluetooth',
       'Loa Karaoke',
       'Loa Soundbar',
-      'Mic cài áo',
-      'Mic livestream',
-      'Micro thu âm',
+      { label: 'Mic cài áo', category: 'Micro thu âm', q: 'Mic cài áo' },
+      { label: 'Mic livestream', category: 'Micro thu âm', q: 'Mic livestream' },
+      { label: 'Micro thu âm', category: 'Micro thu âm', q: '' },
       'Phụ kiện âm thanh',
     ], 'Âm thanh'),
   ],
@@ -248,7 +248,9 @@ const genericMegaGroups = {
   ],
   tv: [
     logoGroup('HÃNG TIVI', APPLIANCE_LOGOS.filter((item) => ['SAMSUNG', 'LG', 'Xiaomi', 'Sony', 'TCL', 'AQUA', 'coocaa'].includes(item.name)), 'Tivi'),
-    logoGroup('HÃNG ĐIỆN MÁY', APPLIANCE_LOGOS.filter((item) => ['LG', 'SAMSUNG', 'Xiaomi', 'Panasonic', 'AQUA', 'Toshiba', 'Sharp'].includes(item.name)), 'Điện máy'),
+    logoGroup('HÃNG TỦ LẠNH', APPLIANCE_LOGOS.filter((item) => ['LG', 'SAMSUNG', 'Xiaomi', 'Panasonic', 'AQUA', 'Toshiba', 'Sharp', 'Hitachi'].includes(item.name)), 'Tủ lạnh'),
+    logoGroup('HÃNG MÁY GIẶT', APPLIANCE_LOGOS.filter((item) => ['LG', 'SAMSUNG', 'Xiaomi', 'Panasonic', 'AQUA', 'Toshiba', 'Sharp'].includes(item.name)), 'Máy giặt'),
+    logoGroup('HÃNG MÁY LẠNH', APPLIANCE_LOGOS.filter((item) => ['Panasonic', 'Daikin', 'Sharp', 'LG', 'AQUA', 'SAMSUNG', 'Casper', 'TCL', 'Hitachi', 'Xiaomi'].includes(item.name)), 'Máy lạnh'),
     pillGroup('TIVI, ĐIỆN MÁY', [
       'Tivi 4K',
       'Tivi QLED',
@@ -482,6 +484,7 @@ function GenericMegaContent({ section }) {
 
 export function FloatingActions() {
   const [visible, setVisible] = useState(false);
+  const pathname = typeof window === 'undefined' ? '/' : window.location.pathname;
 
   useEffect(() => {
     const handleScroll = () => setVisible(window.scrollY > 400);
@@ -491,29 +494,78 @@ export function FloatingActions() {
 
   const scrollToTop = () => window.scrollTo({ top: 0, behavior: 'smooth' });
 
+  const mobileLinks = [
+    {
+      label: 'Trang chủ',
+      href: '/',
+      active: pathname === '/',
+      icon: <path d="M3 11.5 12 4l9 7.5V21h-6v-6H9v6H3z" />,
+    },
+    {
+      label: 'Danh mục',
+      href: '/mobile.html',
+      active: pathname.endsWith('.html') && pathname !== '/search.html',
+      icon: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>,
+    },
+    {
+      label: 'Cửa hàng',
+      href: '/dia-chi-cua-hang',
+      active: pathname === '/dia-chi-cua-hang',
+      icon: <><path d="M4 10h16l-1-5H5z" /><path d="M5 10v10h14V10M9 20v-6h6v6" /></>,
+    },
+    {
+      label: 'Thông báo',
+      href: '/smember/notification',
+      active: pathname === '/smember/notification',
+      badge: '0',
+      icon: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path d="M10 21h4" /></>,
+    },
+    {
+      label: 'Tài khoản',
+      href: '/smember',
+      active: pathname.startsWith('/smember'),
+      icon: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
+    },
+  ];
+
   return (
-    <aside className="floating-actions" aria-label="Liên kết hỗ trợ nhanh">
-      <button
-        className={`floating-action-button back-to-top ${visible ? 'visible' : ''}`}
-        onClick={scrollToTop}
-        type="button"
-        aria-label="Lên đầu trang"
-      >
-        <span>Lên đầu</span>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
-          <polyline points="18 15 12 9 6 15" />
-          <polyline points="18 20 12 14 6 20" />
-        </svg>
-      </button>
-      <a className="floating-action-button floating-contact" href="/lien-he">
-        <span>Liên hệ</span>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-          <path d="M4 14v-2a8 8 0 0 1 16 0v2" />
-          <path d="M18 19h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2h-1zM6 19H5a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h1z" />
-          <path d="M18 19c0 1.1-.9 2-2 2h-3" />
-        </svg>
-      </a>
-    </aside>
+    <>
+      <aside className="floating-actions" aria-label="Liên kết hỗ trợ nhanh">
+        <button
+          className={`floating-action-button back-to-top ${visible ? 'visible' : ''}`}
+          onClick={scrollToTop}
+          type="button"
+          aria-label="Lên đầu trang"
+        >
+          <span>Lên đầu</span>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
+            <polyline points="18 15 12 9 6 15" />
+            <polyline points="18 20 12 14 6 20" />
+          </svg>
+        </button>
+        <a className="floating-action-button floating-contact" href="/lien-he">
+          <span>Liên hệ</span>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <path d="M4 14v-2a8 8 0 0 1 16 0v2" />
+            <path d="M18 19h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2h-1zM6 19H5a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h1z" />
+            <path d="M18 19c0 1.1-.9 2-2 2h-3" />
+          </svg>
+        </a>
+      </aside>
+      <nav className="mobile-bottom-nav" aria-label="Điều hướng di động">
+        {mobileLinks.map((item) => (
+          <a className={item.active ? 'active' : ''} href={item.href} key={item.label}>
+            <span className="mobile-bottom-nav-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                {item.icon}
+              </svg>
+              {item.badge && <small>{item.badge}</small>}
+            </span>
+            <span>{item.label}</span>
+          </a>
+        ))}
+      </nav>
+    </>
   );
 }
 
@@ -521,11 +573,9 @@ export function HeaderPopups({
   activePopup,
   currentUser,
   filteredProvinces,
-  goAccount,
   goLogin,
   goRegister,
   handleCloseAllPopups,
-  handleLogout,
   locationSearch,
   selectedLocation,
   setLocationSearch,
@@ -597,7 +647,7 @@ export function HeaderPopups({
         </>
       )}
 
-      {(activePopup === 'location' || activePopup === 'auth') && (
+      {activePopup === 'location' && (
         <div className="location-global-overlay" onClick={handleCloseAllPopups} role="presentation" />
       )}
 
@@ -651,60 +701,6 @@ export function HeaderPopups({
         </div>
       )}
 
-      {activePopup === 'auth' && (
-        <div className="auth-modal-box">
-          <button className="auth-modal-close-x" onClick={handleCloseAllPopups} type="button">×</button>
-          <h2 className="auth-modal-title">Smember</h2>
-          <div className="auth-modal-mascot">
-            <img src="https://cellphones.com.vn/media/wysiwyg/ant-smile.png" alt="Smember Mascot" />
-          </div>
-          {currentUser ? (
-            <>
-              <p className="auth-modal-desc">
-                Xin chào <strong>{currentUser.fullName || currentUser.email}</strong>.
-                Tài khoản của bạn đã đăng nhập và sẵn sàng dùng ưu đãi Smember.
-              </p>
-              <div className="auth-modal-user-meta">
-                <span>{currentUser.email}</span>
-                <span>{currentUser.phone}</span>
-                <span>Role: {currentUser.role || 'customer'}</span>
-              </div>
-              <div className="auth-modal-actions stacked">
-                <button className="auth-btn btn-login" onClick={goAccount} type="button">Thông tin cá nhân</button>
-                <button className="auth-btn btn-register" onClick={handleLogout} type="button">Đăng xuất</button>
-              </div>
-            </>
-          ) : (
-            <>
-              <p className="auth-modal-desc">
-                Vui lòng đăng nhập tài khoản Smember để xem ưu đãi và thanh toán dễ dàng hơn.
-              </p>
-              <div className="auth-modal-actions">
-                <button
-                  className="auth-btn btn-register"
-                  onClick={() => {
-                    handleCloseAllPopups();
-                    goRegister();
-                  }}
-                  type="button"
-                >
-                  Đăng ký
-                </button>
-                <button
-                  className="auth-btn btn-login"
-                  onClick={() => {
-                    handleCloseAllPopups();
-                    goLogin();
-                  }}
-                  type="button"
-                >
-                  Đăng nhập
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      )}
     </>
   );
 }

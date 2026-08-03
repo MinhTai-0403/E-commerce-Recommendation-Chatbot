@@ -15,7 +15,7 @@ function getMongoConfig() {
 
   if (!uri) {
     throw new Error(
-      "Missing MONGODB_URI. Create a .env file from .env.example first."
+      "Missing MONGODB_URI."
     );
   }
 
@@ -48,6 +48,10 @@ function getMongoConfig() {
       process.env.COUPONS_COLLECTION ||
       process.env.MONGODB_COUPONS_COLLECTION ||
       "coupons",
+    userVouchersCollection:
+      process.env.USER_VOUCHERS_COLLECTION ||
+      process.env.MONGODB_USER_VOUCHERS_COLLECTION ||
+      "user_vouchers",
     inventoryCollection:
       process.env.INVENTORY_COLLECTION ||
       process.env.MONGODB_INVENTORY_COLLECTION ||

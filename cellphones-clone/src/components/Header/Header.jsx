@@ -1,4 +1,8 @@
+import { useEffect, useMemo, useState } from 'react';
 import "./Header.css";
+import { fetchSearchSuggestions } from '../../services/apiContent';
+import { buildSearchPath } from '../../utils/linkRoutes';
+import { PUBLIC_EXTERNAL_LINKS } from '../../utils/routeRegistry';
 
 function StoreIcon() {
   return (
@@ -95,10 +99,10 @@ export function TopBar() {
           </div>
         </div>
         <nav className="topbar-links" aria-label="Liên kết hỗ trợ">
-          <a href="/he-thong-cua-hang">
+          <a href="/dia-chi-cua-hang">
             <StoreIcon /> Cửa hàng gần bạn
           </a>
-          <a href="/tra-cuu-don-hang">
+          <a href={PUBLIC_EXTERNAL_LINKS.smemberOrder}>
             <OrderIcon /> Tra cứu đơn hàng
           </a>
           <a href="tel:18002097">
@@ -118,6 +122,52 @@ export function MainHeader({
   cartCount = 0,
   onGoCart,
 }) {
+  const initialSearch = useMemo(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('key') || params.get('keyword') || '';
+  }, []);
+  const [searchQuery, setSearchQuery] = useState(initialSearch);
+  const [suggestions, setSuggestions] = useState(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchLoading, setSearchLoading] = useState(false);
+
+  useEffect(() => {
+    const query = searchQuery.trim();
+    if (query.length < 2) {
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setSearchLoading(true);
+      try {
+        const payload = await fetchSearchSuggestions(query, {
+          limit: 5,
+          location: selectedLocation,
+          signal: controller.signal,
+        });
+        setSuggestions(payload.data || null);
+        setSearchOpen(true);
+      } catch (error) {
+        if (error.name !== 'AbortError') setSuggestions(null);
+      } finally {
+        if (!controller.signal.aborted) setSearchLoading(false);
+      }
+    }, 220);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [searchQuery, selectedLocation]);
+
+  const suggestionGroups = [
+    ['Gợi ý tìm kiếm', suggestions?.intents || []],
+    ['Danh mục liên quan', suggestions?.categories || []],
+    ['Sản phẩm gợi ý', suggestions?.products || []],
+    ['Bài viết liên quan', suggestions?.articles || []],
+  ].filter(([, items]) => items.length > 0);
+
   const accountLabel = currentUser?.fullName
     ? currentUser.fullName.split(" ").slice(-2).join(" ")
     : currentUser?.email || "Đăng nhập";
@@ -128,9 +178,15 @@ export function MainHeader({
         {/* Logo */}
         <a href="/" className="header-logo">
           <img
-            className="header-logo-image"
+            className="header-logo-image header-logo-image-desktop"
             src="https://cdn2.cellphones.com.vn/x/media/wysiwyg/Web/Logo/Logo_CPS.png"
             alt="CellphoneS"
+          />
+          <img
+            className="header-logo-image header-logo-image-mobile"
+            src="https://cdn2.cellphones.com.vn/x/media/wysiwyg/Web/Logo/Logo-CPS-m.png"
+            alt=""
+            aria-hidden="true"
           />
         </a>
 
@@ -211,7 +267,18 @@ export function MainHeader({
         </button>
 
         {/* Search */}
-        <form className="header-search" id="header-search" action="/search" method="get">
+        <form
+          className="header-search"
+          id="header-search"
+          action="/catalogsearch/result"
+          method="get"
+          role="search"
+          onSubmit={(event) => {
+            const query = searchQuery.trim();
+            event.preventDefault();
+            if (query) window.location.assign(buildSearchPath(query));
+          }}
+        >
           <svg
             className="search-icon"
             width="20"
@@ -226,10 +293,56 @@ export function MainHeader({
           </svg>
           <input
             type="text"
-            name="keyword"
+            name="q"
             placeholder="Bạn muốn mua gì hôm nay?"
             className="search-input"
+            value={searchQuery}
+            autoComplete="off"
+            aria-autocomplete="list"
+            aria-expanded={searchOpen}
+            aria-controls="header-search-suggestions"
+            onChange={(event) => setSearchQuery(event.target.value)}
+            onFocus={() => setSearchOpen(true)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') setSearchOpen(false);
+            }}
           />
+          {searchOpen && searchQuery.trim().length >= 2 && (
+            <div
+              className="header-search-suggestions"
+              id="header-search-suggestions"
+              role="listbox"
+            >
+              {searchLoading && <div className="header-search-status">Đang tìm gợi ý...</div>}
+              {!searchLoading && suggestionGroups.length === 0 && (
+                <a className="header-search-status" href={buildSearchPath(searchQuery)}>
+                  Xem tất cả kết quả cho “{searchQuery.trim()}”
+                </a>
+              )}
+              {!searchLoading && suggestionGroups.map(([label, items]) => (
+                <section className="header-suggestion-group" key={label}>
+                  <strong>{label}</strong>
+                  {items.map((item) => (
+                    <a
+                      href={item.path || buildSearchPath(item.label || item.name)}
+                      key={`${label}-${item.id || item.path || item.label || item.name}`}
+                      role="option"
+                      onClick={() => setSearchOpen(false)}
+                    >
+                      {item.image && <img src={item.image} alt="" loading="lazy" />}
+                      <span>
+                        <b>{item.label || item.name}</b>
+                        {item.priceLabel && <small>{item.priceLabel}</small>}
+                      </span>
+                    </a>
+                  ))}
+                </section>
+              ))}
+              <a className="header-search-all" href={buildSearchPath(searchQuery)}>
+                Xem tất cả kết quả
+              </a>
+            </div>
+          )}
         </form>
 
         {/* Right Actions */}
@@ -264,16 +377,11 @@ export function MainHeader({
             </svg>
           </a>
 
-          <button
-            type="button"
-            className={`header-outlined-btn header-login-btn ${activePopup === "auth" ? "active-popup-btn" : ""}`}
+          <a
+            className="header-outlined-btn header-login-btn"
             id="header-login-btn"
-            aria-label={currentUser ? `Tài khoản ${accountLabel}` : 'Đăng nhập hoặc đăng ký'}
-            aria-expanded={activePopup === "auth"}
-            onClick={(e) => {
-              e.stopPropagation();
-              setActivePopup(activePopup === "auth" ? null : "auth");
-            }}
+            href={currentUser ? "/smember" : "/smember/login"}
+            aria-label={currentUser ? `Mở tài khoản ${accountLabel}` : 'Đăng nhập Smember'}
           >
             <span className="header-action-label">{accountLabel}</span>
             <svg
@@ -287,7 +395,7 @@ export function MainHeader({
               <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
               <circle cx="12" cy="7" r="4" />
             </svg>
-          </button>
+          </a>
         </div>
       </div>
     </header>

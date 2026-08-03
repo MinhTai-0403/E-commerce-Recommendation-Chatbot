@@ -1,0 +1,219 @@
+{
+  "info": {
+    "_postman_id": "a93a80fa-a88d-4ead-9caf-cellphones-api-audit",
+    "name": "CellphoneS Clone - API Audit",
+    "description": "Collection hỗ trợ chạy lại audit. Biến password/OTP/token để trống trong file; request ghi dữ liệu tự skip nếu thiếu biến runtime. Runner Node tests/api/run-api-audit.js là nguồn kết quả chính.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      { "key": "token", "value": "{{access_token}}", "type": "string" }
+    ]
+  },
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "let payload = {};",
+          "try { payload = pm.response.json(); } catch (error) {}",
+          "const token = payload?.data?.token || payload?.token;",
+          "if (token) pm.collectionVariables.set('access_token', token);",
+          "const requestPath = pm.request.url.getPath();",
+          "const product = (requestPath === '/api/products' || requestPath === 'api/products') && Array.isArray(payload?.data) ? payload.data[0] : null;",
+          "if (product?.slug || product?.id) pm.collectionVariables.set('product_id', product.slug || product.id);",
+          "const orderCode = payload?.data?.orderCode || payload?.data?.order?.orderCode;",
+          "if (orderCode) pm.collectionVariables.set('order_code', orderCode);",
+          "pm.test('Response không lộ passwordHash/OTP/secret', function () {",
+          "  const text = pm.response.text();",
+          "  pm.expect(text).not.to.match(/passwordHash|otpHash|SMTP_APP_PASSWORD|JWT_SECRET/i);",
+          "});"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    { "key": "base_url", "value": "http://127.0.0.1:5050", "type": "string" },
+    { "key": "access_token", "value": "", "type": "secret" },
+    { "key": "audit_email", "value": "", "type": "string" },
+    { "key": "audit_phone", "value": "", "type": "string" },
+    { "key": "audit_password", "value": "", "type": "secret" },
+    { "key": "audit_otp", "value": "", "type": "secret" },
+    { "key": "product_id", "value": "", "type": "string" },
+    { "key": "order_code", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "System & Public",
+      "item": [
+        {
+          "name": "API index",
+          "request": { "auth": { "type": "noauth" }, "method": "GET", "header": [], "url": "{{base_url}}/api" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Health - database connected",
+          "request": { "auth": { "type": "noauth" }, "method": "GET", "header": [], "url": "{{base_url}}/api/health" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('HTTP 200 và MongoDB OK', function () { pm.response.to.have.status(200); pm.expect(pm.response.json().ok).to.eql(true); });"] } }]
+        },
+        {
+          "name": "Content routes",
+          "request": { "auth": { "type": "noauth" }, "method": "GET", "header": [], "url": "{{base_url}}/api/content/routes" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Content page",
+          "request": { "auth": { "type": "noauth" }, "method": "GET", "header": [], "url": "{{base_url}}/api/content/page?path=%2Fmobile.html" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Search suggestions",
+          "request": { "auth": { "type": "noauth" }, "method": "GET", "header": [], "url": "{{base_url}}/api/search/suggestions?q=iphone&limit=5&location=HCM" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Unknown route returns 404",
+          "request": { "auth": { "type": "noauth" }, "method": "GET", "header": [], "url": "{{base_url}}/api/__postman_not_found__" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('HTTP 404', () => pm.response.to.have.status(404));"] } }]
+        }
+      ]
+    },
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Request register OTP (optional write)",
+          "event": [
+            { "listen": "prerequest", "script": { "exec": ["if (!pm.collectionVariables.get('audit_email') || !pm.collectionVariables.get('audit_phone') || !pm.collectionVariables.get('audit_password')) pm.execution.skipRequest();"] } },
+            { "listen": "test", "script": { "exec": ["pm.test('OTP requested', () => pm.expect([200, 409, 429]).to.include(pm.response.code));"] } }
+          ],
+          "request": {
+            "auth": { "type": "noauth" }, "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"fullName\": \"Postman API Audit\",\n  \"email\": \"{{audit_email}}\",\n  \"phone\": \"{{audit_phone}}\",\n  \"birthday\": \"2001-01-15\",\n  \"password\": \"{{audit_password}}\"\n}" },
+            "url": "{{base_url}}/api/auth/request-register-otp"
+          }
+        },
+        {
+          "name": "Verify register OTP (optional write)",
+          "event": [
+            { "listen": "prerequest", "script": { "exec": ["if (!pm.collectionVariables.get('audit_email') || !pm.collectionVariables.get('audit_otp')) pm.execution.skipRequest();"] } },
+            { "listen": "test", "script": { "exec": ["pm.test('Account created', () => pm.response.to.have.status(201));"] } }
+          ],
+          "request": {
+            "auth": { "type": "noauth" }, "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{audit_email}}\",\n  \"otp\": \"{{audit_otp}}\"\n}" },
+            "url": "{{base_url}}/api/auth/verify-register-otp"
+          }
+        },
+        {
+          "name": "Login success (optional)",
+          "event": [
+            { "listen": "prerequest", "script": { "exec": ["if (!pm.collectionVariables.get('audit_email') || !pm.collectionVariables.get('audit_password')) pm.execution.skipRequest();"] } },
+            { "listen": "test", "script": { "exec": ["pm.test('HTTP 200 và token', function () { pm.response.to.have.status(200); pm.expect(pm.response.json()?.data?.token).to.be.a('string'); });"] } }
+          ],
+          "request": {
+            "auth": { "type": "noauth" }, "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"identifier\": \"{{audit_email}}\",\n  \"password\": \"{{audit_password}}\"\n}" },
+            "url": "{{base_url}}/api/auth/login"
+          }
+        },
+        {
+          "name": "Login wrong password returns 401 (optional)",
+          "event": [
+            { "listen": "prerequest", "script": { "exec": ["if (!pm.collectionVariables.get('audit_email')) pm.execution.skipRequest();"] } },
+            { "listen": "test", "script": { "exec": ["pm.test('HTTP 401', () => pm.response.to.have.status(401));"] } }
+          ],
+          "request": {
+            "auth": { "type": "noauth" }, "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"identifier\": \"{{audit_email}}\",\n  \"password\": \"definitely-wrong-9\"\n}" },
+            "url": "{{base_url}}/api/auth/login"
+          }
+        },
+        {
+          "name": "Me (optional)",
+          "event": [
+            { "listen": "prerequest", "script": { "exec": ["if (!pm.collectionVariables.get('access_token')) pm.execution.skipRequest();"] } },
+            { "listen": "test", "script": { "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"] } }
+          ],
+          "request": { "method": "GET", "header": [], "url": "{{base_url}}/api/auth/me" }
+        }
+      ]
+    },
+    {
+      "name": "Products",
+      "item": [
+        {
+          "name": "Product filters and pagination",
+          "request": { "auth": { "type": "noauth" }, "method": "GET", "header": [], "url": "{{base_url}}/api/products?q=iphone&brand=Apple&minPrice=1000000&maxPrice=50000000&sort=price-asc&page=1&limit=5" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('HTTP 200 và data là mảng', function () { pm.response.to.have.status(200); pm.expect(pm.response.json().data).to.be.an('array'); });"] } }]
+        },
+        {
+          "name": "Product detail (optional id from previous request)",
+          "event": [
+            { "listen": "prerequest", "script": { "exec": ["if (!pm.collectionVariables.get('product_id')) pm.execution.skipRequest();"] } },
+            { "listen": "test", "script": { "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"] } }
+          ],
+          "request": { "auth": { "type": "noauth" }, "method": "GET", "header": [], "url": "{{base_url}}/api/products/{{product_id}}" }
+        },
+        {
+          "name": "Product write without admin returns 401",
+          "request": {
+            "auth": { "type": "noauth" }, "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"name\":\"Forbidden Postman Product\"}" },
+            "url": "{{base_url}}/api/products"
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('HTTP 401', () => pm.response.to.have.status(401));"] } }]
+        }
+      ]
+    },
+    {
+      "name": "Commerce & Customer (optional authenticated)",
+      "item": [
+        {
+          "name": "Cart",
+          "event": [
+            { "listen": "prerequest", "script": { "exec": ["if (!pm.collectionVariables.get('access_token')) pm.execution.skipRequest();"] } },
+            { "listen": "test", "script": { "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"] } }
+          ],
+          "request": { "method": "GET", "header": [], "url": "{{base_url}}/api/cart" }
+        },
+        {
+          "name": "Checkout preview",
+          "event": [
+            { "listen": "prerequest", "script": { "exec": ["if (!pm.collectionVariables.get('product_id')) pm.execution.skipRequest();"] } },
+            { "listen": "test", "script": { "exec": ["pm.test('Preview succeeds or fixture unavailable', () => pm.expect([200, 400]).to.include(pm.response.code));"] } }
+          ],
+          "request": {
+            "auth": { "type": "noauth" }, "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"items\": [{\"slug\": \"{{product_id}}\", \"quantity\": 1}],\n  \"paymentMethod\": \"cod\"\n}" },
+            "url": "{{base_url}}/api/checkout/preview"
+          }
+        },
+        {
+          "name": "Orders list",
+          "event": [
+            { "listen": "prerequest", "script": { "exec": ["if (!pm.collectionVariables.get('access_token')) pm.execution.skipRequest();"] } },
+            { "listen": "test", "script": { "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"] } }
+          ],
+          "request": { "method": "GET", "header": [], "url": "{{base_url}}/api/orders" }
+        },
+        {
+          "name": "Notifications",
+          "event": [
+            { "listen": "prerequest", "script": { "exec": ["if (!pm.collectionVariables.get('access_token')) pm.execution.skipRequest();"] } },
+            { "listen": "test", "script": { "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"] } }
+          ],
+          "request": { "method": "GET", "header": [], "url": "{{base_url}}/api/notifications" }
+        }
+      ]
+    }
+  ]
+}

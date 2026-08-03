@@ -5,7 +5,11 @@ const PRETTY_JSON = String(process.env.API_PRETTY_JSON || "false") === "true";
 const GZIP_MIN_BYTES = Math.max(0, Number(process.env.API_GZIP_MIN_BYTES || 1024));
 
 function getAllowedCorsOrigins() {
-  const configured = String(process.env.CORS_ORIGIN || DEFAULT_CORS_ORIGIN)
+  const configured = String(
+    process.env.CORS_ALLOWED_ORIGINS
+    || process.env.CORS_ORIGIN
+    || DEFAULT_CORS_ORIGIN
+  )
     .split(/[;,\s]+/)
     .map((origin) => origin.trim().replace(/\/$/, ""))
     .filter(Boolean);
@@ -66,17 +70,35 @@ function sendError(res, statusCode, message, details) {
 
 function parseJsonBody(req, maxBytes = 2_000_000) {
   return new Promise((resolve, reject) => {
-    let body = "";
+    const chunks = [];
+    let totalBytes = 0;
+    let settled = false;
+
+    const rejectRequest = (statusCode, code, message) => {
+      if (settled) return;
+      settled = true;
+      const error = new Error(message);
+      error.statusCode = statusCode;
+      error.code = code;
+      reject(error);
+    };
 
     req.on("data", (chunk) => {
-      body += chunk;
-      if (body.length > maxBytes) {
-        reject(new Error("Request body is too large."));
-        req.destroy();
+      if (settled) return;
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      totalBytes += buffer.length;
+      if (totalBytes > maxBytes) {
+        chunks.length = 0;
+        rejectRequest(413, "PAYLOAD_TOO_LARGE", "Request body is too large.");
+        return;
       }
+      chunks.push(buffer);
     });
 
     req.on("end", () => {
+      if (settled) return;
+      settled = true;
+      const body = Buffer.concat(chunks, totalBytes).toString("utf8");
       if (!body.trim()) {
         resolve({});
         return;
@@ -85,11 +107,18 @@ function parseJsonBody(req, maxBytes = 2_000_000) {
       try {
         resolve(JSON.parse(body));
       } catch {
-        reject(new Error("Invalid JSON body."));
+        const error = new Error("Invalid JSON body.");
+        error.statusCode = 400;
+        error.code = "INVALID_JSON";
+        reject(error);
       }
     });
 
-    req.on("error", reject);
+    req.on("error", (error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    });
   });
 }
 

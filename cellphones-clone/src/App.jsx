@@ -3,8 +3,10 @@ import './App.css';
 import { TopBar, MainHeader } from './components/Header/Header';
 import ChatbotWidget from './components/ChatbotWidget/ChatbotWidget';
 import { FloatingActions, HeaderPopups } from './components/AppChrome/AppChrome';
-import { extractProductSlug, findProductDetailByPathname } from './data/productCatalog';
-import { getInfoRouteKind, getRouteForDeadAnchor } from './utils/linkRoutes';
+import { findProductDetailByPathname } from './data/productCatalog';
+import { getRouteForDeadAnchor } from './utils/linkRoutes';
+import { getExternalRouteTarget, resolvePublicRoute } from './utils/routeRegistry';
+import useRouteMetadata from './hooks/useRouteMetadata';
 import {
   phoneSubCategories, phoneBrandFilters, phoneProducts,
   laptopBrandFilters, laptopProducts,
@@ -13,8 +15,9 @@ import {
   tvBrandFilters, tvProducts,
   applianceBrandFilters, applianceProducts,
   hotTrendProducts,
+  promoStripBanners,
 } from './data/mockData';
-import { useApiProductDetail, useApiProducts } from './hooks/useApiProducts';
+import { useApiProductDetail } from './hooks/useApiProducts';
 import useCart from './hooks/useCart';
 import { clearAuthSession, fetchCurrentSmember, getStoredUser, logoutSmember } from './services/apiAuth';
 
@@ -35,6 +38,13 @@ const CheckoutPage = lazy(() => import('./components/CheckoutPage/CheckoutPage')
 const SmemberAccount = lazy(() => import('./components/SmemberAccount/SmemberAccount'));
 const InfoPage = lazy(() => import('./components/InfoPage/InfoPage'));
 const StoreLocator = lazy(() => import('./components/StoreLocator/StoreLocator'));
+const TradeInPage = lazy(() => import('./components/TradeInPage/TradeInPage'));
+const PromotionsPage = lazy(() => import('./components/PromotionsPage/PromotionsPage'));
+const FooterPages = lazy(() => import('./components/FooterPages/FooterPages'));
+const ShippingPolicyPage = lazy(() => import('./components/ShippingPolicyPage/ShippingPolicyPage'));
+const InstallmentPage = lazy(() => import('./components/InstallmentPage/InstallmentPage'));
+const CreditCardInstallmentGuidePage = lazy(() => import('./components/CreditCardInstallmentGuidePage/CreditCardInstallmentGuidePage'));
+const NotFoundPage = lazy(() => import('./components/NotFoundPage/NotFoundPage'));
 
 const homeProductQueries = {
   hotTrend: { category: 'Phụ kiện', displayLimit: 12, fetchLimit: 36, inStock: true, sort: 'latest' },
@@ -75,31 +85,10 @@ const homeTabQueries = {
   ],
 };
 
-const authRouteMap = {
-  '/login': 'login',
-  '/register': 'register',
-  '/smember/login': 'login',
-  '/smember/register': 'register',
+const getPageFromPathname = (pathname = '', search = '') => {
+  const route = resolvePublicRoute(pathname, search);
+  return route.appPage || (route.pageType === 'product' ? 'product' : 'not-found');
 };
-
-const getAuthPageFromPathname = (pathname = '') => {
-  const cleaned = pathname.replace(/\/+$/g, '') || '/';
-  return authRouteMap[cleaned] || '';
-};
-
-const getAppPageFromPathname = (pathname = '') => {
-  const cleaned = pathname.replace(/\/+$/g, '') || '/';
-  if (cleaned === '/admin') return 'admin';
-  if (cleaned === '/cart' || cleaned === '/gio-hang') return 'cart';
-  if (cleaned === '/checkout' || cleaned === '/thanh-toan') return 'checkout';
-  if (cleaned === '/dia-chi-cua-hang' || cleaned === '/he-thong-cua-hang') return 'stores';
-  if (cleaned === '/smember' || cleaned === '/smember/profile' || cleaned === '/smember/account' || cleaned === '/thong-tin-ca-nhan') return 'account';
-  return getAuthPageFromPathname(cleaned);
-};
-
-const getPageFromPathname = (pathname = '') => (
-  getAppPageFromPathname(pathname) || getInfoRouteKind(pathname)
-);
 
 const getBrowserLocationState = () => ({
   pathname: window.location.pathname,
@@ -192,7 +181,7 @@ const CELLPHONES_47_PROVINCES = [
 
 function ProductRoute({ slug, pathname = window.location.pathname, currentUser, onGoLogin, onAddToCart, onGoCart }) {
   const fallbackProduct = useMemo(() => (
-    findProductDetailByPathname(pathname)
+    import.meta.env.DEV ? findProductDetailByPathname(pathname) : null
   ), [pathname]);
   const { product, loading, error, source } = useApiProductDetail(slug, fallbackProduct);
   const resolvedProduct = source === 'api' ? product : (fallbackProduct || product);
@@ -246,9 +235,36 @@ function ProductRoute({ slug, pathname = window.location.pathname, currentUser, 
   );
 }
 
-function HomePage({ currentUser, onGoLogin, onGoRegister }) {
-  const hotTrend = useApiProducts(homeProductQueries.hotTrend, hotTrendProducts);
+function HomePromoStrip() {
+  const desktopBanner = promoStripBanners[0];
+  const mobileBanner = promoStripBanners[1] || desktopBanner;
 
+  if (!desktopBanner?.image) return null;
+
+  return (
+    <div className="home-promo-strip-wrap container">
+      <a
+        className="home-promo-strip"
+        href="/chao-nam-hoc-moi"
+        aria-label="Xem ưu đãi Back to School"
+      >
+        <picture>
+          {mobileBanner?.image && (
+            <source media="(max-width: 640px)" srcSet={mobileBanner.image} />
+          )}
+          <img
+            src={desktopBanner.image}
+            alt="Back to School - Đặc quyền ưu đãi học sinh, sinh viên"
+            width="1200"
+            height="75"
+          />
+        </picture>
+      </a>
+    </div>
+  );
+}
+
+function HomePage({ currentUser, onGoLogin, onGoRegister }) {
   return (
     <>
       <HeroSection
@@ -257,7 +273,9 @@ function HomePage({ currentUser, onGoLogin, onGoRegister }) {
         onGoRegister={onGoRegister}
       />
 
-      <HotTrend products={hotTrend.products} loading={hotTrend.loading} />
+      <HomePromoStrip />
+
+      <HotTrend products={hotTrendProducts} />
 
       <CategoryBlock
         title="Điện thoại nổi bật"
@@ -350,17 +368,35 @@ function HomePage({ currentUser, onGoLogin, onGoRegister }) {
 
 function App() {
   const [currentLocation, setCurrentLocation] = useState(() => getBrowserLocationState());
-  const initialPage = getPageFromPathname(currentLocation.pathname);
-  const productSlug = initialPage ? '' : extractProductSlug(currentLocation.pathname);
-  const isProductRoute = Boolean(productSlug) && !initialPage;
+  const resolvedRoute = useMemo(
+    () => resolvePublicRoute(currentLocation.pathname, currentLocation.search),
+    [currentLocation.pathname, currentLocation.search],
+  );
+  const initialPage = getPageFromPathname(currentLocation.pathname, currentLocation.search);
+  const productSlug = resolvedRoute.productSlug || '';
+  const isProductRoute = resolvedRoute.pageType === 'product' && Boolean(productSlug);
   const [activePopup, setActivePopup] = useState(null);
   const [currentPage, setCurrentPage] = useState(() => (
-    initialPage || 'home'
+    initialPage
   ));
   const [currentUser, setCurrentUser] = useState(() => getStoredUser());
   const [selectedLocation, setSelectedLocation] = useState('Hồ Chí Minh');
   const [locationSearch, setLocationSearch] = useState('');
   const cartState = useCart(currentUser);
+  useRouteMetadata(resolvedRoute, currentLocation.search);
+
+  useEffect(() => {
+    if (resolvedRoute.handling === 'external') {
+      const target = getExternalRouteTarget(resolvedRoute);
+      if (target) window.location.replace(target);
+      return;
+    }
+
+    if (resolvedRoute.handling === 'legacy-redirect' && resolvedRoute.canonicalPath) {
+      const nextPath = `${resolvedRoute.canonicalPath}${currentLocation.search || ''}`;
+      window.location.replace(nextPath);
+    }
+  }, [currentLocation.search, resolvedRoute]);
 
   useEffect(() => {
     let ignore = false;
@@ -407,7 +443,7 @@ function App() {
     window.history.pushState(null, '', path);
     const nextLocation = getBrowserLocationState();
     setCurrentLocation(nextLocation);
-    const nextPage = getPageFromPathname(nextLocation.pathname) || 'home';
+    const nextPage = getPageFromPathname(nextLocation.pathname, nextLocation.search);
     setCurrentPage(nextPage);
     handleCloseAllPopups();
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -456,7 +492,7 @@ function App() {
     const handlePopState = () => {
       const nextLocation = getBrowserLocationState();
       setCurrentLocation(nextLocation);
-      setCurrentPage(getPageFromPathname(nextLocation.pathname) || 'home');
+      setCurrentPage(getPageFromPathname(nextLocation.pathname, nextLocation.search));
       handleCloseAllPopups();
     };
 
@@ -483,7 +519,7 @@ function App() {
         return;
       }
 
-      if (href.startsWith('/') && !href.toLowerCase().endsWith('.html')) {
+      if (href.startsWith('/')) {
         event.preventDefault();
         navigateToPath(href);
       }
@@ -518,11 +554,9 @@ function App() {
     activePopup,
     currentUser,
     filteredProvinces,
-    goAccount,
     goLogin,
     goRegister,
     handleCloseAllPopups,
-    handleLogout,
     locationSearch,
     selectedLocation,
     setLocationSearch,
@@ -684,6 +718,210 @@ function App() {
     );
   }
 
+  if (currentPage === 'trade-in') {
+    return (
+      <div className="app">
+        <TopBar />
+        <MainHeader
+          activePopup={activePopup}
+          setActivePopup={setActivePopup}
+          selectedLocation={selectedLocation}
+          currentUser={currentUser}
+          cartCount={cartState.count}
+          onGoCart={goCart}
+        />
+        <main className="main-content tradein-main-shell">
+          <TradeInPage />
+        </main>
+        <Footer />
+        <FloatingActions />
+        <HeaderPopups {...headerPopupProps} />
+        <ChatbotWidget
+          userName={
+            currentUser?.fullName
+            || currentUser?.displayName
+            || currentUser?.name
+            || currentUser?.username
+            || ''
+          }
+        />
+      </div>
+    );
+  }
+
+  if (currentPage === 'promotions') {
+    return (
+      <div className="app">
+        <TopBar />
+        <MainHeader
+          activePopup={activePopup}
+          setActivePopup={setActivePopup}
+          selectedLocation={selectedLocation}
+          currentUser={currentUser}
+          cartCount={cartState.count}
+          onGoCart={goCart}
+        />
+        <main className="main-content promotions-main-shell">
+          <PromotionsPage />
+        </main>
+        <Footer />
+        <FloatingActions />
+        <HeaderPopups {...headerPopupProps} />
+        <ChatbotWidget
+          userName={
+            currentUser?.fullName
+            || currentUser?.displayName
+            || currentUser?.name
+            || currentUser?.username
+            || ''
+          }
+        />
+      </div>
+    );
+  }
+
+  if (currentPage === 'credit-card-installment-guide') {
+    return (
+      <div className="app">
+        <TopBar />
+        <MainHeader
+          activePopup={activePopup}
+          setActivePopup={setActivePopup}
+          selectedLocation={selectedLocation}
+          currentUser={currentUser}
+          cartCount={cartState.count}
+          onGoCart={goCart}
+        />
+        <main className="main-content credit-card-installment-main-shell">
+          <CreditCardInstallmentGuidePage />
+        </main>
+        <Footer />
+        <FloatingActions />
+        <HeaderPopups {...headerPopupProps} />
+        <ChatbotWidget
+          userName={
+            currentUser?.fullName
+            || currentUser?.displayName
+            || currentUser?.name
+            || currentUser?.username
+            || ''
+          }
+        />
+      </div>
+    );
+  }
+
+  if (currentPage === 'installment') {
+    return (
+      <div className="app">
+        <TopBar />
+        <MainHeader
+          activePopup={activePopup}
+          setActivePopup={setActivePopup}
+          selectedLocation={selectedLocation}
+          currentUser={currentUser}
+          cartCount={cartState.count}
+          onGoCart={goCart}
+        />
+        <main className="main-content installment-main-shell">
+          <InstallmentPage />
+        </main>
+        <Footer />
+        <FloatingActions />
+        <HeaderPopups {...headerPopupProps} />
+        <ChatbotWidget
+          userName={
+            currentUser?.fullName
+            || currentUser?.displayName
+            || currentUser?.name
+            || currentUser?.username
+            || ''
+          }
+        />
+      </div>
+    );
+  }
+
+  if (currentPage === 'shipping-policy') {
+    return (
+      <div className="app">
+        <TopBar />
+        <MainHeader
+          activePopup={activePopup}
+          setActivePopup={setActivePopup}
+          selectedLocation={selectedLocation}
+          currentUser={currentUser}
+          cartCount={cartState.count}
+          onGoCart={goCart}
+        />
+        <main className="main-content shipping-policy-main-shell">
+          <ShippingPolicyPage />
+        </main>
+        <Footer />
+        <FloatingActions />
+        <HeaderPopups {...headerPopupProps} />
+        <ChatbotWidget
+          userName={
+            currentUser?.fullName
+            || currentUser?.displayName
+            || currentUser?.name
+            || currentUser?.username
+            || ''
+          }
+        />
+      </div>
+    );
+  }
+
+  if (currentPage === 'footer-pages') {
+    return (
+      <div className="app">
+        <TopBar />
+        <MainHeader
+          activePopup={activePopup}
+          setActivePopup={setActivePopup}
+          selectedLocation={selectedLocation}
+          currentUser={currentUser}
+          cartCount={cartState.count}
+          onGoCart={goCart}
+        />
+        <main className="main-content footer-pages-main-shell">
+          <FooterPages
+            pathname={currentLocation.pathname}
+            search={currentLocation.search}
+          />
+        </main>
+        <Footer />
+        <FloatingActions />
+        <HeaderPopups {...headerPopupProps} />
+        <ChatbotWidget
+          userName={
+            currentUser?.fullName
+            || currentUser?.displayName
+            || currentUser?.name
+            || currentUser?.username
+            || ''
+          }
+        />
+      </div>
+    );
+  }
+
+  if (currentPage === 'info' && currentLocation.pathname === '/sforum') {
+    return (
+      <div className="app app-sforum">
+        <main className="main-content">
+          <InfoPage
+            pathname={currentLocation.pathname}
+            search={currentLocation.search}
+            onGoHome={goHome}
+            currentUser={currentUser}
+          />
+        </main>
+      </div>
+    );
+  }
+
   if (currentPage === 'info') {
     return (
       <div className="app">
@@ -701,6 +939,7 @@ function App() {
             pathname={currentLocation.pathname}
             search={currentLocation.search}
             onGoHome={goHome}
+            currentUser={currentUser}
           />
         </main>
         <Footer />
@@ -715,6 +954,28 @@ function App() {
             || ''
           }
         />
+      </div>
+    );
+  }
+
+  if (currentPage === 'not-found') {
+    return (
+      <div className="app">
+        <TopBar />
+        <MainHeader
+          activePopup={activePopup}
+          setActivePopup={setActivePopup}
+          selectedLocation={selectedLocation}
+          currentUser={currentUser}
+          cartCount={cartState.count}
+          onGoCart={goCart}
+        />
+        <main className="main-content">
+          <NotFoundPage onGoHome={goHome} />
+        </main>
+        <Footer />
+        <FloatingActions />
+        <HeaderPopups {...headerPopupProps} />
       </div>
     );
   }

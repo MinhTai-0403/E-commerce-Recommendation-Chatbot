@@ -102,6 +102,8 @@ const buildCartItemId = (item = {}) => {
   return [slugify(base), optionSuffix].filter(Boolean).join('--').slice(0, 220);
 };
 
+const isMongoObjectId = (value) => /^[a-f\d]{24}$/i.test(cleanText(value, 80));
+
 export const summarizeCart = (items = []) => {
   const totalQuantity = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
   const subtotal = items.reduce(
@@ -132,10 +134,20 @@ export const normalizeCartItem = (input = {}, options = {}) => {
       getSlugFromUrl(product.url || product.productUrl) ||
       slugify(name)
   );
+  const rawMongoId = cleanText(product.mongoId || product._id, 80);
+  const mongoId = isMongoObjectId(rawMongoId) ? rawMongoId : '';
+  const rawId = cleanText(product.id, 180);
+  const legacyProductId =
+    (rawMongoId && !mongoId ? rawMongoId : '') ||
+    (/^\d+$/.test(rawId) ? rawId : '');
+  const productId = cleanText(
+    product.productId || legacyProductId || mongoId || slug || product.sku,
+    180
+  );
   const selectedOptions = normalizeSelectedOptions(product, options);
   const item = {
-    productId: cleanText(product.productId || product.id || product.mongoId || product._id || slug, 180),
-    mongoId: cleanText(product.mongoId || product._id, 80),
+    productId,
+    mongoId,
     sku: cleanText(product.sku || slug, 180),
     slug,
     name: name || 'Sản phẩm CellphoneS',

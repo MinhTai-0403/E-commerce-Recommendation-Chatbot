@@ -1,0 +1,586 @@
+.installment-page {
+  min-height: 100vh;
+  padding-bottom: 36px;
+  background: #f4f5f6;
+  color: #111827;
+}
+
+.installment-container {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding-top: 10px;
+}
+
+.installment-breadcrumb {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 8px;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.installment-breadcrumb a:hover { color: #d70018; }
+
+.installment-container > h1 {
+  margin: 0;
+  font-size: 27px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.installment-hero,
+.installment-section,
+.installment-article,
+.installment-faq-section,
+.installment-student-section {
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 3px 12px rgba(15, 23, 42, .06);
+}
+
+.installment-hero img {
+  display: block;
+  width: 100%;
+  max-height: 460px;
+  object-fit: cover;
+}
+
+.installment-section,
+.installment-article,
+.installment-faq-section {
+  padding: 22px;
+}
+
+.installment-section > h2,
+.installment-faq-section > h2 {
+  margin: 0 0 18px;
+  font-size: 24px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.installment-method-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.installment-method-grid article {
+  display: flex;
+  min-height: 335px;
+  flex-direction: column;
+  align-items: center;
+  padding: 22px 20px;
+  border: 1px solid #e5e7eb;
+  border-radius: 13px;
+  background: linear-gradient(180deg, #fff 0%, #fafafa 100%);
+  text-align: center;
+  transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+
+.installment-method-grid article:hover {
+  border-color: #fda4af;
+  box-shadow: 0 9px 24px rgba(15, 23, 42, .08);
+  transform: translateY(-3px);
+}
+
+.installment-method-grid img {
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+}
+
+.installment-method-grid h3 {
+  margin: 14px 0 8px;
+  font-size: 19px;
+}
+
+.installment-method-grid p,
+.installment-method-grid li {
+  color: #5f6672;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.installment-method-grid ul {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  text-align: left;
+}
+
+.installment-method-grid li {
+  position: relative;
+  padding-left: 17px;
+}
+
+.installment-method-grid li::before {
+  content: '✓';
+  position: absolute;
+  left: 0;
+  color: #16a34a;
+  font-weight: 800;
+}
+
+.installment-method-grid a {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  margin-top: auto;
+  padding: 0 15px;
+  border-radius: 8px;
+  background: #d70018;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.installment-process-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.installment-process-grid article {
+  position: relative;
+  min-height: 245px;
+  padding: 20px 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fff;
+  text-align: center;
+}
+
+.installment-process-grid article > span {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 50%;
+  background: #d70018;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.installment-process-grid img {
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+}
+
+.installment-process-grid h3 {
+  margin: 12px 0 7px;
+  font-size: 15px;
+}
+
+.installment-process-grid p {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.installment-process-grid b {
+  position: absolute;
+  top: 50%;
+  right: -13px;
+  z-index: 2;
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid #fecdd3;
+  border-radius: 50%;
+  background: #fff;
+  color: #d70018;
+  font-size: 23px;
+  transform: translateY(-50%);
+}
+
+.installment-student-section {
+  display: grid;
+  grid-template-columns: .9fr 1.1fr;
+  min-height: 290px;
+  background: linear-gradient(135deg, #fff1f2, #fff);
+}
+
+.installment-student-copy {
+  display: flex;
+  justify-content: center;
+  flex-direction: column;
+  padding: 30px;
+}
+
+.installment-student-copy > span {
+  color: #d70018;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: .1em;
+}
+
+.installment-student-copy h2 {
+  margin: 8px 0 10px;
+  font-size: 28px;
+  line-height: 1.22;
+}
+
+.installment-student-copy p {
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.installment-student-copy > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 17px;
+}
+
+.installment-student-copy a {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px;
+  border: 1px solid #d70018;
+  border-radius: 8px;
+  background: #d70018;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.installment-student-copy a + a {
+  background: #fff;
+  color: #d70018;
+}
+
+.installment-student-section > img {
+  width: 100%;
+  height: 100%;
+  min-height: 290px;
+  object-fit: cover;
+}
+
+.installment-product-title-image {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 15px;
+}
+
+.installment-product-title-image img {
+  width: auto;
+  max-width: min(100%, 800px);
+  max-height: 78px;
+  object-fit: contain;
+}
+
+.installment-category-tabs,
+.installment-brand-strip,
+.installment-sort-row {
+  display: flex;
+  gap: 9px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  scrollbar-width: thin;
+}
+
+.installment-category-tabs {
+  justify-content: center;
+  margin-bottom: 13px;
+}
+
+.installment-category-tabs button,
+.installment-sort-row button,
+.installment-brand-strip button {
+  flex: 0 0 auto;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+  transition: border-color .18s ease, background .18s ease, color .18s ease;
+}
+
+.installment-category-tabs button {
+  min-height: 38px;
+  padding: 0 18px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.installment-category-tabs button:hover,
+.installment-category-tabs button.active,
+.installment-sort-row button:hover,
+.installment-sort-row button.active,
+.installment-brand-strip button:hover,
+.installment-brand-strip button.active {
+  border-color: #d70018;
+  background: #fff5f6;
+  color: #d70018;
+}
+
+.installment-brand-strip {
+  margin-bottom: 13px;
+}
+
+.installment-brand-strip button {
+  display: grid;
+  width: 88px;
+  height: 48px;
+  place-items: center;
+  padding: 6px;
+  border-radius: 8px;
+}
+
+.installment-brand-strip button span {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.installment-brand-strip img {
+  width: 100%;
+  max-width: 74px;
+  max-height: 31px;
+  object-fit: contain;
+}
+
+.installment-sort-row {
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.installment-sort-row strong {
+  flex: 0 0 auto;
+  font-size: 13px;
+}
+
+.installment-sort-row button {
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.installment-sort-row a {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: #d70018;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.installment-product-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.installment-product-grid .product-card {
+  min-width: 0;
+  border: 1px solid #edf0f3;
+}
+
+.installment-empty-products {
+  display: grid;
+  min-height: 160px;
+  place-items: center;
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.installment-article {
+  position: relative;
+  max-height: 700px;
+  padding-bottom: 64px;
+}
+
+.installment-article.expanded { max-height: none; }
+
+.installment-article::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 105px;
+  background: linear-gradient(transparent, #fff 58%);
+  pointer-events: none;
+}
+
+.installment-article.expanded::after {
+  height: 58px;
+  background: linear-gradient(transparent, #fff 90%);
+}
+
+.installment-article img {
+  display: block;
+  width: min(760px, 100%);
+  margin: 16px auto;
+  border-radius: 9px;
+}
+
+.installment-article h2 {
+  margin: 20px 0 8px;
+  font-size: 20px;
+}
+
+.installment-article p,
+.installment-article li {
+  color: #46505c;
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+.installment-article ul {
+  display: grid;
+  gap: 6px;
+  padding-left: 21px;
+}
+
+.installment-article-extra { display: none; }
+.installment-article.expanded .installment-article-extra { display: block; }
+
+.installment-article > button {
+  position: absolute;
+  right: 50%;
+  bottom: 14px;
+  z-index: 2;
+  min-width: 128px;
+  height: 36px;
+  border: 1px solid #d70018;
+  border-radius: 8px;
+  background: #fff;
+  color: #d70018;
+  font-size: 12px;
+  font-weight: 750;
+  transform: translateX(50%);
+}
+
+.installment-faq-section > div {
+  display: grid;
+  gap: 9px;
+}
+
+.installment-faq-section article {
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  border-radius: 9px;
+}
+
+.installment-faq-section article > button {
+  display: flex;
+  width: 100%;
+  min-height: 52px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  padding: 0 15px;
+  background: #fff;
+  color: #1f2937;
+  font-size: 13px;
+  font-weight: 750;
+  text-align: left;
+}
+
+.installment-faq-section article b {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  place-items: center;
+  border-radius: 50%;
+  background: #fff1f2;
+  color: #d70018;
+  font-size: 18px;
+}
+
+.installment-faq-section article > div {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows .22s ease;
+}
+
+.installment-faq-section article > div p {
+  min-height: 0;
+  overflow: hidden;
+  padding: 0 15px;
+  color: #5f6672;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.installment-faq-section article.open {
+  border-color: #fda4af;
+}
+
+.installment-faq-section article.open > div { grid-template-rows: 1fr; }
+.installment-faq-section article.open > div p { padding-bottom: 14px; }
+
+.installment-faq-section > a {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  margin-top: 14px;
+  padding: 0 16px;
+  border-radius: 8px;
+  background: #d70018;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+@media (max-width: 1100px) {
+  .installment-product-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (max-width: 900px) {
+  .installment-method-grid { grid-template-columns: 1fr; }
+  .installment-method-grid article { min-height: 0; }
+  .installment-process-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .installment-process-grid article:nth-child(2) b { display: none; }
+  .installment-student-section { grid-template-columns: 1fr; }
+  .installment-student-section > img { min-height: 0; max-height: 320px; }
+  .installment-product-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 640px) {
+  .installment-container { gap: 12px; padding-top: 6px; }
+  .installment-container > h1 { font-size: 21px; }
+  .installment-section,
+  .installment-article,
+  .installment-faq-section { padding: 14px; border-radius: 10px; }
+  .installment-section > h2,
+  .installment-faq-section > h2 { font-size: 19px; }
+  .installment-hero { border-radius: 10px; }
+  .installment-method-grid article { padding: 17px 15px; }
+  .installment-process-grid { grid-template-columns: 1fr; }
+  .installment-process-grid b { display: none; }
+  .installment-process-grid article { min-height: 215px; }
+  .installment-student-copy { padding: 20px 16px; }
+  .installment-student-copy h2 { font-size: 22px; }
+  .installment-category-tabs { justify-content: flex-start; }
+  .installment-category-tabs button { min-height: 34px; padding: 0 13px; font-size: 11px; }
+  .installment-brand-strip button { width: 74px; height: 42px; }
+  .installment-sort-row a { margin-left: 0; }
+  .installment-product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .installment-article { max-height: 660px; }
+  .installment-article h2 { font-size: 17px; }
+  .installment-article p,
+  .installment-article li { font-size: 13px; }
+}

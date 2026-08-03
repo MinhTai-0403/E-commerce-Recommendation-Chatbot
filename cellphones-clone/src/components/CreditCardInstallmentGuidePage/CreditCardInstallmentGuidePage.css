@@ -1,0 +1,549 @@
+.credit-installment-page {
+  min-height: 100vh;
+  padding: 12px 0 36px;
+  background: #f4f5f6;
+  color: #111;
+}
+
+.credit-installment-container {
+  max-width: 1200px;
+}
+
+.credit-installment-breadcrumb {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 8px;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.credit-installment-breadcrumb a:hover { color: #d70018; }
+
+.credit-installment-article,
+.credit-installment-faq {
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, .05);
+}
+
+.credit-installment-article {
+  padding: 0 32px 30px;
+}
+
+.credit-installment-hero {
+  display: block;
+  width: calc(100% + 64px);
+  max-height: 430px;
+  margin: 0 -32px 25px;
+  object-fit: cover;
+}
+
+.credit-installment-article > h1 {
+  margin: 0 0 18px;
+  font-size: 25px;
+  font-weight: 800;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.credit-installment-intro {
+  margin-bottom: 24px;
+  padding: 15px 17px;
+  border: 1px solid #fecdd3;
+  border-left: 4px solid #d70018;
+  border-radius: 7px;
+  background: #fff7f8;
+}
+
+.credit-installment-intro strong {
+  display: block;
+  margin-bottom: 5px;
+  color: #d70018;
+  font-size: 14px;
+}
+
+.credit-installment-intro p,
+.credit-installment-article p,
+.credit-installment-article li,
+.credit-installment-table-wrap th,
+.credit-installment-table-wrap td {
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.credit-installment-intro p,
+.credit-installment-article p {
+  margin: 0;
+}
+
+.credit-installment-article > section + section {
+  margin-top: 27px;
+}
+
+.credit-installment-article section > h2 {
+  margin: 0 0 13px;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.credit-installment-article section > h3,
+.credit-installment-bank-box h3,
+.credit-installment-online-guide h3 {
+  margin: 15px 0 8px;
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.credit-installment-method-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 11px;
+  margin: 12px 0 17px;
+}
+
+.credit-installment-method-grid article {
+  position: relative;
+  min-height: 155px;
+  padding: 18px;
+  border: 1px solid #e1e4e8;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #fff, #fafafa);
+}
+
+.credit-installment-method-grid article > span {
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  margin-bottom: 11px;
+  border-radius: 50%;
+  background: #d70018;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.credit-installment-method-grid h4 {
+  margin: 0 0 7px;
+  font-size: 15px;
+}
+
+.credit-installment-method-grid p {
+  color: #555;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.credit-installment-bank-box {
+  margin: 13px 0 18px;
+  padding: 15px;
+  border: 1px solid #e5e7eb;
+  border-radius: 7px;
+  background: #fafafa;
+}
+
+.credit-installment-bank-box h3 { margin-top: 0; }
+.credit-installment-bank-box p { color: #4b5563; }
+
+.credit-installment-bank-box img {
+  display: block;
+  width: min(100%, 1000px);
+  margin: 14px auto 0;
+  border-radius: 5px;
+  background: #fff;
+  object-fit: contain;
+}
+
+.credit-installment-list {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.credit-installment-list li {
+  position: relative;
+  padding-left: 19px;
+}
+
+.credit-installment-list li::before {
+  content: '+';
+  position: absolute;
+  left: 2px;
+  color: #d70018;
+  font-weight: 800;
+}
+
+.credit-installment-three-zero {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0 16px;
+}
+
+.credit-installment-three-zero > div {
+  display: grid;
+  min-height: 92px;
+  place-items: center;
+  align-content: center;
+  gap: 2px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #d70018, #ef3340);
+  color: #fff;
+}
+
+.credit-installment-three-zero strong {
+  font-size: 27px;
+  line-height: 1;
+}
+
+.credit-installment-three-zero span {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.credit-installment-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  margin: 14px 0 16px;
+}
+
+.credit-installment-table-wrap table {
+  width: 100%;
+  min-width: 920px;
+  border-collapse: collapse;
+  background: #fff;
+}
+
+.credit-installment-table-wrap th,
+.credit-installment-table-wrap td {
+  padding: 11px 12px;
+  border: 1px solid #cfd3d8;
+  vertical-align: top;
+  text-align: left;
+}
+
+.credit-installment-table-wrap th {
+  background: #ededed;
+  font-weight: 800;
+  text-align: center;
+}
+
+.credit-installment-table-wrap td:first-child {
+  width: 20%;
+  font-weight: 750;
+}
+
+.credit-installment-table-wrap td:nth-child(2) { width: 43%; }
+.credit-installment-table-wrap td:last-child { white-space: nowrap; text-align: center; }
+
+.credit-installment-channel-note {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.credit-installment-channel-note > div {
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 7px;
+}
+
+.credit-installment-channel-note strong {
+  color: #d70018;
+  font-size: 14px;
+}
+
+.credit-installment-channel-note span {
+  color: #555;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.credit-installment-program-image {
+  display: block;
+  width: min(100%, 980px);
+  margin: 15px auto 0;
+  border: 1px solid #eee;
+  border-radius: 6px;
+  object-fit: contain;
+}
+
+.credit-installment-process {
+  display: grid;
+  gap: 10px;
+}
+
+.credit-installment-process article {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 13px;
+  padding: 15px;
+  border: 1px solid #e3e5e8;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.credit-installment-process article > span {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 50%;
+  background: #d70018;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 850;
+}
+
+.credit-installment-process h3 {
+  margin: 0 0 5px;
+  font-size: 15px;
+}
+
+.credit-installment-process p {
+  color: #555;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.credit-installment-warning {
+  margin-top: 13px;
+  padding: 14px 16px;
+  border-left: 4px solid #f59e0b;
+  border-radius: 6px;
+  background: #fffbeb;
+}
+
+.credit-installment-warning > strong {
+  font-size: 14px;
+}
+
+.credit-installment-online-guide {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #eef6ff, #fff);
+}
+
+.credit-installment-online-guide span {
+  color: #0369a1;
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: .1em;
+}
+
+.credit-installment-online-guide h3 {
+  margin: 6px 0 6px;
+}
+
+.credit-installment-online-guide p {
+  color: #555;
+  font-size: 13px;
+}
+
+.credit-installment-online-guide a {
+  display: inline-flex;
+  min-height: 40px;
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 0 15px;
+  border-radius: 7px;
+  background: #d70018;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.credit-installment-vat-note {
+  padding: 13px 15px;
+  border: 1px solid #fecaca;
+  border-radius: 7px;
+  background: #fef2f2;
+  color: #991b1b;
+  font-weight: 700;
+}
+
+.credit-installment-faq {
+  margin-top: 18px;
+  padding: 24px 28px 28px;
+}
+
+.credit-installment-faq > h2 {
+  margin: 0 0 15px;
+  font-size: 22px;
+}
+
+.credit-installment-faq-head {
+  display: flex;
+  align-items: center;
+  gap: 17px;
+  padding: 15px 17px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.credit-installment-faq-head img {
+  width: 88px;
+  height: 88px;
+  flex: 0 0 88px;
+  object-fit: contain;
+}
+
+.credit-installment-faq-head h3 {
+  margin: 0 0 6px;
+  font-size: 17px;
+}
+
+.credit-installment-faq-head p {
+  margin: 0;
+  color: #666;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.credit-installment-faq form {
+  display: grid;
+  gap: 10px;
+  margin-top: 13px;
+}
+
+.credit-installment-faq textarea {
+  width: 100%;
+  min-height: 105px;
+  resize: vertical;
+  padding: 12px 14px;
+  border: 1px solid #cfd3d8;
+  border-radius: 6px;
+  outline: none;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.credit-installment-faq textarea:focus {
+  border-color: #d70018;
+  box-shadow: 0 0 0 3px rgba(215, 0, 24, .08);
+}
+
+.credit-installment-faq form > button {
+  justify-self: end;
+  min-width: 116px;
+  height: 39px;
+  border: 0;
+  border-radius: 6px;
+  background: #d70018;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.credit-installment-success {
+  margin: 8px 0 0;
+  color: #15803d;
+  font-size: 13px;
+}
+
+.credit-installment-faq-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.credit-installment-faq-list article {
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.credit-installment-faq-list article > button {
+  display: flex;
+  width: 100%;
+  min-height: 50px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 14px;
+  border: 0;
+  background: #fff;
+  color: #222;
+  font-size: 13px;
+  font-weight: 750;
+  text-align: left;
+}
+
+.credit-installment-faq-list b {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  place-items: center;
+  border-radius: 50%;
+  background: #fff1f2;
+  color: #d70018;
+  font-size: 18px;
+}
+
+.credit-installment-faq-list article > div {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows .2s ease;
+}
+
+.credit-installment-faq-list article > div p {
+  min-height: 0;
+  overflow: hidden;
+  margin: 0;
+  padding: 0 14px;
+  color: #555;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.credit-installment-faq-list article.open {
+  border-color: #fda4af;
+}
+
+.credit-installment-faq-list article.open > div { grid-template-rows: 1fr; }
+.credit-installment-faq-list article.open > div p { padding-bottom: 14px; }
+
+@media (max-width: 900px) {
+  .credit-installment-method-grid { grid-template-columns: 1fr; }
+  .credit-installment-channel-note { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 640px) {
+  .credit-installment-page { padding-top: 7px; }
+  .credit-installment-breadcrumb { font-size: 11px; }
+  .credit-installment-article,
+  .credit-installment-faq { border-radius: 6px; }
+  .credit-installment-article { padding: 0 16px 22px; }
+  .credit-installment-hero { width: calc(100% + 32px); margin: 0 -16px 20px; }
+  .credit-installment-article > h1 { font-size: 21px; }
+  .credit-installment-article section > h2 { font-size: 16px; }
+  .credit-installment-intro p,
+  .credit-installment-article p,
+  .credit-installment-article li,
+  .credit-installment-table-wrap th,
+  .credit-installment-table-wrap td { font-size: 13px; }
+  .credit-installment-three-zero { grid-template-columns: 1fr; }
+  .credit-installment-three-zero > div { min-height: 76px; }
+  .credit-installment-online-guide { align-items: flex-start; flex-direction: column; }
+  .credit-installment-process article { grid-template-columns: 34px minmax(0, 1fr); }
+  .credit-installment-process article > span { width: 34px; height: 34px; }
+  .credit-installment-faq { padding: 18px 16px 23px; }
+  .credit-installment-faq-head { align-items: flex-start; }
+  .credit-installment-faq-head img { width: 68px; height: 68px; flex-basis: 68px; }
+}

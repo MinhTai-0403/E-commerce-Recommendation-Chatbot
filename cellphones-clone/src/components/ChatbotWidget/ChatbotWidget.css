@@ -672,10 +672,21 @@
   cursor: not-allowed;
 }
 
+@media (min-width: 641px) and (max-width: 1023px) {
+  .chatbot-launcher {
+    bottom: 78px;
+  }
+
+  .chatbot-panel {
+    bottom: 142px;
+    height: min(610px, calc(100vh - 158px));
+  }
+}
+
 @media (max-width: 640px) {
   .chatbot-launcher {
     right: 70px;
-    bottom: 14px;
+    bottom: 76px;
     width: 54px;
     height: 54px;
   }
@@ -687,9 +698,9 @@
 
   .chatbot-panel {
     right: 10px;
-    bottom: 78px;
+    bottom: 140px;
     width: calc(100vw - 20px);
-    height: min(610px, calc(100vh - 94px));
+    height: min(610px, calc(100vh - 156px));
     border-radius: 16px;
   }
 
@@ -705,7 +716,7 @@
 
   .chatbot-panel {
     right: 8px;
-    bottom: 76px;
+    bottom: 138px;
     width: calc(100vw - 16px);
   }
 
