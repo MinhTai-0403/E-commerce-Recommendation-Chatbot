@@ -26,27 +26,32 @@ async function adminRequest(path, options = {}) {
     credentials: 'include',
     headers: createAdminHeaders(options.body ? { 'Content-Type': 'application/json' } : {}),
     body: options.body ? JSON.stringify(options.body) : undefined,
+    signal: options.signal,
   });
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload.ok === false) {
-    throw new Error(getErrorMessage(payload, `Admin API lỗi ${response.status}`));
+    const error = new Error(getErrorMessage(payload, `Admin API lỗi ${response.status}`));
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
   }
 
   return payload;
 }
 
-export async function fetchAdminSummary() {
-  const payload = await adminRequest('/api/admin/summary');
+export async function fetchAdminSummary(signal) {
+  const payload = await adminRequest('/api/admin/summary', { signal });
   return payload.data;
 }
 
-export async function fetchAdminBusinessVerifications(params = {}) {
+export async function fetchAdminBusinessVerifications(params = {}, signal) {
   const payload = await adminRequest('/api/admin/business-verifications', {
     params: {
       limit: 50,
       ...params,
     },
+    signal,
   });
   return payload;
 }
@@ -59,8 +64,8 @@ export async function updateAdminBusinessVerification(userId, body) {
   return payload.data;
 }
 
-export async function fetchAdminUsers(params = {}) {
-  const payload = await adminRequest('/api/admin/users', { params });
+export async function fetchAdminUsers(params = {}, signal) {
+  const payload = await adminRequest('/api/admin/users', { params, signal });
   return payload;
 }
 
@@ -79,12 +84,13 @@ export async function deleteAdminUser(userId) {
   return payload.deleted;
 }
 
-export async function fetchAdminOrders(params = {}) {
+export async function fetchAdminOrders(params = {}, signal) {
   const payload = await adminRequest('/api/admin/orders', {
     params: {
       limit: 50,
       ...params,
     },
+    signal,
   });
   return payload;
 }
@@ -97,7 +103,7 @@ export async function updateAdminOrder(orderId, body) {
   return payload.data;
 }
 
-export async function fetchAdminProducts(params = {}) {
+export async function fetchAdminProducts(params = {}, signal) {
   const payload = await adminRequest('/api/products', {
     params: {
       source: 'all',
@@ -105,6 +111,7 @@ export async function fetchAdminProducts(params = {}) {
       sort: 'latest',
       ...params,
     },
+    signal,
   });
   return payload;
 }
@@ -132,12 +139,13 @@ export async function deleteAdminProduct(identifier) {
   return payload.deleted;
 }
 
-export async function fetchAdminReviews(params = {}) {
+export async function fetchAdminReviews(params = {}, signal) {
   const payload = await adminRequest('/api/admin/reviews', {
     params: {
       limit: 50,
       ...params,
     },
+    signal,
   });
   return payload;
 }
@@ -157,12 +165,13 @@ export async function deleteAdminReview(reviewId) {
   return payload.deleted;
 }
 
-export async function fetchAdminQuestions(params = {}) {
+export async function fetchAdminQuestions(params = {}, signal) {
   const payload = await adminRequest('/api/admin/questions', {
     params: {
       limit: 50,
       ...params,
     },
+    signal,
   });
   return payload;
 }
@@ -182,12 +191,13 @@ export async function deleteAdminQuestion(questionId) {
   return payload.deleted;
 }
 
-export async function fetchAdminCoupons(params = {}) {
+export async function fetchAdminCoupons(params = {}, signal) {
   const payload = await adminRequest('/api/admin/coupons', {
     params: {
       limit: 50,
       ...params,
     },
+    signal,
   });
   return payload;
 }
@@ -215,22 +225,24 @@ export async function deleteAdminCoupon(couponId) {
   return payload.deleted;
 }
 
-export async function fetchAdminAuditLogs(params = {}) {
+export async function fetchAdminAuditLogs(params = {}, signal) {
   const payload = await adminRequest('/api/admin/audit-logs', {
     params: {
       limit: 50,
       ...params,
     },
+    signal,
   });
   return payload;
 }
 
-export async function fetchAdminInventory(params = {}) {
+export async function fetchAdminInventory(params = {}, signal) {
   const payload = await adminRequest('/api/admin/inventory', {
     params: {
       limit: 50,
       ...params,
     },
+    signal,
   });
   return payload;
 }
@@ -309,8 +321,8 @@ export async function deleteAdminShipment(identifier) {
   return payload.deleted;
 }
 
-export async function fetchAdminRevenue(params = {}) {
-  const payload = await adminRequest('/api/admin/revenue', { params });
+export async function fetchAdminRevenue(params = {}, signal) {
+  const payload = await adminRequest('/api/admin/revenue', { params, signal });
   return payload;
 }
 
@@ -318,12 +330,13 @@ export function buildAdminExportUrl(target = 'orders', params = {}) {
   return buildApiUrl(`/api/admin/export/${encodeURIComponent(target)}.csv`, params);
 }
 
-export async function fetchAdminReturns(params = {}) {
+export async function fetchAdminReturns(params = {}, signal) {
   const payload = await adminRequest('/api/admin/returns', {
     params: {
       limit: 50,
       ...params,
     },
+    signal,
   });
   return payload;
 }
@@ -343,12 +356,13 @@ export async function deleteAdminReturn(returnId) {
   return payload.deleted;
 }
 
-export async function fetchAdminSupportRequests(params = {}) {
+export async function fetchAdminSupportRequests(params = {}, signal) {
   const payload = await adminRequest('/api/admin/support-requests', {
     params: {
       limit: 50,
       ...params,
     },
+    signal,
   });
   return payload;
 }

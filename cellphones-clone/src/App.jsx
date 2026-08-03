@@ -38,6 +38,12 @@ const CheckoutPage = lazy(() => import('./components/CheckoutPage/CheckoutPage')
 const SmemberAccount = lazy(() => import('./components/SmemberAccount/SmemberAccount'));
 const InfoPage = lazy(() => import('./components/InfoPage/InfoPage'));
 const StoreLocator = lazy(() => import('./components/StoreLocator/StoreLocator'));
+const TradeInPage = lazy(() => import('./components/TradeInPage/TradeInPage'));
+const PromotionsPage = lazy(() => import('./components/PromotionsPage/PromotionsPage'));
+const FooterPages = lazy(() => import('./components/FooterPages/FooterPages'));
+const ShippingPolicyPage = lazy(() => import('./components/ShippingPolicyPage/ShippingPolicyPage'));
+const InstallmentPage = lazy(() => import('./components/InstallmentPage/InstallmentPage'));
+const CreditCardInstallmentGuidePage = lazy(() => import('./components/CreditCardInstallmentGuidePage/CreditCardInstallmentGuidePage'));
 const NotFoundPage = lazy(() => import('./components/NotFoundPage/NotFoundPage'));
 
 const homeProductQueries = {
@@ -548,11 +554,9 @@ function App() {
     activePopup,
     currentUser,
     filteredProvinces,
-    goAccount,
     goLogin,
     goRegister,
     handleCloseAllPopups,
-    handleLogout,
     locationSearch,
     selectedLocation,
     setLocationSearch,
@@ -697,6 +701,195 @@ function App() {
         />
         <main className="main-content store-locator-main">
           <StoreLocator initialCity={selectedLocation} />
+        </main>
+        <Footer />
+        <FloatingActions />
+        <HeaderPopups {...headerPopupProps} />
+        <ChatbotWidget
+          userName={
+            currentUser?.fullName
+            || currentUser?.displayName
+            || currentUser?.name
+            || currentUser?.username
+            || ''
+          }
+        />
+      </div>
+    );
+  }
+
+  if (currentPage === 'trade-in') {
+    return (
+      <div className="app">
+        <TopBar />
+        <MainHeader
+          activePopup={activePopup}
+          setActivePopup={setActivePopup}
+          selectedLocation={selectedLocation}
+          currentUser={currentUser}
+          cartCount={cartState.count}
+          onGoCart={goCart}
+        />
+        <main className="main-content tradein-main-shell">
+          <TradeInPage />
+        </main>
+        <Footer />
+        <FloatingActions />
+        <HeaderPopups {...headerPopupProps} />
+        <ChatbotWidget
+          userName={
+            currentUser?.fullName
+            || currentUser?.displayName
+            || currentUser?.name
+            || currentUser?.username
+            || ''
+          }
+        />
+      </div>
+    );
+  }
+
+  if (currentPage === 'promotions') {
+    return (
+      <div className="app">
+        <TopBar />
+        <MainHeader
+          activePopup={activePopup}
+          setActivePopup={setActivePopup}
+          selectedLocation={selectedLocation}
+          currentUser={currentUser}
+          cartCount={cartState.count}
+          onGoCart={goCart}
+        />
+        <main className="main-content promotions-main-shell">
+          <PromotionsPage />
+        </main>
+        <Footer />
+        <FloatingActions />
+        <HeaderPopups {...headerPopupProps} />
+        <ChatbotWidget
+          userName={
+            currentUser?.fullName
+            || currentUser?.displayName
+            || currentUser?.name
+            || currentUser?.username
+            || ''
+          }
+        />
+      </div>
+    );
+  }
+
+  if (currentPage === 'credit-card-installment-guide') {
+    return (
+      <div className="app">
+        <TopBar />
+        <MainHeader
+          activePopup={activePopup}
+          setActivePopup={setActivePopup}
+          selectedLocation={selectedLocation}
+          currentUser={currentUser}
+          cartCount={cartState.count}
+          onGoCart={goCart}
+        />
+        <main className="main-content credit-card-installment-main-shell">
+          <CreditCardInstallmentGuidePage />
+        </main>
+        <Footer />
+        <FloatingActions />
+        <HeaderPopups {...headerPopupProps} />
+        <ChatbotWidget
+          userName={
+            currentUser?.fullName
+            || currentUser?.displayName
+            || currentUser?.name
+            || currentUser?.username
+            || ''
+          }
+        />
+      </div>
+    );
+  }
+
+  if (currentPage === 'installment') {
+    return (
+      <div className="app">
+        <TopBar />
+        <MainHeader
+          activePopup={activePopup}
+          setActivePopup={setActivePopup}
+          selectedLocation={selectedLocation}
+          currentUser={currentUser}
+          cartCount={cartState.count}
+          onGoCart={goCart}
+        />
+        <main className="main-content installment-main-shell">
+          <InstallmentPage />
+        </main>
+        <Footer />
+        <FloatingActions />
+        <HeaderPopups {...headerPopupProps} />
+        <ChatbotWidget
+          userName={
+            currentUser?.fullName
+            || currentUser?.displayName
+            || currentUser?.name
+            || currentUser?.username
+            || ''
+          }
+        />
+      </div>
+    );
+  }
+
+  if (currentPage === 'shipping-policy') {
+    return (
+      <div className="app">
+        <TopBar />
+        <MainHeader
+          activePopup={activePopup}
+          setActivePopup={setActivePopup}
+          selectedLocation={selectedLocation}
+          currentUser={currentUser}
+          cartCount={cartState.count}
+          onGoCart={goCart}
+        />
+        <main className="main-content shipping-policy-main-shell">
+          <ShippingPolicyPage />
+        </main>
+        <Footer />
+        <FloatingActions />
+        <HeaderPopups {...headerPopupProps} />
+        <ChatbotWidget
+          userName={
+            currentUser?.fullName
+            || currentUser?.displayName
+            || currentUser?.name
+            || currentUser?.username
+            || ''
+          }
+        />
+      </div>
+    );
+  }
+
+  if (currentPage === 'footer-pages') {
+    return (
+      <div className="app">
+        <TopBar />
+        <MainHeader
+          activePopup={activePopup}
+          setActivePopup={setActivePopup}
+          selectedLocation={selectedLocation}
+          currentUser={currentUser}
+          cartCount={cartState.count}
+          onGoCart={goCart}
+        />
+        <main className="main-content footer-pages-main-shell">
+          <FooterPages
+            pathname={currentLocation.pathname}
+            search={currentLocation.search}
+          />
         </main>
         <Footer />
         <FloatingActions />

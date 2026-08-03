@@ -88,6 +88,7 @@ const rootProfile = ({
   path,
   department,
   category,
+  apiCategory = category,
   title,
   seoTitle,
   banners,
@@ -105,6 +106,7 @@ const rootProfile = ({
   path,
   department,
   category,
+  apiCategory,
   title,
   seoTitle,
   banners,
@@ -155,6 +157,15 @@ const microphoneBrands = [
   card('audio-technica', '/thiet-bi-am-thanh/micro-thu-am.html?brand=audio-technica', logo('wysiwyg/audio-technica.png'), { brand: 'audio-technica' }),
   card('GoChek', '/thiet-bi-am-thanh/micro-thu-am/gochek.html', logo('wysiwyg/logo-gocheck-new.png'), { brand: 'gochek' }),
   card('HOLLYLAND', '/thiet-bi-am-thanh/micro-thu-am/hollyland.html', '', { brand: 'hollyland' }),
+];
+
+const karaokeMicrophoneBrands = [
+  card('Acnos', '/thiet-bi-am-thanh/micro.html?brand=acnos', logo('catalog/product/l/o/logo-brand-acnos.png'), { brand: 'acnos' }),
+  card('Alpha Works', '/thiet-bi-am-thanh/micro.html?brand=alpha-works', logo('catalog/product/b/r/brand-icon-alpha-works.png'), { brand: 'alpha-works' }),
+  card('Sony', '/thiet-bi-am-thanh/micro.html?brand=sony', logo('catalog/product/b/r/brand-icon-sony_2.png'), { brand: 'sony' }),
+  card('Shure', '/thiet-bi-am-thanh/micro.html?brand=shure', logo('wysiwyg/Shure-new.png'), { brand: 'shure' }),
+  card('Paramax', '/thiet-bi-am-thanh/micro.html?brand=paramax', logo('wysiwyg/Logo/paramax.png'), { brand: 'paramax' }),
+  card('JBL', '/thiet-bi-am-thanh/micro.html?brand=jbl', logo('wysiwyg/Web/Brand/JBL-240x50.png'), { brand: 'jbl' }),
 ];
 
 const headphoneBrands = [
@@ -342,7 +353,7 @@ const laptopProfile = rootProfile({
       card('Mỏng nhẹ', '/laptop/mong-nhe.html', media('image_6__1.png'), { usage: 'Mỏng nhẹ' }),
       card('Đồ họa - kỹ thuật', '/laptop/do-hoa.html', media('image_1__4.png'), { usage: 'Đồ họa - Kỹ thuật' }),
       card('Sinh viên', '/laptop/sinh-vien.html', media('image_2__4.png'), { q: 'Laptop sinh viên' }),
-      card('Cảm ứng', '/laptop/cam-ung.html', media('image_4__4.png'), { special: 'Cảm ứng' }),
+      card('Cảm ứng', '/laptop/cam-ung.html', media('image_4__4.png'), { q: 'Laptop Flip|Surface Pro|Laptop cảm ứng|Touchscreen' }),
       card('Laptop AI', '/laptop/ai.html', media('image_5__3.png'), { special: 'AI tích hợp' }),
     ],
   },
@@ -367,10 +378,11 @@ const audioProfile = rootProfile({
     title: 'Chọn loại sản phẩm',
     items: [
       card('Tai nghe', '/thiet-bi-am-thanh/tai-nghe.html', 'https://cdn2.cellphones.com.vn/insecure/rs:fill:150:150/q:100/plain/https://cellphones.com.vn/media/wysiwyg/chup-taii.png', { q: 'Tai nghe' }),
-      card('Loa', '/thiet-bi-am-thanh.html?q=Loa&title=Loa', 'https://cdn2.cellphones.com.vn/insecure/rs:fill:150:150/q:100/plain/https://cellphones.com.vn/media/wysiwyg/loa-cate.png', { q: 'Loa' }),
+      card('Tai nghe không dây', '/thiet-bi-am-thanh/tai-nghe/tai-nghe-bluetooth.html', media('tainghebluetooth.png'), { q: 'Tai nghe Bluetooth' }),
+      card('Loa', '/thiet-bi-am-thanh/loa.html', 'https://cdn2.cellphones.com.vn/insecure/rs:fill:150:150/q:100/plain/https://cellphones.com.vn/media/wysiwyg/loa-cate.png', { q: 'Loa' }),
       card('Mic thu âm', '/thiet-bi-am-thanh/micro-thu-am.html', 'https://cdn2.cellphones.com.vn/insecure/rs:fill:150:150/q:100/plain/https://cellphones.com.vn/media/wysiwyg/micthu.png', { q: 'Micro thu âm' }),
-      card('Mic Karaoke', '/thiet-bi-am-thanh.html?q=Mic%20Karaoke', 'https://cdn2.cellphones.com.vn/insecure/rs:fill:150:150/q:100/plain/https://cellphones.com.vn/media/wysiwyg/karaoke.png', { q: 'Mic Karaoke' }),
-      card('Đầu đĩa than', '/thiet-bi-am-thanh.html?q=Đầu%20đĩa%20than', 'https://cdn2.cellphones.com.vn/insecure/rs:fill:150:150/q:100/plain/https://cellphones.com.vn/media/wysiwyg/image-removebg-preview_43_.png', { q: 'Đầu đĩa than' }),
+      card('Mic Karaoke', '/thiet-bi-am-thanh/micro.html', 'https://cdn2.cellphones.com.vn/insecure/rs:fill:150:150/q:100/plain/https://cellphones.com.vn/media/wysiwyg/karaoke.png', { q: 'Mic Karaoke' }),
+      card('Đầu đĩa than', '/thiet-bi-am-thanh/dia-than.html', 'https://cdn2.cellphones.com.vn/insecure/rs:fill:150:150/q:100/plain/https://cellphones.com.vn/media/wysiwyg/image-removebg-preview_43_.png', { q: 'Đầu đĩa than' }),
     ],
   },
   featuredTitle: 'SẢN PHẨM NỔI BẬT',
@@ -436,6 +448,50 @@ const microphoneProfile = rootProfile({
   queryPreset: { q: 'Micro thu âm' },
 });
 
+const karaokeMicrophoneProfile = rootProfile({
+  id: 'catalog-karaoke-microphone',
+  path: '/thiet-bi-am-thanh/micro.html',
+  department: 'karaoke-microphone',
+  category: 'Âm thanh',
+  title: 'Micro không dây và micro Karaoke',
+  seoTitle: 'Micro không dây, micro Karaoke chính hãng, giá tốt',
+  parentPath: '/thiet-bi-am-thanh.html',
+  parentTitle: 'Thiết bị âm thanh',
+  brandLinks: karaokeMicrophoneBrands,
+  featureSection: {
+    title: 'Chọn loại micro',
+    items: [
+      card('Micro không dây', '/thiet-bi-am-thanh/micro.html?q=Micro%20không%20dây', media('image_2__4.png'), { q: 'Micro không dây' }),
+      card('Micro Karaoke', '/thiet-bi-am-thanh/micro.html?q=Micro%20Karaoke', media('karaoke.png'), { q: 'Micro Karaoke' }),
+      card('Micro thu âm', '/thiet-bi-am-thanh/micro-thu-am.html', media('micthu.png'), { q: 'Micro thu âm' }),
+    ],
+  },
+  featuredTitle: 'SẢN PHẨM NỔI BẬT',
+  filterIds: CATALOG_FILTER_IDS.audio,
+  queryPreset: { q: 'Micro không dây' },
+});
+
+const turntableProfile = rootProfile({
+  id: 'catalog-turntable',
+  path: '/thiet-bi-am-thanh/dia-than.html',
+  department: 'turntable',
+  category: 'Âm thanh',
+  title: 'Đầu đĩa than',
+  seoTitle: 'Đầu đĩa than chính hãng, âm thanh analog chất lượng',
+  parentPath: '/thiet-bi-am-thanh.html',
+  parentTitle: 'Thiết bị âm thanh',
+  featureSection: {
+    title: 'Khám phá âm thanh đĩa than',
+    items: [
+      card('Đầu đĩa than', '/thiet-bi-am-thanh/dia-than.html', media('image-removebg-preview_43_.png'), { q: 'Đầu đĩa than' }),
+      card('Phụ kiện đĩa than', '/thiet-bi-am-thanh/dia-than.html?q=Phụ%20kiện%20đĩa%20than', '', { q: 'Phụ kiện đĩa than' }, '♪'),
+    ],
+  },
+  featuredTitle: 'SẢN PHẨM NỔI BẬT',
+  filterIds: CATALOG_FILTER_IDS.audio,
+  queryPreset: { q: 'Đầu đĩa than' },
+});
+
 const speakerProfile = rootProfile({
   id: 'catalog-speaker',
   path: '/thiet-bi-am-thanh/loa.html',
@@ -461,6 +517,7 @@ const speakerProfile = rootProfile({
   },
   featuredTitle: 'SẢN PHẨM NỔI BẬT',
   filterIds: CATALOG_FILTER_IDS.audio,
+  queryPreset: { q: 'Loa' },
 });
 
 const watchProfile = rootProfile({
@@ -478,7 +535,7 @@ const watchProfile = rootProfile({
   featureSection: {
     title: 'Chọn theo nhu cầu',
     items: [
-      card('Tập luyện thể thao', '/do-choi-cong-nghe.html?usage=Tập%20luyện%20thể%20thao', '', { usage: 'Tập luyện thể thao' }, '🏃'),
+      card('Tập luyện thể thao', '/do-choi-cong-nghe.html?q=Đồng%20hồ%20thể%20thao', '', { q: 'Đồng hồ thể thao|Garmin Forerunner' }, '🏃'),
       card('Nghe gọi', '/do-choi-cong-nghe.html?q=Đồng%20hồ%20nghe%20gọi', '', { q: 'Đồng hồ nghe gọi' }, '📞'),
       card('Vòng đeo tay thông minh', '/do-choi-cong-nghe.html?q=Vòng%20đeo%20tay', '', { q: 'Vòng đeo tay thông minh' }, '⌚'),
       card('Định vị trẻ em', '/do-choi-cong-nghe.html?q=Đồng%20hồ%20trẻ%20em', '', { q: 'Đồng hồ định vị trẻ em' }, '🧒'),
@@ -510,7 +567,7 @@ const cameraProfile = rootProfile({
       card('An ninh', '/phu-kien/camera/an-ninh.html', 'https://cdn2.cellphones.com.vn/insecure/rs:fill:150:150/q:100/plain/https://cellphones.com.vn/media/wysiwyg/camera-an-ninh.png', { q: 'Camera an ninh' }),
       card('Action camera', '/phu-kien/camera/action-camera.html', media('camera-action.png'), { q: 'Action camera' }),
       card('Flycam', '/flycam.html', '', { q: 'Flycam' }, '🛸'),
-      card('Máy ảnh', '/may-anh.html', '', { q: 'Máy ảnh' }, '📷'),
+      card('Máy ảnh', '/may-anh.html', '', { category: 'Máy ảnh', categoryMode: 'primary', q: 'Máy ảnh' }, '📷'),
       card('Hành trình', '/phu-kien/camera/hanh-trinh.html', '', { q: 'Camera hành trình' }, '🚗'),
       card('Gimbal', '/phu-kien/camera/gimbal.html', '', { q: 'Gimbal' }, '🎥'),
       card('Tripod', '/phu-kien/camera/tripod.html', '', { q: 'Tripod' }, '🔭'),
@@ -635,17 +692,32 @@ const beautyProfile = rootProfile({
     ],
   },
   filterIds: CATALOG_FILTER_IDS.appliance,
-  queryPreset: { q: 'Máy sấy tóc massage chăm sóc' },
+  queryPreset: {
+    q: [
+      'Máy sấy tóc',
+      'Máy massage',
+      'Máy cạo râu',
+      'Bàn chải điện',
+      'Máy tăm nước',
+      'Máy tạo kiểu tóc',
+      'Máy triệt lông',
+      'Tông đơ cắt tóc',
+      'Máy tỉa lông mũi',
+      'Máy rửa mặt',
+      'Máy đo huyết áp',
+      'Cân sức khỏe',
+    ].join('|'),
+  },
 });
 
 const accessoryItems = [
   ['Phụ kiện Apple', '/phu-kien/apple.html', ''],
-  ['Sạc, cáp', '/phu-kien/sac-dien-thoai.html', '🔌'],
+  ['Sạc, cáp', '/phu-kien/sac-dien-thoai.html', '🔌', { q: 'Sạc cáp' }],
   ['Pin sạc dự phòng', '/phu-kien/pin-du-phong.html', '🔋'],
   ['Bao da, ốp lưng', '/phu-kien/bao-da-op-lung.html', '📱'],
   ['Dán màn hình', '/phu-kien/dan-man-hinh.html', '🛡️'],
   ['Thẻ nhớ, USB', '/phu-kien/the-nho-usb-otg.html', '💾'],
-  ['Sim 4G', '/sim-3g-4g-nghe-goi.html', '📶'],
+  ['Sim 4G', '/sim-3g-4g-nghe-goi.html', '📶', { category: 'Sim 4G', categoryMode: 'primary', q: 'Sim 4G' }],
   ['Gaming Gear, Playstation', '/phu-kien/gaming-gear.html', '🎮'],
   ['Thiết bị mạng', '/phu-kien/thiet-bi-mang.html', '🌐'],
   ['Camera', '/phu-kien/camera.html', '📹'],
@@ -681,7 +753,13 @@ const accessoryProfile = rootProfile({
   featureSection: {
     title: 'Danh mục phụ kiện',
     variant: 'compact',
-    items: accessoryItems.map(([label, href, icon]) => card(label, href, '', { q: label }, icon)),
+    items: accessoryItems.map(([label, href, icon, queryPreset]) => card(
+      label,
+      href,
+      '',
+      queryPreset || { q: label },
+      icon,
+    )),
   },
   promoPanel: {
     title: 'Phụ kiện di động',
@@ -705,9 +783,9 @@ const pcProfile = rootProfile({
     banner('https://cdn2.cellphones.com.vn/insecure/rs:fill:595:100/q:100/plain/https://media-asset.cellphones.com.vn/dashboard-v1/Cate Inteli5.png', 'PC CPS văn phòng Intel', '/may-tinh-de-ban.html?q=Intel'),
   ],
   brandLinks: [
-    card('PC GAMING', '/may-tinh-de-ban.html?usage=Gaming', '', { usage: 'Gaming' }),
-    card('PC HỌC TẬP - VĂN PHÒNG', '/may-tinh-de-ban.html?usage=Học%20tập%20-%20Văn%20phòng', '', { usage: 'Học tập - Văn phòng' }),
-    card('MÁY TÍNH ĐỒ HỌA', '/may-tinh-de-ban.html?usage=Đồ%20họa%20-%20Kỹ%20thuật', '', { usage: 'Đồ họa - Kỹ thuật' }),
+    card('PC GAMING', '/may-tinh-de-ban.html?q=Gaming', '', { q: 'Gaming' }),
+    card('PC HỌC TẬP - VĂN PHÒNG', '/may-tinh-de-ban.html?q=Văn%20phòng', '', { q: 'Văn phòng' }),
+    card('MÁY TÍNH ĐỒ HỌA', '/may-tinh-de-ban.html?q=Đồ%20họa', '', { q: 'Đồ họa' }),
     card('PC AI', '/may-tinh-de-ban.html?special=AI%20tích%20hợp', '', { special: 'AI tích hợp' }),
   ],
   featureSection: {
@@ -808,10 +886,10 @@ const monitorProfile = rootProfile({
   featureSection: {
     title: 'Chọn theo nhu cầu',
     items: [
-      card('Gaming', '/man-hinh/gaming.html', media('image_16.png'), { usage: 'Gaming' }),
-      card('Văn phòng', '/man-hinh/van-phong.html', media('image_2__1.png'), { usage: 'Học tập - Văn phòng' }),
-      card('Đồ họa', '/man-hinh/do-hoa.html', media('image_1__2.png'), { usage: 'Đồ họa - Kỹ thuật' }),
-      card('Màn hình cong', '/man-hinh.html?display=Màn%20hình%20cong', media('Icon/image_4.png'), { display: 'Màn hình cong' }),
+      card('Gaming', '/man-hinh/gaming.html', media('image_16.png'), { q: 'Gaming' }),
+      card('Văn phòng', '/man-hinh/van-phong.html', media('image_2__1.png'), { q: 'Văn phòng' }),
+      card('Đồ họa', '/man-hinh/do-hoa.html', media('image_1__2.png'), { q: 'Đồ họa' }),
+      card('Màn hình cong', '/man-hinh.html?q=Màn%20hình%20cong', media('Icon/image_4.png'), { q: 'Màn hình cong' }),
       card('Màn hình lập trình', '/man-hinh/lap-trinh.html', media('image_3__1.png'), { q: 'Màn hình lập trình' }),
       card('Màn hình di động', '/man-hinh/di-dong.html', media('image_5_.png'), { q: 'Màn hình di động' }),
       card('Arm màn hình', '/man-hinh/gia-treo-man-hinh.html', media('image_4__1.png'), { q: 'Arm màn hình' }),
@@ -865,7 +943,7 @@ const tvProfile = rootProfile({
           { screenSize: `${size} inch` },
         )
       )),
-      card('Tivi cũ', '/hang-cu/tivi.html', media('tivi-cu-cate-new.png'), { q: 'Tivi cũ' }),
+      card('Tivi cũ', '/hang-cu/tivi.html', media('tivi-cu-cate-new.png'), { category: 'Hàng cũ', q: 'Tivi' }),
       card('Giá treo tivi', '/tivi/gia-treo-tivi.html', media('gia-treo-tivi-cate-new.png'), { q: 'Giá treo tivi' }),
     ],
   },
@@ -901,18 +979,6 @@ const refrigeratorProfile = rootProfile({
     title: 'Chọn theo dòng tủ',
     items: [
       card(
-        'Ngăn đá trên',
-        '/tu-lanh.html?tulanh_kieu_tu_filter=ngan-da-tren',
-        media('tu-lanh-ngan-da-tren.png'),
-        { q: 'Tủ lạnh ngăn đá trên' },
-      ),
-      card(
-        'Ngăn đá dưới',
-        '/tu-lanh.html?tulanh_kieu_tu_filter=ngan-da-duoi',
-        media('tu-lanh-ngan-da-duoi.png'),
-        { q: 'Tủ lạnh ngăn đá dưới' },
-      ),
-      card(
         'Nhiều cánh',
         '/tu-lanh.html?tulanh_kieu_tu_filter=nhieu-canh',
         media('tu-lanh-nhieu-canh.png'),
@@ -934,6 +1000,7 @@ const refrigeratorProfile = rootProfile({
   },
   featuredTitle: '🔥 SẢN PHẨM NỔI BẬT',
   filterIds: CATALOG_FILTER_IDS.coldAppliance,
+  queryPreset: { categoryMode: 'primary' },
 });
 
 const washingMachineProfile = rootProfile({
@@ -987,6 +1054,7 @@ const washingMachineProfile = rootProfile({
   },
   featuredTitle: '🔥 SẢN PHẨM NỔI BẬT',
   filterIds: CATALOG_FILTER_IDS.coldAppliance,
+  queryPreset: { categoryMode: 'primary' },
 });
 
 const airConditionerProfile = rootProfile({
@@ -1032,6 +1100,15 @@ const electronicsProfile = rootProfile({
   path: '/dien-may.html',
   department: 'electronics',
   category: 'Điện máy',
+  apiCategory: [
+    'Tivi',
+    'Máy giặt',
+    'Máy sấy quần áo',
+    'Máy rửa bát',
+    'Điều hòa - Máy lạnh',
+    'Tủ lạnh',
+    'Tủ đông',
+  ].join('|'),
   title: 'Điện máy',
   seoTitle: 'Cửa hàng điện máy chính hãng | Giá rẻ, hỗ trợ trả góp 0%',
   banners: [
@@ -1062,6 +1139,7 @@ const electronicsProfile = rootProfile({
     ],
   },
   filterIds: CATALOG_FILTER_IDS.appliance,
+  queryPreset: { categoryMode: 'primary' },
 });
 
 export const CATALOG_LANDING_PROFILES = [
@@ -1070,6 +1148,8 @@ export const CATALOG_LANDING_PROFILES = [
   audioProfile,
   headphoneProfile,
   microphoneProfile,
+  karaokeMicrophoneProfile,
+  turntableProfile,
   speakerProfile,
   watchProfile,
   cameraProfile,

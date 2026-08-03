@@ -66,6 +66,26 @@ export const PHONE_BRANDS = [
     name: "Infinix",
     logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:50/q:30/plain/https://cellphones.com.vn/media/wysiwyg/Web/Brand/Infinix-240x50.png",
   },
+  {
+    name: "Vivo",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:50/q:30/plain/https://cellphones.com.vn/media/wysiwyg/Web/Brand/VIVO-240x50.png",
+  },
+  {
+    name: "OnePlus",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:50/q:30/plain/https://cellphones.com.vn/media/wysiwyg/Web/Brand/ONEPLUS-240x50.png",
+  },
+  {
+    name: "TCL",
+    logo: "https://cdn2.cellphones.com.vn/x/media/wysiwyg/logo-tach-nen-tcl.png",
+  },
+  {
+    name: "benco",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:50/q:30/plain/https://cellphones.com.vn/media/wysiwyg/Web/Brand/benco-240x50.png",
+  },
+  {
+    name: "ASUS",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:50/q:30/plain/https://cellphones.com.vn/media/wysiwyg/Web/Brand/ASUS-240x50.png",
+  },
 ];
 
 // 2. MẢNG DATA LOGO LAPTOP
@@ -124,7 +144,7 @@ export const LAPTOP_BRANDS = [
 export const TABLET_BRANDS = [
   {
     name: "iPad",
-    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:50/q:30/plain/https://cellphones.com.vn/media/wysiwyg/Web/Brand/iPhone-240x50.png",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:50/q:30/plain/https://cellphones.com.vn/media/wysiwyg/Web/Brand/iPad-240x50.png",
   },
   {
     name: "Samsung",
@@ -219,6 +239,66 @@ export const AUDIO_BRANDS = [
     name: "Shokz",
     logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/Web/Brand/shokz-240x50.png",
   },
+  {
+    name: "HyperX",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/Web/Brand/hyperx.png",
+  },
+  {
+    name: "ASUS",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/Web/Brand/ASUS-240x50.png",
+  },
+  {
+    name: "OPPO",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/Web/Brand/Oppo-240x50.png",
+  },
+  {
+    name: "Logitech",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/Web/Brand/Property_1_logitech-240x50.png",
+  },
+  {
+    name: "Bowers & Wilkins",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/Web/Brand/browser_wilkins-240x50.png",
+  },
+  {
+    name: "KZ",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/Web/Brand/kz-240x50.png",
+  },
+  {
+    name: "EarFun",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/Web/Brand/earfun-240x50.png",
+  },
+  {
+    name: "QCY",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/Web/Brand/QCY-240x50.png",
+  },
+  {
+    name: "StarGO",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/Web/Brand/STARGO-240x50.png",
+  },
+  {
+    name: "Philips",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/Web/Brand/PHILLIPS-240x50.png",
+  },
+  {
+    name: "Alpha Works",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/Web/Brand/alphaworks-240x50.png",
+  },
+  {
+    name: "Robot",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/Web/Brand/robotsmartpower-240x50.png",
+  },
+  {
+    name: "GOOJODOQ",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/Web/Brand/GOOJADOO-240x50.png",
+  },
+  {
+    name: "Nakamichi",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/Web/Brand/nakamichi-240x50.png",
+  },
+  {
+    name: "Aukey",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/Web/Brand/aukey-240x50.png",
+  },
 ];
 
 // 5. MẢNG DATA LOGO HÃNG LOA
@@ -270,6 +350,82 @@ export const SPEAKER_BRANDS = [
   {
     name: "Tronsmart",
     logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/catalog/product/b/r/brand-icon-tronsmart.png",
+  },
+  {
+    name: "Xiaomi",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/tmp/catalog/product/f/r/frame_61.png",
+  },
+  {
+    name: "Logitech",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/tmp/catalog/product/l/o/logitech-brand-icon.png",
+  },
+  {
+    name: "HiFuture",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/catalog/product/l/o/logo-brand-hifuture.png",
+  },
+  {
+    name: "Anker",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/catalog/product/b/r/brand-icon-anker.png",
+  },
+  {
+    name: "PARAMAX",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/Logo/paramax.png",
+  },
+  {
+    name: "StarGO",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/stargo.png",
+  },
+  {
+    name: "Havit",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/Web/Brand/HAVIT-240x50.png",
+  },
+  {
+    name: "Robot",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/catalog/product/r/o/robot_2_2.png",
+  },
+  {
+    name: "Dalton",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/dalton_1.png",
+  },
+  {
+    name: "SOUL",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/Icon/loa-soul.png",
+  },
+  {
+    name: "Baseus",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/baseus.png",
+  },
+  {
+    name: "Energizer",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/Icon/Frame_61.png",
+  },
+  {
+    name: "Divoom",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/catalog/product/l/o/logo-brand-divoom.png",
+  },
+  {
+    name: "Beats",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/Icon/beats-logo-cate.png",
+  },
+  {
+    name: "Fender",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/fender.png",
+  },
+  {
+    name: "Nakamichi",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/Brand/nakamichi.png",
+  },
+  {
+    name: "Tribit",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/Logo/tribit-removebg-preview.png",
+  },
+  {
+    name: "KEF",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/Am-thanh/Loa/Logo-cate-loa-kef-240x50.png",
+  },
+  {
+    name: "GOOJODOQ",
+    logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:0/q:1/plain/https://cellphones.com.vn/media/wysiwyg/Web/Brand/GOOJADOO-240x50.png",
   },
 ];
 
@@ -434,5 +590,9 @@ export const APPLIANCE_LOGOS = [
   {
     name: "coocaa",
     logo: "https://cdn2.cellphones.com.vn/insecure/rs:fill:0:50/q:30/plain/https://cellphones.com.vn/media/catalog/product/f/r/frame_85.png",
+  },
+  {
+    name: "VSP",
+    logo: "https://vsp.vn/media/lib/16-05-2025/VSPlogo.png",
   },
 ];

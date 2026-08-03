@@ -105,6 +105,7 @@ let cartIndexesReady = false;
 let orderIndexesReady = false;
 let inventoryIndexesReady = false;
 let couponIndexesReady = false;
+let userVoucherIndexesReady = false;
 let userEventIndexesReady = false;
 let supportRequestIndexesReady = false;
 let returnRequestIndexesReady = false;
@@ -570,6 +571,12 @@ function normalizeBreadcrumbs(product) {
   ];
 }
 
+function isInventoryManagedProduct(product = {}) {
+  // Mặc định mọi sản phẩm đều quản lý tồn kho. Chỉ bỏ theo dõi khi Admin
+  // chủ động lưu manageInventory = false sau đợt backfill dữ liệu hiện tại.
+  return product.manageInventory !== false;
+}
+
 function normalizeProduct(product) {
   if (!product) return null;
 
@@ -589,6 +596,8 @@ function normalizeProduct(product) {
     id: String(product._id || product.id || product.sku || slug),
     mongoId: product._id ? String(product._id) : null,
     source: product.source || "admin",
+    manageInventory: isInventoryManagedProduct(product),
+    inventorySummary: product.inventorySummary || null,
     url: product.url || product.detailUrl || "",
     sku: product.sku || slug,
     slug,
@@ -639,6 +648,91 @@ function normalizeProduct(product) {
     createdAt: product.createdAt,
     updatedAt: product.updatedAt,
   };
+}
+
+async function attachInventorySummaries(inventory, productDocs = []) {
+  const docs = Array.isArray(productDocs) ? productDocs.filter(Boolean) : [];
+  const managedProducts = docs.filter(isInventoryManagedProduct);
+  if (!inventory || !managedProducts.length) return docs;
+
+  const allAliases = uniqueStrings(managedProducts.flatMap((product) => [
+    product?._id ? String(product._id) : "",
+    product.id,
+    product.slug,
+    product.sku,
+  ]));
+  const inventoryRows = allAliases.length
+    ? await inventory.find({
+      $or: [
+        { productId: { $in: allAliases } },
+        { productSlug: { $in: allAliases } },
+        { productSku: { $in: allAliases } },
+        { slug: { $in: allAliases } },
+        { sku: { $in: allAliases } },
+      ],
+    }).toArray()
+    : [];
+
+  return docs.map((product) => {
+    if (!isInventoryManagedProduct(product)) return product;
+
+    const aliases = new Set(uniqueStrings([
+      product?._id ? String(product._id) : "",
+      product.id,
+      product.slug,
+      product.sku,
+    ]).map((value) => value.toLowerCase()));
+    const rows = inventoryRows.filter((row) => [
+      row.productId,
+      row.productSlug,
+      row.productSku,
+      row.slug,
+      row.sku,
+    ].filter(Boolean).some((value) => aliases.has(String(value).toLowerCase())));
+    const activeRows = rows.filter((row) => row.status !== "inactive");
+    const stock = activeRows.reduce((sum, row) => sum + Math.max(0, Number(row.stock || 0)), 0);
+    const reservedStock = activeRows.reduce(
+      (sum, row) => sum + Math.max(0, Number(row.reservedStock || 0)),
+      0
+    );
+    const soldCount = rows.reduce((sum, row) => sum + Math.max(0, Number(row.soldCount || 0)), 0);
+    const availableStock = Math.max(0, stock - reservedStock);
+    const allInactive = rows.length > 0 && activeRows.length === 0;
+    const inventoryStatus = allInactive
+      ? "inactive"
+      : availableStock <= 0
+        ? "out_of_stock"
+        : availableStock <= 5
+          ? "low_stock"
+          : "in_stock";
+    const isAvailable = ["in_stock", "low_stock"].includes(inventoryStatus);
+
+    return {
+      ...product,
+      stock: availableStock,
+      inventory: stock,
+      inventoryStatus,
+      inventorySummary: {
+        managed: true,
+        stock,
+        reservedStock,
+        availableStock,
+        soldCount,
+        status: inventoryStatus,
+        itemCount: rows.length,
+      },
+      availability: {
+        status: isAvailable ? "InStock" : "OutOfStock",
+        raw: allInactive ? "Ngừng bán" : isAvailable ? "Còn hàng" : "Hết hàng",
+      },
+      statusLabel: allInactive ? "Ngừng bán" : isAvailable ? "Còn hàng" : "Hết hàng",
+    };
+  });
+}
+
+async function attachInventorySummary(inventory, product = null) {
+  if (!product) return null;
+  return (await attachInventorySummaries(inventory, [product]))[0] || product;
 }
 
 function uniqueStrings(values = []) {
@@ -739,7 +833,10 @@ function buildProductSearchCondition(value = "") {
 }
 
 function buildApplianceTopicCondition(value = "") {
-  const key = normalizeSearchKey(value).replace(/[^a-z0-9]+/g, "-");
+  const keys = String(value || "")
+    .split("|")
+    .map((item) => normalizeSearchKey(item).replace(/[^a-z0-9]+/g, "-"))
+    .filter(Boolean);
   const identityFields = [
     "name",
     "slug",
@@ -778,17 +875,35 @@ function buildApplianceTopicCondition(value = "") {
     "may-triet-long": /(?:máy triệt lông|may triet long|máy làm sạch lông|may lam sach long|hair removal|\bipl\b)/i,
     "may-do-huyet-ap": /^(?:máy|may).{0,20}(?:đo huyết áp|do huyet ap)|blood pressure monitor/i,
   };
-  const rule = topicRules[key];
-  if (!rule) return null;
-
   const topicExcludes = {
     "may-tia-long-mui": /lint remover|máy cắt lông xù|may cat long xu/i,
   };
-  const includeCondition = regexCondition(identityFields, rule);
-  const exclude = topicExcludes[key];
-  return exclude
-    ? { $and: [includeCondition, { $nor: [regexCondition(identityFields, exclude)] }] }
-    : includeCondition;
+  const conditions = keys.map((key) => {
+    const rule = topicRules[key];
+    if (!rule) return null;
+    const includeCondition = regexCondition(identityFields, rule);
+    const exclude = topicExcludes[key];
+    return exclude
+      ? { $and: [includeCondition, { $nor: [regexCondition(identityFields, exclude)] }] }
+      : includeCondition;
+  }).filter(Boolean);
+
+  if (!conditions.length) return null;
+  return conditions.length === 1 ? conditions[0] : { $or: conditions };
+}
+
+function buildAudioTopicCondition(value = "") {
+  const key = normalizeSearchKey(value).replace(/[^a-z0-9]+/g, "-");
+  const fields = ["name", "slug", "sku", "trainingLabels.productName"];
+
+  if (["mic-cai-ao", "micro-cai-ao", "microphone-cai-ao"].includes(key)) {
+    return regexCondition(
+      fields,
+      /^(?:microphone|micro|mic).{0,64}(?:không dây|khong day|wireless|lavalier|cài áo|cai ao)/i
+    );
+  }
+
+  return null;
 }
 
 function buildAccessoryTopicCondition(value = "") {
@@ -809,6 +924,10 @@ function buildAccessoryTopicCondition(value = "") {
     "the-nho": {
       include: /^(?:thẻ nhớ|the nho|memory card|micro ?sd|sdhc|sdxc|cfexpress)(?:[\s-]|$)/i,
     },
+    "the-nho-usb": {
+      include: /^(?:thẻ nhớ|the nho|memory card|micro ?sd|sdhc|sdxc|cfexpress)(?:[\s-]|$)|^usb.{0,64}(?:flash drive|\d+\s*(?:gb|tb))/i,
+      exclude: /^(?:củ sạc|cu sac|sạc|sac|cáp|cap|hub|adapter)(?:[\s-]|$)/i,
+    },
     "apple-care": {
       include: /(?:^|[\s-])apple\s*care\+?|applecare\+?/i,
     },
@@ -821,6 +940,14 @@ function buildAccessoryTopicCondition(value = "") {
     "cap-sac": {
       include: /^(?:(?:cáp|cap)(?:[\s-]|$)|(?:củ|cu|bộ|bo|đế|de|dock).{0,20}(?:sạc|sac)|(?:sạc|sac)(?:[\s-]|$)|adapter(?:[\s-]|$)|charger(?:[\s-]|$))/i,
       exclude: /(?:trạm sạc dự phòng|tram sac du phong|trạm-sạc-dự-phòng|tram-sac-du-phong|pin dự phòng|pin du phong|power ?bank)/i,
+    },
+    "sac-cap": {
+      include: /^(?:(?:cáp|cap)(?:[\s-]|$)|(?:củ|cu|bộ|bo|đế|de|dock).{0,20}(?:sạc|sac)|(?:sạc|sac)(?:[\s-]|$)|adapter(?:[\s-]|$)|charger(?:[\s-]|$))/i,
+      exclude: /(?:trạm sạc dự phòng|tram sac du phong|pin dự phòng|pin du phong|power ?bank)/i,
+    },
+    "phu-kien-laptop": {
+      include: /^(?:balo|ba lô|túi|tui|đế|de|giá đỡ|gia do|bàn|ban|kệ|ke|sạc|sac|cáp|cap|hub|dock|dán|dan|ốp|op|bao da).{0,56}(?:laptop|macbook|notebook)|^(?:đế tản nhiệt|de tan nhiet)(?:[\s-]|$)/i,
+      exclude: /^(?:laptop|macbook|notebook)(?:[\s-]|$)/i,
     },
     "pin-du-phong": {
       include: /^(?:pin dự phòng|pin du phong|power ?bank)(?:[\s-]|$)/i,
@@ -959,6 +1086,9 @@ function buildNetworkTopicCondition(value = "") {
     "card-mang": {
       include: /^(?:card mạng|card mang|network card|pcie.{0,18}(?:wifi|ethernet))(?:[\s-]|$)/i,
     },
+    "thiet-bi-mang-doanh-nghiep": {
+      include: /^(?:access point|switch|thiết bị mạng switch|thiet bi mang switch|bộ chia tín hiệu|bo chia tin hieu).{0,64}(?:poe|cổng|cong|gigabit|mbps|wifi|wi-fi)|^(?:access point|switch)(?:[\s-]|$)/i,
+    },
   };
   const rule = topicRules[key];
   if (!rule) return null;
@@ -1056,7 +1186,50 @@ function buildMonitorTopicCondition(value = "") {
     "do-hoa": /^(?:màn hình|man hinh|monitor).{0,56}(?:đồ họa|do hoa|designer|creator)|^màn hình đồ họa$/i,
     "lap-trinh": /^(?:màn hình|man hinh|monitor).{0,56}(?:lập trình|lap trinh|coding|programming)|^màn hình lập trình$/i,
     "man-hinh-di-dong": /^(?:màn hình di động|man hinh di dong|portable monitor)(?:[\s-]|$)/i,
+    "man-hinh-cong": /^(?:màn hình|man hinh|monitor).{0,56}(?:cong|curved)/i,
     "arm-man-hinh": /^(?:arm màn hình|arm man hinh|giá treo màn hình|gia treo man hinh|tay đỡ màn hình|tay do man hinh|monitor arm)(?:[\s-]|$)/i,
+  };
+  const include = rules[key];
+  return include ? regexCondition(fields, include) : null;
+}
+
+function buildPhotoCameraTopicCondition(value = "") {
+  const key = normalizeSearchKey(value).replace(/[^a-z0-9]+/g, "-");
+  if (key !== "may-anh") return null;
+
+  const fields = ["name", "slug", "sku", "trainingLabels.productName"];
+  return {
+    $and: [
+      regexCondition(
+        fields,
+        /^(?:máy ảnh|may anh|máy chụp ảnh|may chup anh|bộ kit|bo kit)(?:[\s-]|$)/i
+      ),
+      { $nor: [regexCondition(fields, /^(?:máy in ảnh|may in anh|phụ kiện|phu kien|tripod|gimbal)(?:[\s-]|$)/i)] },
+    ],
+  };
+}
+
+function buildRefrigeratorTopicCondition(value = "") {
+  const key = normalizeSearchKey(value).replace(/[^a-z0-9]+/g, "-");
+  const fields = ["name", "slug", "sku", "trainingLabels.productName"];
+  const rules = {
+    "tu-lanh-nhieu-canh": /^(?:tủ lạnh|tu lanh).{0,64}(?:nhiều cánh|nhieu canh|multi[ -]?door)/i,
+    "tu-lanh-side-by-side": /^(?:tủ lạnh|tu lanh).{0,64}side[ -]?by[ -]?side/i,
+    "tu-lanh-mini": /^(?:tủ lạnh|tu lanh).{0,64}(?:mini|nhỏ gọn|nho gon)/i,
+  };
+  const include = rules[key];
+  return include ? regexCondition(fields, include) : null;
+}
+
+function buildAirConditionerTopicCondition(value = "") {
+  const key = normalizeSearchKey(value).replace(/[^a-z0-9]+/g, "-");
+  const fields = ["name", "slug", "sku", "trainingLabels.productName"];
+  const rules = {
+    "may-lanh-1-0hp": /^(?:máy lạnh|may lanh|điều hòa|dieu hoa).{0,64}1(?:[.,]0)?\s*hp/i,
+    "may-lanh-1-5hp": /^(?:máy lạnh|may lanh|điều hòa|dieu hoa).{0,64}1[.,]5\s*hp/i,
+    "may-lanh-2-0hp": /^(?:máy lạnh|may lanh|điều hòa|dieu hoa).{0,64}2(?:[.,]0)?\s*hp/i,
+    "may-lanh-inverter": /^(?:máy lạnh|may lanh|điều hòa|dieu hoa).{0,64}inverter/i,
+    "may-lanh-treo-tuong": /^(?:máy lạnh|may lanh|điều hòa|dieu hoa).{0,64}(?:treo tường|treo tuong)/i,
   };
   const include = rules[key];
   return include ? regexCondition(fields, include) : null;
@@ -1127,6 +1300,7 @@ function buildListQuery(searchParams) {
   const source = searchParams.get("source") || "all";
   const q = searchParams.get("q");
   const category = searchParams.get("category");
+  const categoryMode = searchParams.get("categoryMode") || searchParams.get("category_mode");
   const brand = searchParams.get("brand");
   const segment = searchParams.get("segment");
   const series = searchParams.get("series");
@@ -1168,6 +1342,9 @@ function buildListQuery(searchParams) {
     const applianceTopicCondition = categoryKey === "do gia dung"
       ? buildApplianceTopicCondition(q)
       : null;
+    const audioTopicCondition = ["am thanh", "tai nghe", "loa"].includes(categoryKey)
+      ? buildAudioTopicCondition(q)
+      : null;
     const accessoryTopicCondition = categoryKey === "phu kien"
       ? buildAccessoryTopicCondition(q)
       : null;
@@ -1183,6 +1360,15 @@ function buildListQuery(searchParams) {
     const monitorTopicCondition = categoryKey === "man hinh"
       ? buildMonitorTopicCondition(q)
       : null;
+    const photoCameraTopicCondition = categoryKey === "may anh"
+      ? buildPhotoCameraTopicCondition(q)
+      : null;
+    const refrigeratorTopicCondition = categoryKey === "tu lanh"
+      ? buildRefrigeratorTopicCondition(q)
+      : null;
+    const airConditionerTopicCondition = ["may lanh", "dieu hoa may lanh"].includes(categoryKey)
+      ? buildAirConditionerTopicCondition(q)
+      : null;
     const gamingGearTopicCondition = categoryKey === "gaming gear"
       ? buildGamingGearTopicCondition(q)
       : null;
@@ -1192,11 +1378,15 @@ function buildListQuery(searchParams) {
     Object.assign(
       query,
       applianceTopicCondition
+      || audioTopicCondition
       || accessoryTopicCondition
       || networkTopicCondition
       || pcTopicCondition
       || componentTopicCondition
       || monitorTopicCondition
+      || photoCameraTopicCondition
+      || refrigeratorTopicCondition
+      || airConditionerTopicCondition
       || gamingGearTopicCondition
       || officeDeviceTopicCondition
       || buildProductSearchCondition(q)
@@ -1205,9 +1395,12 @@ function buildListQuery(searchParams) {
 
   if (category) {
     const requestedCategories = category.split("|").map((item) => item.trim()).filter(Boolean);
+    const categoryConditionBuilder = normalizeSearchKey(categoryMode) === "primary"
+      ? buildPrimaryCategoryCondition
+      : buildCategoryCondition;
     appendAndCondition(query, requestedCategories.length > 1
-      ? { $or: requestedCategories.map((item) => buildCategoryCondition(item)) }
-      : buildCategoryCondition(category));
+      ? { $or: requestedCategories.map((item) => categoryConditionBuilder(item)) }
+      : categoryConditionBuilder(category));
   }
   if (brand && brand !== "all") {
     const categoriesWithReliableBrandInName = new Set([
@@ -1674,6 +1867,18 @@ function buildFilterCondition(filter = "") {
         { currentPrice: { $gt: 0 } },
         { originalPrice: { $gt: 0 } },
         { $expr: { $gt: ["$originalPrice", "$currentPrice"] } },
+      ],
+    };
+  }
+
+  if (key === "new" || key === "hang-moi" || key === "hang-moi-ve") {
+    const recentCutoff = new Date(Date.now() - (45 * 24 * 60 * 60 * 1000));
+    return {
+      $or: [
+        { firstSeenAt: { $gte: recentCutoff } },
+        { createdAt: { $gte: recentCutoff } },
+        { updatedAt: { $gte: recentCutoff } },
+        { scrapedAt: { $gte: recentCutoff } },
       ],
     };
   }
@@ -2571,6 +2776,24 @@ function buildCategoryCondition(category = "") {
   return categoryCondition;
 }
 
+function buildPrimaryCategoryCondition(category = "") {
+  const text = String(category || "").trim();
+  if (!text) return {};
+
+  const aliases = {
+    "may lanh": ["Điều hòa - Máy lạnh"],
+    "may rua chen bat": ["Máy rửa bát"],
+    "may rua bat": ["Máy rửa bát"],
+  };
+  const values = aliases[normalizeSearchKey(text)] || [text];
+
+  return {
+    $or: values.map((value) => ({
+      category: new RegExp(`^${escapeRegex(value)}$`, "i"),
+    })),
+  };
+}
+
 function createBrandRegex(brand = "") {
   const key = String(brand || "").trim().toLowerCase();
   const aliases = {
@@ -2578,7 +2801,7 @@ function createBrandRegex(brand = "") {
     apple: "apple|iphone|ipad|\\bmacbook\\b|\\bmac\\b",
     samsung: "samsung|galaxy",
     xiaomi: "xiaomi|redmi|poco",
-    oppo: "\\boppo\\b|realme|oneplus",
+    oppo: "\\boppo\\b",
     honor: "honor",
     asus: "\\basus\\b|\\brog\\b|\\btuf\\b",
     lenovo: "lenovo|legion",
@@ -2619,17 +2842,10 @@ function buildBrandCondition(brand = "") {
     "slug",
   ], regex);
 
-  // Một số bản crawl cũ gán nhầm Vivo Watch vào brand OPPO. Giữ nhóm liên
-  // quan Realme/OnePlus theo alias hiện có, nhưng không để Vivo lọt vào trang
-  // thương hiệu OPPO.
+  // Dữ liệu cũ từng gộp OPPO, Realme, OnePlus và Vivo vào cùng một họ hãng.
+  // Trang OPPO chỉ được dựa vào nhãn OPPO rõ ràng trong brand hoặc định danh.
   if (key === "oppo") {
-    return {
-      $and: [
-        condition,
-        { name: { $not: /\bvivo\b/i } },
-        { slug: { $not: /\bvivo\b/i } },
-      ],
-    };
+    return condition;
   }
 
   return condition;
@@ -2988,8 +3204,7 @@ function sanitizeProductInput(input, { isCreate = false } = {}) {
     "originalPrice",
     "priceCurrency",
     "availability",
-    "stock",
-    "inventory",
+    "manageInventory",
     "categories",
     "breadcrumbs",
     "primaryImage",
@@ -3019,6 +3234,7 @@ function sanitizeProductInput(input, { isCreate = false } = {}) {
   if (!product.sku && product.slug) product.sku = product.slug;
   if (!product.source) product.source = "admin";
   if (!product.priceCurrency) product.priceCurrency = "VND";
+  if (product.manageInventory !== undefined) product.manageInventory = Boolean(product.manageInventory);
 
   if (isCreate && !product.name) {
     throw new Error("Product name is required.");
@@ -3376,7 +3592,7 @@ async function handleStoresRequest(req, res) {
 }
 
 async function handleListProducts(req, res) {
-  const { productDetails } = await getDb();
+  const { productDetails, inventory } = await getDb();
   const webProducts = productDetails;
   const url = new URL(req.url, `http://${req.headers.host}`);
   const page = toPositiveInt(url.searchParams.get("page"), 1);
@@ -3432,6 +3648,7 @@ async function handleListProducts(req, res) {
       image: 1,
       images: { $slice: 5 },
       source: 1,
+      manageInventory: 1,
       sourceUrls: 1,
       scrapedAt: 1,
       updatedAt: 1,
@@ -3485,6 +3702,9 @@ async function handleListProducts(req, res) {
     docsPromise,
   ]);
 
+  const inventoryBackedDocs = includeRaw
+    ? docs
+    : await attachInventorySummaries(inventory, docs);
   const payload = {
     ok: true,
     pagination: {
@@ -3493,7 +3713,7 @@ async function handleListProducts(req, res) {
       total,
       totalPages: Math.ceil(total / limit),
     },
-    data: includeRaw ? docs : docs.map(normalizeProduct),
+    data: includeRaw ? docs : inventoryBackedDocs.map(normalizeProduct),
   };
 
   if (!includeRaw && !includeDetails) {
@@ -3504,7 +3724,7 @@ async function handleListProducts(req, res) {
 }
 
 async function handleGetProduct(_req, res, identifier) {
-  const { productDetails } = await getDb();
+  const { productDetails, inventory } = await getDb();
   const doc = await findProductByIdentifier(productDetails, identifier);
 
   if (!doc) {
@@ -3512,9 +3732,10 @@ async function handleGetProduct(_req, res, identifier) {
     return;
   }
 
+  const inventoryBackedDoc = await attachInventorySummary(inventory, doc);
   sendJson(res, 200, {
     ok: true,
-    data: normalizeProduct(doc),
+    data: normalizeProduct(inventoryBackedDoc),
     raw: doc,
   });
 }
@@ -3532,7 +3753,7 @@ async function handleGetProductDetails(req, res, identifier) {
     }
   }
 
-  const { productDetails } = await getDb();
+  const { productDetails, inventory } = await getDb();
   const product = await findProductByIdentifier(productDetails, identifier);
   const manifest = product || await findProductDetailByIdentifier(productDetails, identifier, product);
   let detail = await hydrateProductDetail(manifest);
@@ -3571,10 +3792,24 @@ async function handleGetProductDetails(req, res, identifier) {
     cacheStatus = `${cacheStatus}:summary-fallback`;
   }
 
+  const inventoryBackedProduct = product
+    ? await attachInventorySummary(inventory, product)
+    : null;
+  if (detail && inventoryBackedProduct?.manageInventory) {
+    detail = {
+      ...detail,
+      manageInventory: true,
+      stock: inventoryBackedProduct.stock,
+      inventory: inventoryBackedProduct.inventory,
+      inventorySummary: inventoryBackedProduct.inventorySummary,
+      availability: inventoryBackedProduct.availability,
+      statusLabel: inventoryBackedProduct.statusLabel,
+    };
+  }
   const payload = {
     ok: true,
     cacheStatus,
-    product: product ? normalizeProduct(product) : null,
+    product: inventoryBackedProduct ? normalizeProduct(inventoryBackedProduct) : null,
     data: normalizeProductDetails(detail),
   };
 
@@ -3592,7 +3827,7 @@ async function handleRelatedProducts(req, res, identifier) {
     return;
   }
 
-  const { productDetails } = await getDb();
+  const { productDetails, inventory } = await getDb();
   const webProducts = productDetails;
   const url = new URL(req.url, `http://${req.headers.host}`);
   const limit = toPositiveInt(url.searchParams.get("limit"), 8, 20);
@@ -3667,10 +3902,14 @@ async function handleRelatedProducts(req, res, identifier) {
     ])
     .toArray();
 
+  const [inventoryBackedProduct, inventoryBackedDocs] = await Promise.all([
+    attachInventorySummary(inventory, product),
+    attachInventorySummaries(inventory, docs),
+  ]);
   const payload = {
     ok: true,
-    baseProduct: normalizeProduct(product),
-    data: docs.map(normalizeProduct),
+    baseProduct: normalizeProduct(inventoryBackedProduct),
+    data: inventoryBackedDocs.map(normalizeProduct),
   };
   setApiResponseCache(req, payload, API_RELATED_PRODUCTS_CACHE_TTL_MS, "products:related");
   sendJson(res, 200, payload);
@@ -3847,6 +4086,12 @@ function sanitizeCartItem(input = {}) {
     brand: cleanCartText(product.brandName || product.brand || product.brandKey, 120),
     selectedOptions,
     quantity: cleanCartQuantity(input.quantity ?? product.quantity ?? 1),
+    ...(product.manageInventory !== undefined
+      ? { manageInventory: Boolean(product.manageInventory) }
+      : {}),
+    ...(product.productSnapshot && typeof product.productSnapshot === "object"
+      ? { productSnapshot: product.productSnapshot }
+      : {}),
   };
 
   item.id = cleanCartText(input.itemId || input.cartItemId || product.cartItemId || buildCartItemId(item), 240);
@@ -4405,6 +4650,7 @@ function buildOrderItemFromProduct(product = {}, rawItem = {}) {
     },
   });
 
+  item.manageInventory = isInventoryManagedProduct(product);
   item.productSnapshot = {
     productId: item.productId,
     slug: item.slug,
@@ -4415,6 +4661,7 @@ function buildOrderItemFromProduct(product = {}, rawItem = {}) {
     brand: item.brand,
     price,
     originalPrice,
+    manageInventory: item.manageInventory,
   };
 
   return item;
@@ -4460,9 +4707,75 @@ async function resolveOrderItemsFromDb({ productDetails, products, rawItems = []
 function buildInventoryKey(item = {}) {
   return [
     item.productId || item.mongoId || item.slug || item.sku,
-    item.selectedOptions?.variantId || item.selectedOptions?.variantName || "",
-    item.selectedOptions?.colorId || item.selectedOptions?.colorName || "",
+    item.selectedOptions?.variantId || item.selectedOptions?.variantName || "default",
+    item.selectedOptions?.colorId || item.selectedOptions?.colorName || "default",
   ].map((value) => slugify(value)).filter(Boolean).join("::");
+}
+
+function getInventoryProductAliases(item = {}) {
+  return uniqueStrings([
+    item.productId,
+    item.mongoId,
+    item.slug,
+    item.sku,
+    item.productSnapshot?.productId,
+    item.productSnapshot?.slug,
+    item.productSnapshot?.sku,
+  ]);
+}
+
+function getInventoryOptionAliases(item = {}, type = "variant") {
+  const options = item.selectedOptions || {};
+  return type === "color"
+    ? uniqueStrings([options.colorId, options.colorName]).map(slugify)
+    : uniqueStrings([options.variantId, options.variantName]).map(slugify);
+}
+
+function inventoryOptionMatches(doc = {}, aliases = [], type = "variant") {
+  const values = type === "color"
+    ? [doc.colorId, doc.colorName]
+    : [doc.variantId, doc.variantName];
+  const normalized = uniqueStrings(values).map(slugify);
+  if (!aliases.length) return normalized.length === 0 || normalized.includes("default") || normalized.includes("mac-dinh");
+  return aliases.some((alias) => normalized.includes(alias));
+}
+
+async function findInventoryForOrderItem(inventory, item = {}) {
+  const key = buildInventoryKey(item);
+  const exact = await inventory.findOne({ key });
+  if (exact) return exact;
+
+  const productAliases = getInventoryProductAliases(item);
+  if (!productAliases.length) return null;
+  const candidates = await inventory.find({
+    $or: [
+      { productId: { $in: productAliases } },
+      { productSlug: { $in: productAliases } },
+      { productSku: { $in: productAliases } },
+      { slug: { $in: productAliases } },
+      { sku: { $in: productAliases } },
+      { key: { $in: productAliases } },
+    ],
+  }).limit(50).toArray();
+
+  const variantAliases = getInventoryOptionAliases(item, "variant");
+  const colorAliases = getInventoryOptionAliases(item, "color");
+  const matched = candidates.find((doc) => (
+    inventoryOptionMatches(doc, variantAliases, "variant")
+    && inventoryOptionMatches(doc, colorAliases, "color")
+  ));
+  if (matched) return matched;
+
+  const hasSpecificInventory = candidates.some((doc) => (
+    !inventoryOptionMatches(doc, [], "variant")
+    || !inventoryOptionMatches(doc, [], "color")
+  ));
+  if ((variantAliases.length || colorAliases.length) && hasSpecificInventory) return null;
+
+  return candidates.find((doc) => (
+    inventoryOptionMatches(doc, [], "variant")
+    && inventoryOptionMatches(doc, [], "color")
+  )) || null;
 }
 
 async function ensureInventoryIndexes(inventory) {
@@ -4483,45 +4796,44 @@ async function reserveInventoryForOrder(inventory, items = [], orderCode = "") {
 
   try {
     for (const item of items) {
-      const key = buildInventoryKey(item);
+      if (item.manageInventory === false || item.productSnapshot?.manageInventory === false) continue;
+
       const quantity = cleanCartQuantity(item.quantity);
       const now = new Date();
-      let doc = await inventory.findOne({ key });
+      const doc = await findInventoryForOrderItem(inventory, item);
 
       if (!doc) {
-        const initialStock = Number(item.stock || item.availableStock || 100);
-        await inventory.updateOne(
-          { key },
-          {
-            $setOnInsert: {
-              key,
-              productId: item.productId,
-              slug: item.slug,
-              sku: item.sku,
-              name: item.name,
-              variantId: item.selectedOptions?.variantId || "",
-              colorId: item.selectedOptions?.colorId || "",
-              stock: Number.isFinite(initialStock) && initialStock > 0 ? initialStock : 100,
-              reservedStock: 0,
-              soldCount: 0,
-              createdAt: now,
-            },
-            $set: { updatedAt: now },
-          },
-          { upsert: true }
+        throw new Error(
+          `Sản phẩm "${item.name}" chưa được thiết lập tồn kho. Vui lòng liên hệ quản trị viên.`
         );
-        doc = await inventory.findOne({ key });
+      }
+      if (doc.status === "inactive") {
+        throw new Error(`Sản phẩm "${item.name}" hiện đã ngừng bán.`);
       }
 
-      const stock = Number(doc.stock || 0);
-      const reservedStock = Number(doc.reservedStock || 0);
+      const stock = Math.max(0, Number(doc.stock || 0));
+      const reservedStock = Math.max(0, Number(doc.reservedStock || 0));
       const availableStock = Math.max(0, stock - reservedStock);
       if (availableStock < quantity) {
-        throw new Error(`Sản phẩm "${item.name}" chỉ còn ${availableStock} sản phẩm trong kho.`);
+        throw new Error(`Sản phẩm "${item.name}" chỉ còn ${availableStock} sản phẩm có thể bán.`);
       }
 
-      await inventory.updateOne(
-        { key },
+      const result = await inventory.updateOne(
+        {
+          _id: doc._id,
+          status: { $ne: "inactive" },
+          $expr: {
+            $gte: [
+              {
+                $subtract: [
+                  { $ifNull: ["$stock", 0] },
+                  { $ifNull: ["$reservedStock", 0] },
+                ],
+              },
+              quantity,
+            ],
+          },
+        },
         {
           $inc: { reservedStock: quantity },
           $push: {
@@ -4532,20 +4844,41 @@ async function reserveInventoryForOrder(inventory, items = [], orderCode = "") {
               status: "reserved",
             },
           },
-          $set: { updatedAt: now },
+          $set: {
+            productId: String(doc.productId || item.productId || item.mongoId || ""),
+            productSlug: doc.productSlug || doc.slug || item.slug || "",
+            productSku: doc.productSku || doc.sku || item.sku || "",
+            productName: doc.productName || doc.name || item.name || "",
+            variantId: doc.variantId || item.selectedOptions?.variantId || "",
+            variantName: doc.variantName || item.selectedOptions?.variantName || "",
+            colorId: doc.colorId || item.selectedOptions?.colorId || "",
+            colorName: doc.colorName || item.selectedOptions?.colorName || "",
+            updatedAt: now,
+          },
         }
       );
-      reserved.push({ key, quantity });
+
+      if (!result.modifiedCount) {
+        const latest = await inventory.findOne({ _id: doc._id });
+        const latestAvailable = Math.max(
+          0,
+          Number(latest?.stock || 0) - Number(latest?.reservedStock || 0)
+        );
+        throw new Error(`Sản phẩm "${item.name}" chỉ còn ${latestAvailable} sản phẩm có thể bán.`);
+      }
+
+      reserved.push({
+        key: doc.key,
+        inventoryId: String(doc._id),
+        itemId: item.id || "",
+        quantity,
+        productId: String(doc.productId || item.productId || ""),
+        productSlug: doc.productSlug || item.slug || "",
+        productSku: doc.productSku || item.sku || "",
+      });
     }
   } catch (error) {
-    await Promise.all(
-      reserved.map((entry) =>
-        inventory.updateOne(
-          { key: entry.key },
-          { $inc: { reservedStock: -entry.quantity }, $set: { updatedAt: new Date() } }
-        )
-      )
-    );
+    await releaseInventoryReservations(inventory, reserved);
     throw error;
   }
 
@@ -4553,14 +4886,31 @@ async function reserveInventoryForOrder(inventory, items = [], orderCode = "") {
 }
 
 async function releaseInventoryReservations(inventory, reservations = []) {
-  await Promise.all(
-    reservations.map((entry) =>
-      inventory.updateOne(
-        { key: entry.key },
-        { $inc: { reservedStock: -entry.quantity }, $set: { updatedAt: new Date() } }
-      )
-    )
-  );
+  for (const entry of reservations) {
+    const query = entry.inventoryId && ObjectId.isValid(entry.inventoryId)
+      ? { _id: new ObjectId(entry.inventoryId) }
+      : { key: entry.key };
+    const doc = await inventory.findOne(query);
+    if (!doc) continue;
+    const reservedStock = Math.max(0, Number(doc.reservedStock || 0));
+    const released = Math.min(reservedStock, Math.max(0, Number(entry.quantity || 0)));
+    await inventory.updateOne(
+      { _id: doc._id },
+      {
+        $set: {
+          reservedStock: Math.max(0, reservedStock - released),
+          status: doc.status === "inactive"
+            ? "inactive"
+            : Math.max(0, Number(doc.stock || 0) - (reservedStock - released)) <= 0
+              ? "out_of_stock"
+              : Math.max(0, Number(doc.stock || 0) - (reservedStock - released)) <= 5
+                ? "low_stock"
+                : "in_stock",
+          updatedAt: new Date(),
+        },
+      }
+    );
+  }
 }
 
 function validateOrderPayload({ customer, receiver, shippingAddress, shippingChoice, items }) {
@@ -4896,7 +5246,11 @@ async function handleBankPaymentWebhook(req, res) {
 
 async function handleOrdersRequest(req, res, pathParts) {
   const { db, orders, carts, products, productDetails, inventory, coupons, userEvents, notifications } = await getDb();
-  await ensureOrderIndexes(orders);
+  const userVouchers = getUserVouchersCollection(db);
+  await Promise.all([
+    ensureOrderIndexes(orders),
+    ensureUserVoucherIndexes(userVouchers),
+  ]);
 
   const owner = getOptionalOrderOwner(req);
   const identifier = decodeURIComponent(pathParts[2] || "");
@@ -4985,6 +5339,7 @@ async function handleOrdersRequest(req, res, pathParts) {
     const orderCode = generateOrderCode();
     const now = new Date();
     let appliedCoupon = null;
+    let appliedWallet = null;
     let couponDiscount = 0;
     const preCouponTotals = buildOrderTotals(items, {
       shippingFee: shippingChoice.fee,
@@ -4992,8 +5347,28 @@ async function handleOrdersRequest(req, res, pathParts) {
     });
 
     if (bodyData.couponCode) {
-      appliedCoupon = await findActiveCoupon(coupons, bodyData.couponCode);
+      if (!owner?.userId) {
+        sendError(res, 401, "Vui lòng đăng nhập Smember để nhận và sử dụng mã giảm giá.");
+        return;
+      }
+
       const couponMember = await getCouponMember(req, db);
+      try {
+        const claimed = await claimCouponForUser({
+          coupons,
+          userVouchers,
+          member: couponMember,
+          userId: owner.userId,
+          code: bodyData.couponCode,
+          source: "checkout",
+        });
+        appliedCoupon = claimed.coupon;
+        appliedWallet = claimed.wallet;
+      } catch (error) {
+        sendError(res, error.statusCode || 400, error.message);
+        return;
+      }
+
       const couponError = getCouponInvalidReason(appliedCoupon, preCouponTotals, {
         member: couponMember,
         educationOffer,
@@ -5046,6 +5421,9 @@ async function handleOrdersRequest(req, res, pathParts) {
       shippingAddress,
       shippingChoice,
       items,
+      inventoryReservations: reservations,
+      inventoryState: reservations.length ? "reserved" : "not_managed",
+      inventoryUpdatedAt: now,
       gifts: Array.isArray(bodyData.gifts)
         ? bodyData.gifts.map((gift) => cleanLimitedText(gift, 180)).filter(Boolean).slice(0, 10)
         : ["Tặng Túi phụ kiện phiên bản CellphoneS"],
@@ -5053,6 +5431,7 @@ async function handleOrdersRequest(req, res, pathParts) {
       coupon: appliedCoupon
         ? {
           couponId: String(appliedCoupon._id),
+          walletId: String(appliedWallet?._id || ""),
           code: appliedCoupon.code,
           type: appliedCoupon.type,
           value: appliedCoupon.value,
@@ -5072,15 +5451,66 @@ async function handleOrdersRequest(req, res, pathParts) {
     };
 
     let inserted;
+    let voucherConsumed = false;
+    let couponCountIncremented = false;
     try {
       const result = await orders.insertOne(doc);
       inserted = await orders.findOne({ _id: result.insertedId });
 
-      if (appliedCoupon && couponDiscount > 0) {
-        await coupons.updateOne(
-          { _id: appliedCoupon._id },
-          { $inc: { usedCount: 1 }, $set: { updatedAt: now } }
+      if (appliedCoupon && appliedWallet && couponDiscount > 0) {
+        const configuredUserLimit = Number(appliedCoupon.userLimit);
+        const userLimit = Number.isFinite(configuredUserLimit) && configuredUserLimit > 0
+          ? Math.floor(configuredUserLimit)
+          : 1;
+        const walletResult = await userVouchers.findOneAndUpdate(
+          {
+            _id: appliedWallet._id,
+            userId: owner.userId,
+            couponId: String(appliedCoupon._id),
+            status: "available",
+            usedCount: { $lt: userLimit },
+          },
+          {
+            $set: {
+              status: "used",
+              orderId: String(inserted._id),
+              orderCode,
+              usedAt: now,
+              updatedAt: now,
+            },
+            $inc: { usedCount: 1 },
+          },
+          { returnDocument: "after" }
         );
+        const consumedWallet = walletResult?.value || walletResult;
+        if (!consumedWallet) {
+          throw createCouponActionError(
+            "Voucher không còn khả dụng hoặc đã vượt quá số lượt sử dụng cho phép.",
+            409,
+            "VOUCHER_NOT_AVAILABLE"
+          );
+        }
+        voucherConsumed = true;
+
+        const configuredUsageLimit = Number(appliedCoupon.usageLimit);
+        const couponUsageQuery = { _id: appliedCoupon._id, status: "active" };
+        if (Number.isFinite(configuredUsageLimit) && configuredUsageLimit > 0) {
+          couponUsageQuery.usedCount = { $lt: Math.floor(configuredUsageLimit) };
+        }
+        const couponResult = await coupons.findOneAndUpdate(
+          couponUsageQuery,
+          { $inc: { usedCount: 1 }, $set: { updatedAt: now } },
+          { returnDocument: "after" }
+        );
+        const incrementedCoupon = couponResult?.value || couponResult;
+        if (!incrementedCoupon) {
+          throw createCouponActionError(
+            "Mã giảm giá vừa hết lượt sử dụng. Vui lòng chọn mã khác.",
+            409,
+            "COUPON_USAGE_LIMIT_REACHED"
+          );
+        }
+        couponCountIncremented = true;
       }
 
       await userEvents.insertOne({
@@ -5111,6 +5541,25 @@ async function handleOrdersRequest(req, res, pathParts) {
         );
       }
     } catch (error) {
+      if (couponCountIncremented && appliedCoupon) {
+        await coupons.updateOne(
+          { _id: appliedCoupon._id, usedCount: { $gt: 0 } },
+          { $inc: { usedCount: -1 }, $set: { updatedAt: new Date() } }
+        ).catch(() => {});
+      }
+      if (voucherConsumed && appliedWallet) {
+        await userVouchers.updateOne(
+          { _id: appliedWallet._id, orderCode },
+          {
+            $set: { status: "available", updatedAt: new Date() },
+            $inc: { usedCount: -1 },
+            $unset: { orderId: "", orderCode: "", usedAt: "" },
+          }
+        ).catch(() => {});
+      }
+      if (inserted?._id) {
+        await orders.deleteOne({ _id: inserted._id }).catch(() => {});
+      }
       await releaseInventoryReservations(inventory, reservations);
       throw error;
     }
@@ -5452,7 +5901,9 @@ async function handleMeExtrasRequest(req, res, pathParts) {
   if (!owner) return;
 
   const resource = pathParts[2];
+  const action = pathParts[3];
   const { db, orders, coupons } = await getDb();
+  const userVouchers = getUserVouchersCollection(db);
   const query = buildCustomerOrderQuery(owner);
 
   if (resource === "warranties" && req.method === "GET") {
@@ -5480,13 +5931,44 @@ async function handleMeExtrasRequest(req, res, pathParts) {
     return;
   }
 
-  if (resource === "vouchers" && req.method === "GET") {
+  if (resource === "vouchers" && action === "claim" && req.method === "POST") {
+    const body = await parseJsonBody(req);
     const member = await getCouponMember(req, db);
-    const availableCoupons = await findAvailableCouponsForMember(coupons, member);
+
+    try {
+      const claimed = await claimCouponForUser({
+        coupons,
+        userVouchers,
+        member,
+        userId: owner.userId,
+        code: body.code || body.couponCode,
+        source: "smember",
+      });
+      sendJson(res, claimed.alreadyClaimed ? 200 : 201, {
+        ok: true,
+        message: claimed.alreadyClaimed
+          ? `Mã ${claimed.coupon.code} đã có trong kho voucher của bạn.`
+          : `Đã thêm mã ${claimed.coupon.code} vào kho voucher.`,
+        data: normalizeClaimedVoucher(claimed.coupon, claimed.wallet),
+      });
+    } catch (error) {
+      sendError(res, error.statusCode || 400, error.message);
+    }
+    return;
+  }
+
+  if (resource === "vouchers" && !action && req.method === "GET") {
+    const member = await getCouponMember(req, db);
+    const claimedCoupons = await findClaimedCouponsForUser({
+      coupons,
+      userVouchers,
+      member,
+      userId: owner.userId,
+    });
     sendJson(res, 200, {
       ok: true,
-      message: "Danh sách mã giảm giá khả dụng cho tài khoản.",
-      data: availableCoupons.map((coupon) => normalizeCouponForPublic(coupon, 0)),
+      message: "Kho voucher đã nhận của tài khoản.",
+      data: claimedCoupons,
     });
     return;
   }
@@ -6597,6 +7079,8 @@ async function ensureNewsletterCoupon(coupons) {
     minSubtotal: 0,
     audiences: ["all"],
     allowWithEducationOffer: true,
+    distributionMode: "manual_claim",
+    userLimit: 1,
     status: "active",
     startsAt: now,
     expiresAt,
@@ -7130,8 +7614,183 @@ async function handleNewsletterSubscribe(req, res) {
   });
 }
 
+function getUserVouchersCollection(db) {
+  return db.collection(process.env.USER_VOUCHERS_COLLECTION || "user_vouchers");
+}
+
+async function ensureUserVoucherIndexes(userVouchers) {
+  if (userVoucherIndexesReady) return;
+
+  const indexes = await userVouchers.listIndexes().toArray().catch(() => []);
+  const hasIndex = (key) => indexes.some((index) => {
+    const current = Object.entries(index.key || {});
+    const expected = Object.entries(key);
+    return current.length === expected.length
+      && current.every(([field, direction], position) => (
+        expected[position]?.[0] === field && expected[position]?.[1] === direction
+      ));
+  });
+  const plans = [
+    [{ userId: 1, couponId: 1 }, { unique: true, name: "unique_user_coupon_wallet" }],
+    [{ userId: 1, status: 1, claimedAt: -1 }, { name: "user_vouchers_user_status_claimed" }],
+    [{ couponId: 1, status: 1 }, { name: "user_vouchers_coupon_status" }],
+  ];
+
+  for (const [key, options] of plans) {
+    if (!hasIndex(key)) await userVouchers.createIndex(key, options);
+  }
+
+  userVoucherIndexesReady = true;
+}
+
+function createCouponActionError(message, statusCode = 400, code = "COUPON_ERROR") {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.code = code;
+  return error;
+}
+
+function normalizeClaimedVoucher(coupon = {}, wallet = {}, discount = 0) {
+  return {
+    ...normalizeCouponForPublic(coupon, discount),
+    walletId: String(wallet._id || ""),
+    walletStatus: wallet.status || "available",
+    claimedAt: wallet.claimedAt || null,
+    usedAt: wallet.usedAt || null,
+    walletUsedCount: Number(wallet.usedCount || 0),
+    claimSource: wallet.source || "smember",
+  };
+}
+
+async function claimCouponForUser({ coupons, userVouchers, member, userId, code, source = "smember" }) {
+  await Promise.all([
+    ensureCouponIndexes(coupons),
+    ensureUserVoucherIndexes(userVouchers),
+  ]);
+
+  const normalizedCode = cleanLimitedText(code, 80).toUpperCase();
+  if (!normalizedCode) {
+    throw createCouponActionError("Vui lòng nhập mã giảm giá.");
+  }
+
+  const coupon = await coupons.findOne({ code: normalizedCode });
+  const availabilityError = getCouponAvailabilityInvalidReason(coupon, { member });
+  if (availabilityError) {
+    throw createCouponActionError(availabilityError, coupon ? 400 : 404, "COUPON_UNAVAILABLE");
+  }
+  if (coupon.distributionMode === "checkout_only" && source !== "checkout") {
+    throw createCouponActionError(
+      "Mã giảm giá này chỉ có thể nhận và áp dụng tại bước thanh toán.",
+      400,
+      "CHECKOUT_ONLY_COUPON"
+    );
+  }
+
+  const couponId = String(coupon._id);
+  const existing = await userVouchers.findOne({ userId, couponId });
+  const configuredLimit = Number(coupon.userLimit);
+  const userLimit = Number.isFinite(configuredLimit) && configuredLimit > 0
+    ? Math.floor(configuredLimit)
+    : 1;
+  const usedCount = Number(existing?.usedCount || 0);
+
+  if (existing && usedCount >= userLimit) {
+    throw createCouponActionError(
+      "Bạn đã sử dụng hết số lượt cho phép của mã giảm giá này.",
+      409,
+      "COUPON_USER_LIMIT_REACHED"
+    );
+  }
+  if (existing && ["available", "reserved"].includes(existing.status)) {
+    return { coupon, wallet: existing, alreadyClaimed: true };
+  }
+
+  const now = new Date();
+  const result = await userVouchers.findOneAndUpdate(
+    { userId, couponId },
+    {
+      $set: {
+        code: coupon.code,
+        status: "available",
+        source,
+        claimedAt: now,
+        expiresAt: coupon.expiresAt || null,
+        updatedAt: now,
+      },
+      $setOnInsert: {
+        userId,
+        couponId,
+        usedCount: 0,
+        createdAt: now,
+      },
+      $unset: {
+        orderCode: "",
+        orderId: "",
+        reservedAt: "",
+        usedAt: "",
+      },
+    },
+    { upsert: true, returnDocument: "after" }
+  );
+
+  return {
+    coupon,
+    wallet: result?.value || result,
+    alreadyClaimed: false,
+  };
+}
+
+async function findClaimedCouponsForUser({ coupons, userVouchers, member, userId, limit = 100 }) {
+  await Promise.all([
+    ensureCouponIndexes(coupons),
+    ensureUserVoucherIndexes(userVouchers),
+  ]);
+
+  const wallets = await userVouchers
+    .find({ userId, status: "available" })
+    .sort({ claimedAt: -1, _id: -1 })
+    .limit(limit)
+    .toArray();
+  if (!wallets.length) return [];
+
+  const couponIds = wallets
+    .map((wallet) => wallet.couponId)
+    .filter((id) => ObjectId.isValid(id))
+    .map((id) => new ObjectId(id));
+  const couponDocs = couponIds.length
+    ? await coupons.find({ _id: { $in: couponIds } }).toArray()
+    : [];
+  const couponMap = new Map(couponDocs.map((coupon) => [String(coupon._id), coupon]));
+  const available = [];
+
+  for (const wallet of wallets) {
+    const coupon = couponMap.get(wallet.couponId);
+    const invalidReason = getCouponAvailabilityInvalidReason(coupon, { member });
+    const configuredLimit = Number(coupon?.userLimit);
+    const userLimit = Number.isFinite(configuredLimit) && configuredLimit > 0
+      ? Math.floor(configuredLimit)
+      : 1;
+
+    if (invalidReason || Number(wallet.usedCount || 0) >= userLimit) {
+      await userVouchers.updateOne(
+        { _id: wallet._id },
+        { $set: { status: "expired", updatedAt: new Date() } }
+      );
+      continue;
+    }
+
+    available.push(normalizeClaimedVoucher(coupon, wallet));
+  }
+
+  return available;
+}
+
 async function handleCouponApply(req, res) {
+  const owner = getRequiredCustomer(req, res);
+  if (!owner) return;
+
   const { db, coupons } = await getDb();
+  const userVouchers = getUserVouchersCollection(db);
   await ensureCouponIndexes(coupons);
 
   const body = await parseJsonBody(req);
@@ -7144,19 +7803,15 @@ async function handleCouponApply(req, res) {
     return;
   }
 
-  const coupon = await coupons.findOne({ code, status: "active" });
-  if (!coupon) {
-    sendError(res, 404, "Mã giảm giá không tồn tại hoặc đã ngừng áp dụng.");
-    return;
-  }
-
+  const coupon = await coupons.findOne({ code });
+  const member = await getCouponMember(req, db);
   const baseTotals = { subtotal, shippingFee };
   const reason = getCouponInvalidReason(coupon, baseTotals, {
-    member: await getCouponMember(req, db),
+    member,
     educationOffer: Boolean(body.educationOffer),
   });
   if (reason) {
-    sendError(res, 400, reason);
+    sendError(res, coupon ? 400 : 404, reason);
     return;
   }
 
@@ -7166,16 +7821,29 @@ async function handleCouponApply(req, res) {
     return;
   }
 
-  sendJson(res, 200, {
-    ok: true,
-    data: {
-      code: coupon.code,
-      type: coupon.type,
-      value: coupon.value,
-      discount,
-      finalTotal: Math.max(0, subtotal + shippingFee - discount),
-    },
-  });
+  try {
+    const claimed = await claimCouponForUser({
+      coupons,
+      userVouchers,
+      member,
+      userId: owner.userId,
+      code,
+      source: "checkout",
+    });
+    sendJson(res, 200, {
+      ok: true,
+      message: claimed.alreadyClaimed
+        ? `Mã ${coupon.code} đã có trong kho voucher và đã được áp dụng.`
+        : `Đã thêm mã ${coupon.code} vào kho voucher và áp dụng cho đơn hàng.`,
+      data: {
+        ...normalizeClaimedVoucher(coupon, claimed.wallet, discount),
+        finalTotal: Math.max(0, subtotal + shippingFee - discount),
+        newlyClaimed: !claimed.alreadyClaimed,
+      },
+    });
+  } catch (error) {
+    sendError(res, error.statusCode || 400, error.message);
+  }
 }
 
 async function handleCouponValidate(req, res) {
@@ -7335,12 +8003,28 @@ async function handleCheckoutPreview(req, res) {
 async function ensureUserEventIndexes(userEvents) {
   if (userEventIndexesReady) return;
 
-  await Promise.all([
-    userEvents.createIndex({ type: 1, createdAt: -1 }, { name: "events_type_created_at" }),
-    userEvents.createIndex({ userId: 1, createdAt: -1 }, { name: "events_user_created_at" }),
-    userEvents.createIndex({ productId: 1, createdAt: -1 }, { name: "events_product_created_at" }),
-    userEvents.createIndex({ slug: 1, createdAt: -1 }, { name: "events_slug_created_at" }),
-  ]);
+  const plans = [
+    [{ type: 1, createdAt: -1 }, "user_events_type_created"],
+    [{ userId: 1, createdAt: -1 }, "events_user_created_at"],
+    [{ productId: 1, createdAt: -1 }, "events_product_created_at"],
+    [{ slug: 1, createdAt: -1 }, "events_slug_created_at"],
+  ];
+  const indexes = await userEvents.listIndexes().toArray();
+  const hasEquivalentIndex = (key) => indexes.some((index) => {
+    const entries = Object.entries(index.key || {});
+    const expected = Object.entries(key);
+    return entries.length === expected.length
+      && entries.every(([field, direction], position) => (
+        expected[position]?.[0] === field && expected[position]?.[1] === direction
+      ));
+  });
+
+  for (const [key, name] of plans) {
+    if (!hasEquivalentIndex(key)) {
+      await userEvents.createIndex(key, { name });
+      indexes.push({ key, name });
+    }
+  }
 
   userEventIndexesReady = true;
 }
@@ -7389,7 +8073,7 @@ async function handleRecentlyViewedProducts(req, res) {
   const owner = getRequiredCustomer(req, res);
   if (!owner) return;
 
-  const { userEvents, productDetails, products } = await getDb();
+  const { userEvents, productDetails, products, inventory } = await getDb();
   await ensureUserEventIndexes(userEvents);
   const url = new URL(req.url, `http://${req.headers.host}`);
   const limit = toPositiveInt(url.searchParams.get("limit"), 12, MAX_LIMIT);
@@ -7408,7 +8092,10 @@ async function handleRecentlyViewedProducts(req, res) {
     const product =
       (await findProductByIdentifier(productDetails, identifier)) ||
       (await findProductByIdentifier(products, identifier));
-    data.push(product ? normalizeProduct(product) : {
+    const inventoryBackedProduct = product
+      ? await attachInventorySummary(inventory, product)
+      : null;
+    data.push(inventoryBackedProduct ? normalizeProduct(inventoryBackedProduct) : {
       id: event.productId || event.slug,
       slug: event.slug || "",
       name: event.productName || "Sản phẩm đã xem",
@@ -7422,7 +8109,7 @@ async function handleRecentlyViewedProducts(req, res) {
   sendJson(res, 200, { ok: true, data });
 }
 
-async function fetchRecommendationProducts({ productDetails, query = {}, limit = 12, sort = {} }) {
+async function fetchRecommendationProducts({ productDetails, inventory, query = {}, limit = 12, sort = {} }) {
   const docs = await productDetails
     .find(query, {
       projection: {
@@ -7438,6 +8125,8 @@ async function fetchRecommendationProducts({ productDetails, query = {}, limit =
         categories: 1,
         category: 1,
         availability: 1,
+        source: 1,
+        manageInventory: 1,
         updatedAt: 1,
         scrapedAt: 1,
       },
@@ -7446,11 +8135,12 @@ async function fetchRecommendationProducts({ productDetails, query = {}, limit =
     .limit(limit)
     .toArray();
 
-  return docs.map(normalizeProduct);
+  const inventoryBackedDocs = await attachInventorySummaries(inventory, docs);
+  return inventoryBackedDocs.map(normalizeProduct);
 }
 
 async function handleRecommendationsRequest(req, res, pathParts) {
-  const { productDetails, userEvents } = await getDb();
+  const { productDetails, inventory, userEvents } = await getDb();
   await ensureUserEventIndexes(userEvents);
   const action = pathParts[2] || "trending";
   const identifier = decodeURIComponent(pathParts[3] || "");
@@ -7477,8 +8167,11 @@ async function handleRecommendationsRequest(req, res, pathParts) {
       ...(relatedOr.length ? { $or: relatedOr } : {}),
     };
 
-    const data = await fetchRecommendationProducts({ productDetails, query, limit });
-    sendJson(res, 200, { ok: true, baseProduct: normalizeProduct(base), data });
+    const [data, inventoryBackedBase] = await Promise.all([
+      fetchRecommendationProducts({ productDetails, inventory, query, limit }),
+      attachInventorySummary(inventory, base),
+    ]);
+    sendJson(res, 200, { ok: true, baseProduct: normalizeProduct(inventoryBackedBase), data });
     return;
   }
 
@@ -7492,17 +8185,17 @@ async function handleRecommendationsRequest(req, res, pathParts) {
     const query = brands.length || categories.length
       ? { $or: [{ brand: { $in: brands } }, { categories: { $in: categories } }] }
       : {};
-    const data = await fetchRecommendationProducts({ productDetails, query, limit });
+    const data = await fetchRecommendationProducts({ productDetails, inventory, query, limit });
     sendJson(res, 200, { ok: true, data });
     return;
   }
 
-  const data = await fetchRecommendationProducts({ productDetails, limit });
+  const data = await fetchRecommendationProducts({ productDetails, inventory, limit });
   sendJson(res, 200, { ok: true, data });
 }
 
 async function handleChatbotMessage(req, res) {
-  const { productDetails, userEvents } = await getDb();
+  const { productDetails, inventory, userEvents } = await getDb();
   const requester = getRequestUser(req);
   const body = await parseJsonBody(req);
   const message = cleanLimitedText(body.message || body.text || body.query, 500);
@@ -7515,6 +8208,7 @@ async function handleChatbotMessage(req, res) {
   const regex = new RegExp(escapeRegex(message), "i");
   const data = await fetchRecommendationProducts({
     productDetails,
+    inventory,
     query: {
       $or: [
         { name: regex },
@@ -7564,13 +8258,95 @@ async function writeApiAdminAuditLog(adminAuditLogs, req, action, targetType, ta
   });
 }
 
+function buildInventoryLinkQueryForProduct(product = {}, previousProduct = null) {
+  const aliases = uniqueStrings([
+    product?._id ? String(product._id) : "",
+    product?.id,
+    product?.slug,
+    product?.sku,
+    previousProduct?._id ? String(previousProduct._id) : "",
+    previousProduct?.id,
+    previousProduct?.slug,
+    previousProduct?.sku,
+  ]);
+
+  return aliases.length
+    ? {
+      $or: [
+        { productId: { $in: aliases } },
+        { productSlug: { $in: aliases } },
+        { productSku: { $in: aliases } },
+        { slug: { $in: aliases } },
+        { sku: { $in: aliases } },
+      ],
+    }
+    : { productId: "__missing_product__" };
+}
+
+async function syncInventoryForProduct(inventory, product = {}, previousProduct = null) {
+  if (!inventory || !product?._id) return;
+
+  const now = new Date();
+  const productId = String(product._id);
+  const metadata = {
+    productId,
+    productSlug: product.slug || "",
+    productSku: product.sku || "",
+    productName: product.name || "",
+    updatedAt: now,
+  };
+  const linkQuery = buildInventoryLinkQueryForProduct(product, previousProduct);
+  const existingCount = await inventory.countDocuments(linkQuery);
+
+  if (product.manageInventory === false) {
+    if (existingCount) {
+      await inventory.updateMany(linkQuery, {
+        $set: {
+          ...metadata,
+          status: "inactive",
+        },
+      });
+    }
+    return;
+  }
+
+  if (existingCount) {
+    await inventory.updateMany(linkQuery, { $set: metadata });
+    return;
+  }
+
+  const key = [productId, "default", "default"].map(slugify).join("::");
+  await inventory.updateOne(
+    { key },
+    {
+      $setOnInsert: {
+        key,
+        variantId: "",
+        variantName: "Mặc định",
+        colorId: "",
+        colorName: "Mặc định",
+        locationId: "main",
+        stock: 100,
+        reservedStock: 0,
+        soldCount: 0,
+        status: "in_stock",
+        note: "Khởi tạo mặc định 100 sản phẩm.",
+        autoCreated: true,
+        createdAt: now,
+      },
+      $set: metadata,
+    },
+    { upsert: true }
+  );
+}
+
 async function handleCreateProduct(req, res) {
   if (!isWriteAuthorized(req)) {
     sendError(res, 401, "Unauthorized.");
     return;
   }
 
-  const { productDetails, adminAuditLogs } = await getDb();
+  const { productDetails, inventory, adminAuditLogs } = await getDb();
   const body = await parseJsonBody(req);
   const product = sanitizeProductInput(body, { isCreate: true });
   const now = new Date();
@@ -7579,6 +8355,7 @@ async function handleCreateProduct(req, res) {
 
   const result = await productDetails.insertOne(product);
   const inserted = await productDetails.findOne({ _id: result.insertedId });
+  await syncInventoryForProduct(inventory, inserted);
   await writeApiAdminAuditLog(adminAuditLogs, req, "create", "product", inserted?._id, {
     after: inserted,
   });
@@ -7596,7 +8373,7 @@ async function handleUpdateProduct(req, res, identifier) {
     return;
   }
 
-  const { productDetails, adminAuditLogs } = await getDb();
+  const { productDetails, inventory, adminAuditLogs } = await getDb();
   const body = await parseJsonBody(req);
   const update = sanitizeProductInput(body);
   update.updatedAt = new Date();
@@ -7607,9 +8384,20 @@ async function handleUpdateProduct(req, res, identifier) {
     return;
   }
 
+  const managesInventory = update.manageInventory !== undefined
+    ? update.manageInventory
+    : isInventoryManagedProduct(existing);
+  const productUpdate = { $set: update };
+  if (managesInventory) {
+    productUpdate.$unset = {
+      stock: "",
+      inventory: "",
+    };
+  }
+
   const result = await productDetails.findOneAndUpdate(
     { _id: existing._id },
-    { $set: update },
+    productUpdate,
     { returnDocument: "after" }
   );
 
@@ -7618,6 +8406,7 @@ async function handleUpdateProduct(req, res, identifier) {
     return;
   }
 
+  await syncInventoryForProduct(inventory, result, existing);
   await writeApiAdminAuditLog(adminAuditLogs, req, "update", "product", existing._id, {
     before: existing,
     after: result,
@@ -7636,7 +8425,7 @@ async function handleDeleteProduct(_req, res, identifier) {
     return;
   }
 
-  const { productDetails, adminAuditLogs } = await getDb();
+  const { productDetails, inventory, adminAuditLogs } = await getDb();
   const existing = await findProductByIdentifier(productDetails, identifier);
 
   if (!existing) {
@@ -7651,6 +8440,7 @@ async function handleDeleteProduct(_req, res, identifier) {
     return;
   }
 
+  await inventory.deleteMany(buildInventoryLinkQueryForProduct(existing));
   await writeApiAdminAuditLog(adminAuditLogs, _req, "delete", "product", existing._id, {
     before: result,
   });
@@ -7921,7 +8711,13 @@ const server = http.createServer((req, res) => {
   prepareCorsResponse(req, res);
   routeRequest(req, res).catch((error) => {
     console.error("[api]", error);
-    sendError(res, 500, "Internal server error.", error.message);
+    if (res.headersSent || res.writableEnded) return;
+    const requestedStatus = Number(error?.statusCode);
+    const statusCode = Number.isInteger(requestedStatus) && requestedStatus >= 400 && requestedStatus < 600
+      ? requestedStatus
+      : 500;
+    const message = statusCode < 500 ? error.message : "Internal server error.";
+    sendError(res, statusCode, message, statusCode < 500 ? { code: error.code || "BAD_REQUEST" } : undefined);
   });
 });
 

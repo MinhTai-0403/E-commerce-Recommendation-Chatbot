@@ -5,6 +5,8 @@
   "scripts": {
     "api:start": "node src/server/api-server.js",
     "api:dev": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-api-dev.ps1",
+    "test:api:audit": "node tests/api/run-api-audit.js",
+    "test:api:postman": "node tests/api/run-postman-audit.js",
     "auth:env": "node src/tools/check-auth-env.js",
     "auth:seed-admin": "node src/jobs/seed-admin-user.js",
     "mongo:test": "node src/tools/connect-mongodb.js",

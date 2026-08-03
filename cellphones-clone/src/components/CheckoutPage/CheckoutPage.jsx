@@ -538,7 +538,11 @@ export default function CheckoutPage({ cart, currentUser, onGoCart, onGoHome, on
       });
       setAppliedCoupon(coupon);
       setCouponCode(coupon.code || code);
-      setCouponMessage(`Đã áp dụng mã ${coupon.code}.`);
+      setOwnedVouchers((items) => [
+        coupon,
+        ...items.filter((item) => item.code !== coupon.code),
+      ]);
+      setCouponMessage(coupon.message || `Đã thêm mã ${coupon.code} vào kho voucher và áp dụng.`);
     } catch (applyError) {
       setAppliedCoupon(null);
       setCouponMessage(applyError.message || 'Mã giảm giá không hợp lệ hoặc chưa đủ điều kiện.');

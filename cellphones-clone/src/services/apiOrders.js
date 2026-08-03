@@ -47,7 +47,10 @@ export async function applyCouponCode(body) {
     throw new Error(getErrorMessage(payload, 'Không thể áp dụng mã giảm giá.'));
   }
 
-  return payload.data;
+  return {
+    ...(payload.data || {}),
+    message: payload.message || '',
+  };
 }
 
 export async function fetchMyOrders(signal) {

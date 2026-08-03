@@ -13,6 +13,8 @@ data/product-details/
 output/
 .playwright-cli/
 .tmp/
+reports/api-audit/*/
+!reports/api-audit/.gitkeep
 cellphones-clone/output/
 multimodal-chatbox/static/uploads/
 

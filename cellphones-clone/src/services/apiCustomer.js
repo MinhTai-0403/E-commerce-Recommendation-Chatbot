@@ -101,6 +101,17 @@ export async function fetchCustomerVouchers() {
   return payload.data || [];
 }
 
+export async function claimCustomerVoucher(code) {
+  const payload = await customerRequest('/api/me/vouchers/claim', {
+    method: 'POST',
+    body: { code: String(code || '').trim().toUpperCase() },
+  });
+  return {
+    voucher: payload.data,
+    message: payload.message || 'Đã thêm mã giảm giá vào kho voucher.',
+  };
+}
+
 export async function fetchCustomerWarranties() {
   const payload = await customerRequest('/api/me/warranties');
   return payload.data || [];

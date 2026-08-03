@@ -16,6 +16,7 @@ import {
   verifyEducationVerificationOtp,
 } from '../../services/apiAuth';
 import {
+  claimCustomerVoucher,
   createCustomerAddress,
   createCustomerReturnRequest,
   deleteCustomerAddress,
@@ -102,6 +103,15 @@ function SmemberIcon({ name, className = '' }) {
   );
 }
 
+function getVoucherBenefit(voucher = {}) {
+  if (voucher.type === 'percent') {
+    const cap = Number(voucher.maxDiscount || 0);
+    return `Giảm ${Number(voucher.value || 0)}%${cap > 0 ? ` · tối đa ${formatPrice(cap)}` : ''}`;
+  }
+  if (voucher.type === 'free_shipping') return 'Miễn phí vận chuyển';
+  return `Giảm ${formatPrice(Number(voucher.value || 0))}`;
+}
+
 function VoucherCard({ voucher, compact = false }) {
   const audiences = Array.isArray(voucher.audiences) && voucher.audiences.length
     ? voucher.audiences
@@ -118,8 +128,12 @@ function VoucherCard({ voucher, compact = false }) {
       <span><SmemberIcon name="voucher" /></span>
       <div>
         <strong>{voucher.code || voucher.title || 'Voucher CellphoneS'}</strong>
+        <b className="smember-voucher-benefit">{getVoucherBenefit(voucher)}</b>
         <p>{voucher.description || voucher.name || 'Áp dụng theo điều kiện chương trình.'}</p>
         <small>Dành cho: {audienceText}</small>
+        {Number(voucher.minSubtotal || 0) > 0 && (
+          <small>Đơn tối thiểu: {formatPrice(Number(voucher.minSubtotal))}</small>
+        )}
         {!compact && <small>Hạn dùng: {expiryText}</small>}
       </div>
     </div>
@@ -665,6 +679,8 @@ export default function SmemberAccount({
   const [wishlist, setWishlist] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [vouchers, setVouchers] = useState([]);
+  const [voucherCode, setVoucherCode] = useState('');
+  const [voucherClaiming, setVoucherClaiming] = useState(false);
   const [warranties, setWarranties] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [returns, setReturns] = useState([]);
@@ -1021,6 +1037,35 @@ export default function SmemberAccount({
     }
   };
 
+  const handleVoucherClaim = async (event) => {
+    event.preventDefault();
+    const code = voucherCode.trim().toUpperCase();
+    if (!code) {
+      setError('Vui lòng nhập mã giảm giá.');
+      setSuccess('');
+      return;
+    }
+
+    setVoucherClaiming(true);
+    setError('');
+    setSuccess('');
+    try {
+      const result = await claimCustomerVoucher(code);
+      if (result.voucher) {
+        setVouchers((items) => [
+          result.voucher,
+          ...items.filter((item) => item.code !== result.voucher.code),
+        ]);
+      }
+      setVoucherCode('');
+      setSuccess(result.message || `Đã thêm mã ${code} vào kho voucher.`);
+    } catch (claimError) {
+      setError(claimError.message || 'Không thể thêm mã giảm giá vào kho voucher.');
+    } finally {
+      setVoucherClaiming(false);
+    }
+  };
+
   const handleCreateReturn = async (payload) => {
     setError('');
     setSuccess('');
@@ -1278,13 +1323,44 @@ export default function SmemberAccount({
             {activeTab === 'vouchers' && (
               <div className="smember-panel">
                 <div className="smember-panel-head">
-                  <h2>Mã giảm giá</h2>
+                  <div>
+                    <h2>Kho mã giảm giá</h2>
+                    <small>Chỉ những mã bạn đã nhập và nhận thành công mới xuất hiện tại đây.</small>
+                  </div>
                   <span>{vouchers.length} mã</span>
                 </div>
+
+                <form className="smember-voucher-claim" onSubmit={handleVoucherClaim}>
+                  <div>
+                    <strong>Nhập mã ưu đãi</strong>
+                    <span>Nhập mã được CellphoneS cung cấp để lưu vào tài khoản.</span>
+                  </div>
+                  <div className="smember-voucher-claim-control">
+                    <input
+                      type="text"
+                      value={voucherCode}
+                      maxLength="80"
+                      autoComplete="off"
+                      spellCheck="false"
+                      placeholder="Ví dụ: KHUYENMAI10"
+                      onChange={(event) => {
+                        setVoucherCode(event.target.value.toUpperCase());
+                        setError('');
+                        setSuccess('');
+                      }}
+                    />
+                    <button type="submit" disabled={voucherClaiming || !voucherCode.trim()}>
+                      {voucherClaiming ? 'Đang kiểm tra...' : 'Thêm vào kho'}
+                    </button>
+                  </div>
+                </form>
+
                 <div className="smember-list-stack">
                   {vouchers.length ? vouchers.map((voucher) => (
-                    <VoucherCard voucher={voucher} key={voucher.id || voucher.code} />
-                  )) : <p className="smember-empty">Bạn chưa có mã giảm giá khả dụng.</p>}
+                    <VoucherCard voucher={voucher} key={voucher.walletId || voucher.id || voucher.code} />
+                  )) : (
+                    <p className="smember-empty">Kho voucher đang trống. Hãy nhập mã ưu đãi để thêm voucher.</p>
+                  )}
                 </div>
               </div>
             )}

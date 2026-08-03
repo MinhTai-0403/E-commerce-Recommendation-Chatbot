@@ -22,7 +22,9 @@ import {
   subBanners,
 } from "../../data/mockData";
 import {
+  AUDIO_CATEGORY_PATHS,
   buildCategoryPath,
+  getAudioCategoryPath,
   getRouteForLabel,
 } from "../../utils/linkRoutes";
 
@@ -117,6 +119,11 @@ const getCategoryBrandPath = (category = "", brand = "", title = "", options = {
 
 const getSidebarCategoryPath = (cat = {}, slug = "") => {
   if (cat.id === 12) return "/tin-tuc/tin-cong-nghe";
+  if (slug === "phone") return "/mobile.html";
+  if (slug === "laptop") return "/laptop.html";
+  if (slug === "audio") return AUDIO_CATEGORY_PATHS.root;
+  if (slug === "tradein") return "/thu-cu-doi-moi";
+  if (slug === "promo") return "/danh-sach-khuyen-mai";
 
   const categoryByPanel = {
     phone: "Điện thoại",
@@ -132,7 +139,31 @@ const getSidebarCategoryPath = (cat = {}, slug = "") => {
   };
   const category = categoryByPanel[slug] || cat.name;
 
-  return buildCategoryPath(category);
+  return buildCategoryPath(category, {
+    keyword: cat.name,
+    title: cat.name,
+  });
+};
+
+const SIDEBAR_LABEL_CATEGORIES = {
+  Tablet: "Máy tính bảng",
+  "Đồng hồ": "Đồng hồ thông minh",
+};
+
+const getSidebarLabelPath = (cat = {}, slug = "", label = "") => {
+  const cleanLabel = String(label || "").trim();
+  const canonicalAudioPath = slug === "audio" ? getAudioCategoryPath(cleanLabel) : "";
+
+  if (canonicalAudioPath) return canonicalAudioPath;
+  if (!cat.name?.includes(",")) return getSidebarCategoryPath(cat, slug);
+
+  const category = SIDEBAR_LABEL_CATEGORIES[cleanLabel] || cleanLabel;
+  if (category === "Máy tính bảng") return "/tablet.html";
+
+  return buildCategoryPath(category, {
+    keyword: cleanLabel,
+    title: cleanLabel,
+  });
 };
 
 const getPhoneBrandPath = (brandName = "") => {
@@ -252,6 +283,38 @@ function BriefcaseIcon() {
   );
 }
 
+function ApplianceBrandGrid({ category, brands, viewAllLabel, viewAllSpan = 1 }) {
+  return (
+    <div className="mega-brand-logos-grid">
+      {brands.map((brandName) => {
+        const brand = APPLIANCE_LOGOS.find((item) => item.name === brandName);
+
+        return (
+          <a
+            key={brandName}
+            href={getCategoryBrandPath(category, brand || brandName)}
+            className="mega-brand-logo-card-item"
+            aria-label={`${category} ${brandName}`}
+          >
+            {brand?.logo ? (
+              <SafeBrandImage src={brand.logo} alt={brandName} />
+            ) : (
+              <span className="fallback-brand-text">{brandName}</span>
+            )}
+          </a>
+        );
+      })}
+      <a
+        href={buildCategoryPath(category)}
+        className="mega-brand-logo-card-item appliance-view-all-card"
+        style={{ gridColumn: `span ${viewAllSpan}` }}
+      >
+        <span>{viewAllLabel}</span>
+      </a>
+    </div>
+  );
+}
+
 export default function HeroSection({
   currentUser,
   onGoLogin,
@@ -299,6 +362,7 @@ export default function HeroSection({
               {categories.map((cat) => {
                 const currentSlug = getCategorySlug(cat.name, cat.id);
                 const isItemHovered = hoveredCategory === currentSlug;
+                const categoryLabels = cat.name.split(",").map((label) => label.trim());
 
                 return (
                   <li
@@ -306,10 +370,22 @@ export default function HeroSection({
                     className={`category-item ${isItemHovered ? "active-hover-item" : ""}`}
                     onMouseEnter={() => setHoveredCategory(currentSlug)}
                   >
-                    <a href={getSidebarCategoryPath(cat, currentSlug)}>
+                    <div className="category-item-content">
                       <div className="category-item-left">
                         <img className="category-icon" src={cat.icon} alt="" />
-                        <span>{cat.name}</span>
+                        <span className="category-labels">
+                          {categoryLabels.map((label, index) => (
+                            <span key={label}>
+                              {index > 0 && <span className="category-separator">, </span>}
+                              <a
+                                className="category-label-link"
+                                href={getSidebarLabelPath(cat, currentSlug, label)}
+                              >
+                                {label}
+                              </a>
+                            </span>
+                          ))}
+                        </span>
                       </div>
                       <svg
                         width="12"
@@ -321,7 +397,7 @@ export default function HeroSection({
                       >
                         <polyline points="9 18 15 12 9 6" />
                       </svg>
-                    </a>
+                    </div>
                   </li>
                 );
               })}
@@ -543,7 +619,7 @@ export default function HeroSection({
                     {audioTypesSquare.map((item, i) => (
                       <a
                         key={i}
-                        href={getCategoryTopicPath("Tai nghe", item.name)}
+                        href={getAudioCategoryPath(item.name) || getCategoryTopicPath("Tai nghe", item.name)}
                         className="mega-laptop-need-card"
                       >
                         <img
@@ -555,7 +631,7 @@ export default function HeroSection({
                       </a>
                     ))}
                     <a
-                      href={buildCategoryPath("Tai nghe")}
+                      href={AUDIO_CATEGORY_PATHS.headphones}
                       className="mega-pill-item full-width-row-pill"
                       style={{ gridColumn: "span 2", marginTop: "4px" }}
                     >
@@ -569,7 +645,7 @@ export default function HeroSection({
                     {micTypesSquare.map((item, i) => (
                       <a
                         key={i}
-                        href={getCategoryTopicPath("Âm thanh", item.name, {
+                        href={getAudioCategoryPath(item.name) || getCategoryTopicPath("Âm thanh", item.name, {
                           q: item.query || item.name,
                         })}
                         className="mega-laptop-need-card"
@@ -593,7 +669,7 @@ export default function HeroSection({
                       <a
                         key={i}
                         href={brand.name === "AirPods"
-                          ? getCategoryTopicPath("Tai nghe", "AirPods")
+                          ? AUDIO_CATEGORY_PATHS.airPods
                           : getCategoryBrandPath("Tai nghe", brand)}
                         className="mega-brand-logo-card-item relative-pill"
                       >
@@ -648,7 +724,7 @@ export default function HeroSection({
                       </a>
                     ))}
                     <a
-                      href={buildCategoryPath("Loa")}
+                      href={AUDIO_CATEGORY_PATHS.speakers}
                       className="mega-pill-item full-width-row-pill"
                       style={{ gridColumn: "span 2", marginTop: "4px" }}
                     >
@@ -841,7 +917,7 @@ export default function HeroSection({
                     {householdDevices.map((item, i) => (
                       <a
                         key={i}
-                        href={getCategoryTopicPath("Làm đẹp", item.name)}
+                        href={getCategoryTopicPath("Đồ gia dụng", item.name)}
                         className="mega-laptop-need-card"
                       >
                         <img
@@ -891,7 +967,7 @@ export default function HeroSection({
                     {beautyDevices.map((item, i) => (
                       <a
                         key={i}
-                        href={getCategoryTopicPath("Đồ gia dụng", item.name)}
+                        href={getCategoryTopicPath("Làm đẹp", item.name)}
                         className="mega-laptop-need-card"
                       >
                         <img
@@ -1261,137 +1337,69 @@ export default function HeroSection({
               <div className="mega-column">
                 <div className="mega-section">
                   <div className="mega-section-title">Chọn hãng tivi</div>
-                  <div className="mega-brand-logos-grid">
-                    {APPLIANCE_LOGOS.filter((l) =>
-                      [
-                        "SAMSUNG",
-                        "LG",
-                        "Xiaomi",
-                        "Sony",
-                        "TCL",
-                        "AQUA",
-                        "coocaa",
-                      ].includes(l.name),
-                    ).map((brand, i) => (
-                      <a
-                        key={i}
-                        href={getCategoryBrandPath("Tivi", brand)}
-                        className="mega-brand-logo-card-item"
-                      >
-                        <SafeBrandImage src={brand.logo} alt={brand.name} />
-                      </a>
-                    ))}
-                  </div>
-                  <a
-                    href={buildCategoryPath("Tivi")}
-                    className="mega-pill-item full-width-row-pill"
-                    style={{ marginTop: "4px" }}
-                  >
-                    Xem tất cả tivi
-                  </a>
+                  <ApplianceBrandGrid
+                    category="Tivi"
+                    brands={["SAMSUNG", "LG", "Xiaomi", "Sony", "TCL", "AQUA", "coocaa", "VSP"]}
+                    viewAllLabel="Xem tất cả tivi"
+                    viewAllSpan={2}
+                  />
                 </div>
               </div>
               <div className="mega-column">
                 <div className="mega-section">
                   <div className="mega-section-title">Chọn hãng tủ lạnh</div>
-                  <div className="mega-brand-logos-grid">
-                    {APPLIANCE_LOGOS.filter((l) =>
-                      [
-                        "LG",
-                        "SAMSUNG",
-                        "Xiaomi",
-                        "Panasonic",
-                        "AQUA",
-                        "Toshiba",
-                        "Sharp",
-                        "Hitachi",
-                      ].includes(l.name),
-                    ).map((brand, i) => (
-                      <a
-                        key={i}
-                        href={getCategoryBrandPath("Tủ lạnh", brand)}
-                        className="mega-brand-logo-card-item"
-                      >
-                        <SafeBrandImage src={brand.logo} alt={brand.name} />
-                      </a>
-                    ))}
-                  </div>
-                  <a
-                    href={buildCategoryPath("Tủ lạnh")}
-                    className="mega-pill-item full-width-row-pill"
-                    style={{ marginTop: "4px" }}
-                  >
-                    Xem tất cả tủ lạnh
-                  </a>
+                  <ApplianceBrandGrid
+                    category="Tủ lạnh"
+                    brands={["LG", "SAMSUNG", "Xiaomi", "Panasonic", "AQUA", "Toshiba"]}
+                    viewAllLabel="Xem tất cả tủ lạnh"
+                    viewAllSpan={2}
+                  />
+                </div>
+                <div className="mega-section" style={{ marginTop: "12px" }}>
+                  <div className="mega-section-title">Chọn hãng tủ đông</div>
+                  <ApplianceBrandGrid
+                    category="Tủ đông"
+                    brands={["Toshiba"]}
+                    viewAllLabel="Xem tất cả tủ đông"
+                  />
                 </div>
               </div>
               <div className="mega-column">
                 <div className="mega-section">
                   <div className="mega-section-title">Chọn hãng máy giặt</div>
-                  <div className="mega-brand-logos-grid">
-                    {APPLIANCE_LOGOS.filter((l) =>
-                      [
-                        "LG",
-                        "SAMSUNG",
-                        "Xiaomi",
-                        "Panasonic",
-                        "AQUA",
-                        "Toshiba",
-                        "Sharp",
-                      ].includes(l.name),
-                    ).map((brand, i) => (
-                      <a
-                        key={i}
-                        href={getCategoryBrandPath("Máy giặt", brand)}
-                        className="mega-brand-logo-card-item"
-                      >
-                        <SafeBrandImage src={brand.logo} alt={brand.name} />
-                      </a>
-                    ))}
-                  </div>
-                  <a
-                    href={buildCategoryPath("Máy giặt")}
-                    className="mega-pill-item full-width-row-pill"
-                    style={{ marginTop: "4px" }}
-                  >
-                    Xem tất cả máy giặt
-                  </a>
+                  <ApplianceBrandGrid
+                    category="Máy giặt"
+                    brands={["LG", "SAMSUNG", "Xiaomi", "Panasonic", "AQUA", "Toshiba"]}
+                    viewAllLabel="Xem tất cả máy giặt"
+                    viewAllSpan={2}
+                  />
+                </div>
+                <div className="mega-section" style={{ marginTop: "12px" }}>
+                  <div className="mega-section-title">Chọn hãng máy sấy</div>
+                  <ApplianceBrandGrid
+                    category="Máy sấy quần áo"
+                    brands={["LG", "SAMSUNG", "Panasonic", "AQUA", "Toshiba"]}
+                    viewAllLabel="Xem tất cả máy sấy"
+                  />
                 </div>
               </div>
               <div className="mega-column">
                 <div className="mega-section">
                   <div className="mega-section-title">Chọn hãng máy lạnh</div>
-                  <div className="mega-brand-logos-grid">
-                    {APPLIANCE_LOGOS.filter((l) =>
-                      [
-                        "Panasonic",
-                        "Daikin",
-                        "Sharp",
-                        "LG",
-                        "AQUA",
-                        "SAMSUNG",
-                        "Casper",
-                        "TCL",
-                        "Hitachi",
-                        "Xiaomi",
-                      ].includes(l.name),
-                    ).map((brand, i) => (
-                      <a
-                        key={i}
-                        href={getCategoryBrandPath("Máy lạnh", brand)}
-                        className="mega-brand-logo-card-item"
-                      >
-                        <SafeBrandImage src={brand.logo} alt={brand.name} />
-                      </a>
-                    ))}
-                  </div>
-                  <a
-                    href={buildCategoryPath("Máy lạnh")}
-                    className="mega-pill-item full-width-row-pill"
-                    style={{ marginTop: "4px" }}
-                  >
-                    Xem tất cả máy lạnh
-                  </a>
+                  <ApplianceBrandGrid
+                    category="Máy lạnh"
+                    brands={["Panasonic", "Daikin", "Sharp", "LG", "AQUA", "SAMSUNG", "Casper", "TCL", "Hitachi", "Xiaomi"]}
+                    viewAllLabel="Xem tất cả máy lạnh"
+                    viewAllSpan={2}
+                  />
+                </div>
+                <div className="mega-section" style={{ marginTop: "12px" }}>
+                  <div className="mega-section-title">Máy rửa chén bát</div>
+                  <ApplianceBrandGrid
+                    category="Máy rửa chén bát"
+                    brands={["Bosch"]}
+                    viewAllLabel="Xem tất cả"
+                  />
                 </div>
               </div>
               <div className="mega-tv-featured-strip">

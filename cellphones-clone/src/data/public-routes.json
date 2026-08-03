@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-28.5",
+  "version": "2026-08-03.7",
   "siteOrigin": "https://cellphones.com.vn",
   "external": {
     "smember": "https://smember.com.vn/?company_id=cellphones",
@@ -11,6 +11,22 @@
     "android": "https://play.google.com/store/apps/details?id=vn.com.cellphones.android.smember",
     "ios": "https://apps.apple.com/vn/app/cellphones/id6502395577"
   },
+  "footerPagePaths": [
+    "/chinh-sach/chinh-sach-doi-tra",
+    "/uu-dai-smember",
+    "/quy-dinh-ve-hoa-don-khi-mua-hang-cellphones",
+    "/bao-hanh/apple",
+    "/quy-dinh-ve-viec-sao-luu-du-lieu",
+    "/chinh-sach-khui-hop-apple",
+    "/vat-refund",
+    "/dich-vu-khach-hang-doanh-nghiep",
+    "/tos",
+    "/chinh-sach-bao-mat",
+    "/chinh-sach/chinh-sach-bao-mat-thong-tin-ca-nhan",
+    "/chinh-sach-bao-hanh",
+    "/lien-he-hop-tac",
+    "/bieu-phi-bao-hanh-mo-rong"
+  ],
   "phoneLandings": {
     "/mobile/apple.html": "iPhone (Apple) chính hãng, giá tốt, góp 0% từ 0đ T07/2026",
     "/mobile/samsung.html": "Điện thoại Samsung Galaxy [A, S, Z] giá tốt, giảm đến 11tr",
@@ -71,6 +87,16 @@
       "appPage": "home",
       "title": "CellphoneS - Điện thoại, laptop, tablet, phụ kiện chính hãng",
       "description": "Hệ thống bán lẻ điện thoại, laptop, tablet, phụ kiện và thiết bị công nghệ chính hãng.",
+      "robots": "index,follow"
+    },
+    {
+      "id": "trade-in",
+      "path": "/thu-cu-doi-moi",
+      "pageType": "service",
+      "handling": "internal",
+      "appPage": "trade-in",
+      "title": "Thu cũ đổi mới | Thanh lý, thu mua điện thoại cũ trợ giá 30%",
+      "description": "Định giá thiết bị cũ, chọn sản phẩm lên đời và nhận trợ giá tại CellphoneS.",
       "robots": "index,follow"
     },
     {
@@ -147,6 +173,30 @@
       "category": "Âm thanh",
       "title": "Micro thu âm chuyên nghiệp, lọc ồn AI",
       "description": "Micro cài áo, micro phòng thu và micro livestream chính hãng.",
+      "robots": "index,follow"
+    },
+    {
+      "id": "karaoke-microphone",
+      "path": "/thiet-bi-am-thanh/micro.html",
+      "pageType": "category",
+      "handling": "internal",
+      "appPage": "info",
+      "keyword": "Micro không dây",
+      "category": "Âm thanh",
+      "title": "Micro không dây và micro Karaoke chính hãng",
+      "description": "Micro không dây, micro Karaoke và phụ kiện âm thanh chính hãng.",
+      "robots": "index,follow"
+    },
+    {
+      "id": "turntable",
+      "path": "/thiet-bi-am-thanh/dia-than.html",
+      "pageType": "category",
+      "handling": "internal",
+      "appPage": "info",
+      "keyword": "Đầu đĩa than",
+      "category": "Âm thanh",
+      "title": "Đầu đĩa than chính hãng",
+      "description": "Đầu đĩa than và phụ kiện âm thanh analog chính hãng.",
       "robots": "index,follow"
     },
     {
@@ -385,11 +435,52 @@
       "robots": "noindex,follow"
     },
     {
+      "id": "installment",
+      "path": "/tra-gop",
+      "pageType": "service",
+      "handling": "internal",
+      "appPage": "installment",
+      "title": "Mua điện thoại trả góp 0% - 0 trả trước - 0 phí tại CellphoneS",
+      "description": "Các hình thức trả góp qua thẻ tín dụng, công ty tài chính và mua trước trả sau tại CellphoneS.",
+      "robots": "index,follow"
+    },
+    {
+      "id": "credit-card-installment-guide",
+      "path": "/huong-dan-mua-hang-tra-gop-bang-the-tin-dung-tai-cellphones",
+      "pageType": "policy",
+      "handling": "internal",
+      "appPage": "credit-card-installment-guide",
+      "title": "Hướng dẫn mua hàng trả góp qua thẻ tín dụng tại CellphoneS",
+      "description": "Điều kiện thẻ, ngân hàng, kỳ hạn và cách chuyển đổi trả góp bằng thẻ tín dụng tại CellphoneS.",
+      "robots": "index,follow"
+    },
+    {
+      "id": "online-purchase-and-payment-policy",
+      "path": "/chinh-sach/mua-hang-va-thanh-toan-online",
+      "canonicalPath": "/chinh-sach-giao-hang",
+      "pageType": "policy",
+      "handling": "internal",
+      "appPage": "shipping-policy",
+      "title": "Mua hàng và thanh toán Online | CellphoneS",
+      "description": "Hướng dẫn mua hàng từ xa, thanh toán, phí vận chuyển, thời gian giao nhận và hoàn tiền tại CellphoneS.",
+      "robots": "index,follow"
+    },
+    {
+      "id": "shipping-policy",
+      "path": "/chinh-sach-giao-hang",
+      "pageType": "policy",
+      "handling": "internal",
+      "appPage": "shipping-policy",
+      "title": "Chính sách giao hàng CellphoneS - Nhanh chóng, miễn phí",
+      "description": "Hướng dẫn mua hàng từ xa, thanh toán, phí vận chuyển, thời gian giao nhận và hoàn tiền tại CellphoneS.",
+      "robots": "index,follow"
+    },
+    {
       "id": "promotions",
       "path": "/danh-sach-khuyen-mai",
       "pageType": "promotion",
       "handling": "internal",
-      "appPage": "info",
+      "appPage": "promotions",
       "aliases": ["/khuyen-mai/uu-dai-thanh-toan"],
       "title": "Danh sách khuyến mãi | CellphoneS",
       "description": "Các chương trình ưu đãi và khuyến mãi đang diễn ra tại CellphoneS.",
@@ -484,36 +575,36 @@
     {
       "id": "points-lookup",
       "path": "/smember/tra-diem",
-      "pageType": "external",
-      "handling": "external",
-      "targetKey": "smemberPoints",
+      "pageType": "lookup",
+      "handling": "internal",
+      "appPage": "footer-pages",
       "title": "Tra điểm Smember",
       "robots": "noindex,nofollow"
     },
     {
       "id": "warranty-lookup",
       "path": "/bao-hanh/tra-thong-tin-bao-hanh",
-      "pageType": "external",
-      "handling": "external",
-      "targetKey": "smemberWarranty",
+      "pageType": "lookup",
+      "handling": "internal",
+      "appPage": "footer-pages",
       "title": "Tra thông tin bảo hành",
       "robots": "noindex,nofollow"
     },
     {
       "id": "invoice-lookup",
       "path": "/hoa-don/tra-cuu-hoa-don-dien-tu",
-      "pageType": "external",
-      "handling": "external",
-      "targetKey": "invoice",
+      "pageType": "lookup",
+      "handling": "internal",
+      "appPage": "footer-pages",
       "title": "Tra cứu hóa đơn điện tử",
       "robots": "noindex,nofollow"
     },
     {
       "id": "recruitment",
       "path": "/tuyen-dung",
-      "pageType": "external",
-      "handling": "external",
-      "targetKey": "recruitment",
+      "pageType": "career",
+      "handling": "internal",
+      "appPage": "footer-pages",
       "title": "Tuyển dụng CellphoneS",
       "robots": "index,follow"
     },

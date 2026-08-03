@@ -377,16 +377,11 @@ export function MainHeader({
             </svg>
           </a>
 
-          <button
-            type="button"
-            className={`header-outlined-btn header-login-btn ${activePopup === "auth" ? "active-popup-btn" : ""}`}
+          <a
+            className="header-outlined-btn header-login-btn"
             id="header-login-btn"
-            aria-label={currentUser ? `Tài khoản ${accountLabel}` : 'Đăng nhập hoặc đăng ký'}
-            aria-expanded={activePopup === "auth"}
-            onClick={(e) => {
-              e.stopPropagation();
-              setActivePopup(activePopup === "auth" ? null : "auth");
-            }}
+            href={currentUser ? "/smember" : "/smember/login"}
+            aria-label={currentUser ? `Mở tài khoản ${accountLabel}` : 'Đăng nhập Smember'}
           >
             <span className="header-action-label">{accountLabel}</span>
             <svg
@@ -400,7 +395,7 @@ export function MainHeader({
               <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
               <circle cx="12" cy="7" r="4" />
             </svg>
-          </button>
+          </a>
         </div>
       </div>
     </header>

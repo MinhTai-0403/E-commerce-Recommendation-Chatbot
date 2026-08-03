@@ -1,68 +1,61 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   createAdminCoupon,
-  createAdminInventory,
   createAdminProduct,
   deleteAdminCoupon,
-  deleteAdminInventory,
   deleteAdminProduct,
   deleteAdminQuestion,
   deleteAdminReturn,
   deleteAdminReview,
-  deleteAdminShipment,
   deleteAdminSupportRequest,
   deleteAdminUser,
   fetchAdminAuditLogs,
   fetchAdminBusinessVerifications,
   fetchAdminCoupons,
   fetchAdminInventory,
-  fetchAdminOrders,
-  fetchAdminPayments,
   fetchAdminProducts,
   fetchAdminQuestions,
   fetchAdminReturns,
   fetchAdminRevenue,
   fetchAdminReviews,
-  fetchAdminShipments,
   fetchAdminSummary,
   fetchAdminSupportRequests,
   fetchAdminUsers,
   updateAdminBusinessVerification,
   updateAdminCoupon,
   updateAdminInventory,
-  updateAdminOrder,
-  updateAdminPayment,
   updateAdminProduct,
   updateAdminQuestion,
   updateAdminReturn,
   updateAdminReview,
-  updateAdminShipment,
   updateAdminSupportRequest,
   updateAdminUser,
 } from '../../services/apiAdmin';
 import { clearAuthSession } from '../../services/apiAuth';
 import {
   buildCouponPayload,
-  buildProductInventoryPayload,
   buildProductPayload,
   couponAudienceOptions,
+  couponDistributionOptions,
   couponStatusOptions,
   couponToForm,
   couponTypeOptions,
   emptyCouponForm,
   emptyProductForm,
-  findInventoryForProduct,
   formatCurrency,
   formatDate,
-  inventoryStatusOptions,
-  orderStatusOptions,
-  paymentStatusOptions,
+  formatMoney,
   productToForm,
   returnStatusOptions,
-  shipmentStatusOptions,
+  returnStatusTransitions,
   supportStatusOptions,
 } from './adminDashboardUtils';
+import AdminOrdersWorkspace from './AdminOrdersWorkspace';
 import './AdminDashboard.css';
+
+function isUsableAdminImage(value) {
+  return Boolean(value) && !/\/media\/catalog\/product\/?$/i.test(value);
+}
 
 function readImageFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
@@ -106,24 +99,6 @@ function readImageFileAsDataUrl(file) {
   });
 }
 
-async function upsertProductInventory(form, savedProduct = {}, editingProduct = null) {
-  const payload = buildProductInventoryPayload(form, savedProduct || editingProduct || {});
-  const identifier = editingProduct?.inventoryId
-    || editingProduct?.inventoryKey
-    || payload.key
-    || payload.productId
-    || payload.productSlug
-    || payload.productSku;
-
-  if (!payload.productId && !payload.key) return;
-
-  try {
-    await updateAdminInventory(identifier, payload);
-  } catch {
-    await createAdminInventory(payload);
-  }
-}
-
 const adminIconPaths = {
   dashboard: ['M4 4h6v6H4z', 'M14 4h6v6h-6z', 'M4 14h6v6H4z', 'M14 14h6v6h-6z'],
   orders: ['M6 3h12v18l-3-2-3 2-3-2-3 2z', 'M9 8h6', 'M9 12h6'],
@@ -144,6 +119,8 @@ const adminIconPaths = {
   search: ['M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16', 'M21 21l-4.35-4.35'],
   bell: ['M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9', 'M13.7 21a2 2 0 0 1-3.4 0'],
   menu: ['M4 6h16', 'M4 12h16', 'M4 18h16'],
+  chevronLeft: ['M15 18l-6-6 6-6'],
+  chevronRight: ['M9 18l6-6-6-6'],
 };
 
 function AdminIcon({ name, size = 20 }) {
@@ -170,6 +147,58 @@ function StatCard({ label, value, tone, icon = 'dashboard', helper = 'Dữ liệ
   );
 }
 
+function useDebouncedValue(value, delay = 350) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedValue(value), delay);
+    return () => window.clearTimeout(timer);
+  }, [delay, value]);
+
+  return debouncedValue;
+}
+
+function AdminPagination({ pagination, onPageChange, noun = 'bản ghi', disabled = false }) {
+  const page = Number(pagination?.page || 1);
+  const totalPages = Math.max(1, Number(pagination?.totalPages || 1));
+  const total = Number(pagination?.total || 0);
+
+  if (totalPages <= 1 && total === 0) return null;
+
+  const changePage = (nextPage) => {
+    onPageChange(nextPage);
+    document.querySelector('.admin-page-heading')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  return (
+    <nav className="admin-pagination" aria-label={`Phân trang ${noun}`}>
+      <span>Trang <strong>{page}</strong>/{totalPages} · {total.toLocaleString('vi-VN')} {noun}</span>
+      <div>
+        <button
+          type="button"
+          className="admin-icon-button"
+          onClick={() => changePage(Math.max(1, page - 1))}
+          disabled={disabled || page <= 1}
+          aria-label="Trang trước"
+          title="Trang trước"
+        >
+          <AdminIcon name="chevronLeft" size={18} />
+        </button>
+        <button
+          type="button"
+          className="admin-icon-button"
+          onClick={() => changePage(Math.min(totalPages, page + 1))}
+          disabled={disabled || page >= totalPages}
+          aria-label="Trang sau"
+          title="Trang sau"
+        >
+          <AdminIcon name="chevronRight" size={18} />
+        </button>
+      </div>
+    </nav>
+  );
+}
+
 export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGoLogin }) {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -179,7 +208,6 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
   const [loading, setLoading] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
   const [summary, setSummary] = useState(null);
-  const [ordersPayload, setOrdersPayload] = useState(null);
   const [productsPayload, setProductsPayload] = useState(null);
   const [usersPayload, setUsersPayload] = useState(null);
   const [businessPayload, setBusinessPayload] = useState(null);
@@ -187,44 +215,56 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
   const [reviewsPayload, setReviewsPayload] = useState(null);
   const [couponsPayload, setCouponsPayload] = useState(null);
   const [inventoryPayload, setInventoryPayload] = useState(null);
-  const [paymentsPayload, setPaymentsPayload] = useState(null);
-  const [shipmentsPayload, setShipmentsPayload] = useState(null);
   const [returnsPayload, setReturnsPayload] = useState(null);
   const [supportPayload, setSupportPayload] = useState(null);
   const [revenuePayload, setRevenuePayload] = useState(null);
   const [auditLogsPayload, setAuditLogsPayload] = useState(null);
 
   const [couponSearch, setCouponSearch] = useState('');
+  const [couponPage, setCouponPage] = useState(1);
   const [inventorySearch, setInventorySearch] = useState('');
-  const [paymentSearch, setPaymentSearch] = useState('');
-  const [shipmentSearch, setShipmentSearch] = useState('');
+  const [inventoryPage, setInventoryPage] = useState(1);
   const [returnSearch, setReturnSearch] = useState('');
+  const [returnPage, setReturnPage] = useState(1);
   const [returnStatusFilter, setReturnStatusFilter] = useState('all');
   const [returnNotes, setReturnNotes] = useState({});
   const [supportSearch, setSupportSearch] = useState('');
+  const [supportPage, setSupportPage] = useState(1);
   const [supportStatusFilter, setSupportStatusFilter] = useState('all');
   const [supportDrafts, setSupportDrafts] = useState({});
   const [inventoryDrafts, setInventoryDrafts] = useState({});
-  const [paymentDrafts, setPaymentDrafts] = useState({});
-  const [shipmentDrafts, setShipmentDrafts] = useState({});
   const [productSearch, setProductSearch] = useState('');
-  const [orderSearch, setOrderSearch] = useState('');
-  const [orderStatusFilter, setOrderStatusFilter] = useState('all');
-  const [orderNotes, setOrderNotes] = useState({});
+  const [productPage, setProductPage] = useState(1);
   const [userSearch, setUserSearch] = useState('');
+  const [userPage, setUserPage] = useState(1);
   const [businessSearch, setBusinessSearch] = useState('');
+  const [businessPage, setBusinessPage] = useState(1);
   const [businessStatusFilter, setBusinessStatusFilter] = useState('pending');
   const [businessReviewNotes, setBusinessReviewNotes] = useState({});
   const [questionSearch, setQuestionSearch] = useState('');
+  const [questionPage, setQuestionPage] = useState(1);
   const [reviewSearch, setReviewSearch] = useState('');
+  const [reviewPage, setReviewPage] = useState(1);
+  const [auditPage, setAuditPage] = useState(1);
   const [questionAnswers, setQuestionAnswers] = useState({});
   const [reviewReplies, setReviewReplies] = useState({});
   const [productForm, setProductForm] = useState(emptyProductForm);
   const [editingProduct, setEditingProduct] = useState(null);
+  const [productEditorOpen, setProductEditorOpen] = useState(false);
   const [couponForm, setCouponForm] = useState(emptyCouponForm);
   const [editingCoupon, setEditingCoupon] = useState(null);
+  const [couponEditorOpen, setCouponEditorOpen] = useState(false);
 
-  const orders = ordersPayload?.data || [];
+  const debouncedProductSearch = useDebouncedValue(productSearch);
+  const debouncedUserSearch = useDebouncedValue(userSearch);
+  const debouncedBusinessSearch = useDebouncedValue(businessSearch);
+  const debouncedQuestionSearch = useDebouncedValue(questionSearch);
+  const debouncedReviewSearch = useDebouncedValue(reviewSearch);
+  const debouncedCouponSearch = useDebouncedValue(couponSearch);
+  const debouncedInventorySearch = useDebouncedValue(inventorySearch);
+  const debouncedReturnSearch = useDebouncedValue(returnSearch);
+  const debouncedSupportSearch = useDebouncedValue(supportSearch);
+
   const products = productsPayload?.data || [];
   const users = usersPayload?.data || [];
   const businessVerifications = businessPayload?.data || [];
@@ -232,8 +272,6 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
   const reviews = reviewsPayload?.data || [];
   const coupons = couponsPayload?.data || [];
   const inventoryItems = inventoryPayload?.data || [];
-  const payments = paymentsPayload?.data || [];
-  const shipments = shipmentsPayload?.data || [];
   const returns = returnsPayload?.data || [];
   const supportRequests = supportPayload?.data || [];
   const auditLogs = auditLogsPayload?.data || [];
@@ -246,6 +284,10 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
   ];
   const maxOrderStage = Math.max(1, ...orderStageStats.map((item) => item.value));
   const completionRate = Math.round((Number(stats.completedOrders || 0) / Math.max(1, Number(stats.totalOrders || 0))) * 100);
+  const notificationCount = Number(stats.pendingOrders || 0)
+    + Number(stats.pendingReturns || 0)
+    + Number(stats.pendingQuestions || 0)
+    + Number(stats.pendingBusinessVerifications || 0);
   const operationalStats = [
     { label: 'Người dùng hoạt động', value: stats.activeUsers, tone: 'green' },
     { label: 'Tài khoản bị khóa', value: stats.blockedUsers, tone: 'orange' },
@@ -272,8 +314,6 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
     { id: 'reviews', label: 'Đánh giá', group: 'operations' },
     { id: 'coupons', label: 'Mã giảm giá', group: 'operations' },
     { id: 'inventory', label: 'Tồn kho', group: 'operations' },
-    { id: 'payments', label: 'Thanh toán', group: 'operations' },
-    { id: 'shipments', label: 'Vận chuyển', group: 'operations' },
     { id: 'returns', label: 'Đổi trả', group: 'operations' },
     { id: 'support', label: 'Hỗ trợ', group: 'operations' },
     { id: 'revenue', label: 'Doanh thu', group: 'reports' },
@@ -308,6 +348,7 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
 
   useEffect(() => {
     let ignore = false;
+    const controller = new AbortController();
 
     async function loadAdminData() {
       if (!isAdmin) {
@@ -320,52 +361,36 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
 
       try {
         if (activeTab === 'dashboard') {
-          const data = await fetchAdminSummary();
+          const data = await fetchAdminSummary(controller.signal);
           if (!ignore) setSummary(data);
         }
 
-        if (activeTab === 'orders') {
-          const data = await fetchAdminOrders({
-            q: orderSearch.trim(),
-            status: orderStatusFilter,
-            limit: 50,
-          });
-          if (!ignore) {
-            setOrdersPayload(data);
-            setOrderNotes(Object.fromEntries(
-              (data.data || []).map((item) => [item.id, item.adminNote || ''])
-            ));
-          }
-        }
-
         if (activeTab === 'products') {
-          const [productsData, inventoryData] = await Promise.all([
-            fetchAdminProducts({
-              q: productSearch.trim(),
-              include: 'details',
-            }),
-            fetchAdminInventory({ limit: 100 }),
-          ]);
-          if (!ignore) {
-            setProductsPayload(productsData);
-            setInventoryPayload(inventoryData);
-          }
+          const data = await fetchAdminProducts({
+            q: debouncedProductSearch.trim(),
+            include: 'details',
+            page: productPage,
+            limit: 12,
+          }, controller.signal);
+          if (!ignore) setProductsPayload(data);
         }
 
         if (activeTab === 'users') {
           const data = await fetchAdminUsers({
-            q: userSearch.trim(),
-            limit: 50,
-          });
+            q: debouncedUserSearch.trim(),
+            page: userPage,
+            limit: 12,
+          }, controller.signal);
           if (!ignore) setUsersPayload(data);
         }
 
         if (activeTab === 'business') {
           const data = await fetchAdminBusinessVerifications({
-            q: businessSearch.trim(),
+            q: debouncedBusinessSearch.trim(),
             status: businessStatusFilter,
-            limit: 50,
-          });
+            page: businessPage,
+            limit: 10,
+          }, controller.signal);
           if (!ignore) {
             setBusinessPayload(data);
             setBusinessReviewNotes(Object.fromEntries(
@@ -376,9 +401,10 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
 
         if (activeTab === 'questions') {
           const data = await fetchAdminQuestions({
-            q: questionSearch.trim(),
-            limit: 50,
-          });
+            q: debouncedQuestionSearch.trim(),
+            page: questionPage,
+            limit: 8,
+          }, controller.signal);
           if (!ignore) {
             setQuestionsPayload(data);
             setQuestionAnswers(Object.fromEntries(
@@ -389,9 +415,10 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
 
         if (activeTab === 'reviews') {
           const data = await fetchAdminReviews({
-            q: reviewSearch.trim(),
-            limit: 50,
-          });
+            q: debouncedReviewSearch.trim(),
+            page: reviewPage,
+            limit: 8,
+          }, controller.signal);
           if (!ignore) {
             setReviewsPayload(data);
             setReviewReplies(Object.fromEntries(
@@ -402,24 +429,24 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
 
         if (activeTab === 'coupons') {
           const data = await fetchAdminCoupons({
-            q: couponSearch.trim(),
-            limit: 50,
-          });
+            q: debouncedCouponSearch.trim(),
+            page: couponPage,
+            limit: 10,
+          }, controller.signal);
           if (!ignore) setCouponsPayload(data);
         }
 
         if (activeTab === 'inventory') {
           const data = await fetchAdminInventory({
-            q: inventorySearch.trim(),
-            limit: 50,
-          });
+            q: debouncedInventorySearch.trim(),
+            page: inventoryPage,
+            limit: 12,
+          }, controller.signal);
           if (!ignore) {
             setInventoryPayload(data);
             setInventoryDrafts(Object.fromEntries(
               (data.data || []).map((item) => [item.id, {
                 stock: item.stock ?? 0,
-                reservedStock: item.reservedStock ?? 0,
-                soldCount: item.soldCount ?? 0,
                 status: item.status || 'in_stock',
                 note: item.note || '',
               }])
@@ -427,49 +454,14 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
           }
         }
 
-        if (activeTab === 'payments') {
-          const data = await fetchAdminPayments({
-            q: paymentSearch.trim(),
-            limit: 50,
-          });
-          if (!ignore) {
-            setPaymentsPayload(data);
-            setPaymentDrafts(Object.fromEntries(
-              (data.data || []).map((item) => [item.id, {
-                status: item.status || 'pending',
-                bankReference: item.bankReference || '',
-                note: item.note || '',
-              }])
-            ));
-          }
-        }
-
-        if (activeTab === 'shipments') {
-          const data = await fetchAdminShipments({
-            q: shipmentSearch.trim(),
-            limit: 50,
-          });
-          if (!ignore) {
-            setShipmentsPayload(data);
-            setShipmentDrafts(Object.fromEntries(
-              (data.data || []).map((item) => [item.id, {
-                carrier: item.carrier || '',
-                trackingCode: item.trackingCode || '',
-                status: item.status || 'pending',
-                receiverName: item.receiverName || '',
-                receiverPhone: item.receiverPhone || '',
-                note: item.note || '',
-              }])
-            ));
-          }
-        }
 
         if (activeTab === 'returns') {
           const data = await fetchAdminReturns({
-            q: returnSearch.trim(),
+            q: debouncedReturnSearch.trim(),
             status: returnStatusFilter,
-            limit: 50,
-          });
+            page: returnPage,
+            limit: 10,
+          }, controller.signal);
           if (!ignore) {
             setReturnsPayload(data);
             setReturnNotes(Object.fromEntries(
@@ -480,10 +472,11 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
 
         if (activeTab === 'support') {
           const data = await fetchAdminSupportRequests({
-            q: supportSearch.trim(),
+            q: debouncedSupportSearch.trim(),
             status: supportStatusFilter,
-            limit: 50,
-          });
+            page: supportPage,
+            limit: 10,
+          }, controller.signal);
           if (!ignore) {
             setSupportPayload(data);
             setSupportDrafts(Object.fromEntries(
@@ -497,12 +490,12 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
         }
 
         if (activeTab === 'revenue') {
-          const data = await fetchAdminRevenue();
+          const data = await fetchAdminRevenue({}, controller.signal);
           if (!ignore) setRevenuePayload(data);
         }
 
         if (activeTab === 'audit') {
-          const data = await fetchAdminAuditLogs({ limit: 50 });
+          const data = await fetchAdminAuditLogs({ page: auditPage, limit: 15 }, controller.signal);
           if (!ignore) setAuditLogsPayload(data);
         }
       } catch (loadError) {
@@ -515,83 +508,37 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
     loadAdminData();
     return () => {
       ignore = true;
+      controller.abort();
     };
   }, [
     activeTab,
     isAdmin,
-    orderSearch,
-    orderStatusFilter,
-    productSearch,
-    questionSearch,
+    debouncedProductSearch,
+    productPage,
+    debouncedQuestionSearch,
+    questionPage,
     refreshTick,
-    reviewSearch,
-    userSearch,
-    businessSearch,
+    debouncedReviewSearch,
+    reviewPage,
+    debouncedUserSearch,
+    userPage,
+    debouncedBusinessSearch,
+    businessPage,
     businessStatusFilter,
-    couponSearch,
-    inventorySearch,
-    paymentSearch,
-    shipmentSearch,
-    returnSearch,
+    debouncedCouponSearch,
+    couponPage,
+    debouncedInventorySearch,
+    inventoryPage,
+    debouncedReturnSearch,
+    returnPage,
     returnStatusFilter,
-    supportSearch,
+    debouncedSupportSearch,
+    supportPage,
     supportStatusFilter,
+    auditPage,
   ]);
 
   const refresh = () => setRefreshTick((value) => value + 1);
-
-  const handleUpdateOrderStatus = async (order, status) => {
-    setLoading(true);
-    setError('');
-    setMessage('');
-
-    try {
-      await updateAdminOrder(order.id || order.orderCode, {
-        status,
-        statusNote: orderNotes[order.id] || '',
-      });
-      setMessage('Đã cập nhật trạng thái đơn hàng.');
-      refresh();
-    } catch (updateError) {
-      setError(updateError.message || 'Không thể cập nhật đơn hàng.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleUpdateOrderPayment = async (order, paymentStatus) => {
-    setLoading(true);
-    setError('');
-    setMessage('');
-
-    try {
-      await updateAdminOrder(order.id || order.orderCode, { paymentStatus });
-      setMessage('Đã cập nhật thanh toán đơn hàng.');
-      refresh();
-    } catch (updateError) {
-      setError(updateError.message || 'Không thể cập nhật thanh toán.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSaveOrderNote = async (order) => {
-    setLoading(true);
-    setError('');
-    setMessage('');
-
-    try {
-      await updateAdminOrder(order.id || order.orderCode, {
-        adminNote: orderNotes[order.id] || '',
-      });
-      setMessage('Đã lưu ghi chú đơn hàng.');
-      refresh();
-    } catch (updateError) {
-      setError(updateError.message || 'Không thể lưu ghi chú đơn hàng.');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const updateProductField = (field, value) => {
     setProductForm((previous) => ({ ...previous, [field]: value }));
@@ -600,6 +547,7 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
   const resetProductForm = () => {
     setProductForm(emptyProductForm);
     setEditingProduct(null);
+    setProductEditorOpen(false);
   };
 
   const handleProductImageFileChange = async (event) => {
@@ -619,13 +567,9 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
   };
 
   const handleEditProduct = (product) => {
-    const inventoryItem = findInventoryForProduct(product, inventoryItems);
-    setEditingProduct({
-      ...product,
-      inventoryId: inventoryItem?.id,
-      inventoryKey: inventoryItem?.key,
-    });
-    setProductForm(productToForm(product, inventoryItem));
+    setEditingProduct(product);
+    setProductForm(productToForm(product));
+    setProductEditorOpen(true);
     setActiveTab('products');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -635,23 +579,40 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
     setError('');
     setMessage('');
 
-    if (!productForm.name.trim()) {
-      setError('Vui lòng nhập tên sản phẩm.');
+    const requiredProductFields = [
+      ['name', 'tên sản phẩm'],
+      ['slug', 'slug'],
+      ['sku', 'SKU'],
+      ['brand', 'thương hiệu'],
+      ['categories', 'danh mục'],
+    ];
+    const missingProductField = requiredProductFields.find(([field]) => !String(productForm[field] || '').trim());
+    if (missingProductField) {
+      setError(`Vui lòng nhập ${missingProductField[1]}.`);
+      return;
+    }
+
+    const currentPrice = Number(productForm.currentPrice);
+    const originalPrice = productForm.originalPrice === '' ? null : Number(productForm.originalPrice);
+    if (!Number.isFinite(currentPrice) || currentPrice < 0) {
+      setError('Giá bán phải là số không âm.');
+      return;
+    }
+    if (originalPrice !== null && (!Number.isFinite(originalPrice) || originalPrice < currentPrice)) {
+      setError('Giá niêm yết phải lớn hơn hoặc bằng giá bán.');
       return;
     }
 
     setLoading(true);
     try {
       const payload = buildProductPayload(productForm);
-      let savedProduct;
       if (editingProduct) {
-        savedProduct = await updateAdminProduct(editingProduct.mongoId || editingProduct.id || editingProduct.slug, payload);
+        await updateAdminProduct(editingProduct.mongoId || editingProduct.id || editingProduct.slug, payload);
       } else {
-        savedProduct = await createAdminProduct(payload);
+        await createAdminProduct(payload);
       }
 
-      await upsertProductInventory(productForm, savedProduct || payload, editingProduct);
-      setMessage(editingProduct ? 'Đã cập nhật sản phẩm và tồn kho.' : 'Đã thêm sản phẩm mới và tạo tồn kho.');
+      setMessage(editingProduct ? 'Đã cập nhật thông tin sản phẩm.' : 'Đã thêm sản phẩm mới. Hãy thiết lập số lượng tại trang Tồn kho.');
       resetProductForm();
       setActiveTab('products');
       refresh();
@@ -697,11 +658,13 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
   const resetCouponForm = () => {
     setCouponForm(emptyCouponForm);
     setEditingCoupon(null);
+    setCouponEditorOpen(false);
   };
 
   const handleEditCoupon = (coupon) => {
     setEditingCoupon(coupon);
     setCouponForm(couponToForm(coupon));
+    setCouponEditorOpen(true);
     setActiveTab('coupons');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -713,6 +676,50 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
 
     if (!couponForm.code.trim()) {
       setError('Vui lòng nhập mã giảm giá.');
+      return;
+    }
+
+    if (!couponForm.name.trim()) {
+      setError('Vui lòng nhập tên chương trình giảm giá.');
+      return;
+    }
+
+    const couponValue = Number(couponForm.value);
+    if (couponForm.type === 'percent' && (!Number.isFinite(couponValue) || couponValue <= 0 || couponValue > 100)) {
+      setError('Mức giảm phần trăm phải từ 1 đến 100%.');
+      return;
+    }
+    if (couponForm.type === 'fixed' && (!Number.isFinite(couponValue) || couponValue <= 0)) {
+      setError('Số tiền giảm cố định phải lớn hơn 0.');
+      return;
+    }
+
+    const nonNegativeFields = [
+      ['minSubtotal', 'Giá trị đơn tối thiểu'],
+      ['maxDiscount', 'Mức giảm tối đa'],
+    ];
+    const invalidNonNegative = nonNegativeFields.find(([field]) => (
+      couponForm[field] !== '' && (!Number.isFinite(Number(couponForm[field])) || Number(couponForm[field]) < 0)
+    ));
+    if (invalidNonNegative) {
+      setError(`${invalidNonNegative[1]} phải là số không âm.`);
+      return;
+    }
+
+    const limitFields = [
+      ['usageLimit', 'Tổng lượt sử dụng'],
+      ['userLimit', 'Lượt dùng mỗi người'],
+    ];
+    const invalidLimit = limitFields.find(([field]) => (
+      couponForm[field] !== '' && (!Number.isInteger(Number(couponForm[field])) || Number(couponForm[field]) < 1)
+    ));
+    if (invalidLimit) {
+      setError(`${invalidLimit[1]} phải là số nguyên lớn hơn 0.`);
+      return;
+    }
+
+    if (couponForm.startsAt && couponForm.expiresAt && new Date(couponForm.startsAt) >= new Date(couponForm.expiresAt)) {
+      setError('Thời gian kết thúc phải sau thời gian bắt đầu.');
       return;
     }
 
@@ -737,6 +744,9 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
   };
 
   const handleQuickUpdateCouponStatus = async (coupon, status) => {
+    const statusLabel = couponStatusOptions.find((item) => item.value === status)?.label || status;
+    if (!window.confirm(`Chuyển mã "${coupon.code}" sang trạng thái "${statusLabel}"?`)) return;
+
     setLoading(true);
     setError('');
     setMessage('');
@@ -781,16 +791,24 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
   };
 
   const handleSaveInventory = async (item) => {
+    const draft = inventoryDrafts[item.id] || {};
+    const stock = Number(draft.stock);
+    if (!Number.isInteger(stock) || stock < 0) {
+      setError('Tồn thực tế phải là số nguyên không âm.');
+      return;
+    }
+    if (stock < Number(item.reservedStock || 0)) {
+      setError(`Tồn thực tế không thể thấp hơn ${Number(item.reservedStock || 0)} sản phẩm đang giữ chỗ.`);
+      return;
+    }
+
     setLoading(true);
     setError('');
     setMessage('');
 
     try {
-      const draft = inventoryDrafts[item.id] || {};
       await updateAdminInventory(item.id || item.key || item.productId, {
-        stock: Number(draft.stock || 0),
-        reservedStock: Number(draft.reservedStock || 0),
-        soldCount: Number(draft.soldCount || 0),
+        stock,
         status: draft.status || 'in_stock',
         note: draft.note || '',
       });
@@ -803,106 +821,13 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
     }
   };
 
-  const handleDeleteInventory = async (item) => {
-    if (!window.confirm(`Xóa tồn kho "${item.productName || item.key}"?`)) return;
-
-    setLoading(true);
-    setError('');
-
-    try {
-      await deleteAdminInventory(item.id || item.key || item.productId);
-      setMessage('Đã xóa tồn kho.');
-      refresh();
-    } catch (deleteError) {
-      setError(deleteError.message || 'Không thể xóa tồn kho.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const updatePaymentDraft = (paymentId, field, value) => {
-    setPaymentDrafts((previous) => ({
-      ...previous,
-      [paymentId]: {
-        ...(previous[paymentId] || {}),
-        [field]: value,
-      },
-    }));
-  };
-
-  const handleSavePayment = async (payment) => {
-    setLoading(true);
-    setError('');
-    setMessage('');
-
-    try {
-      const draft = paymentDrafts[payment.id] || {};
-      await updateAdminPayment(payment.id || payment.transactionId || payment.orderCode, {
-        status: draft.status || 'pending',
-        bankReference: draft.bankReference || '',
-        note: draft.note || '',
-      });
-      setMessage('Đã cập nhật thanh toán và đồng bộ đơn hàng.');
-      refresh();
-    } catch (updateError) {
-      setError(updateError.message || 'Không thể cập nhật thanh toán.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const updateShipmentDraft = (shipmentId, field, value) => {
-    setShipmentDrafts((previous) => ({
-      ...previous,
-      [shipmentId]: {
-        ...(previous[shipmentId] || {}),
-        [field]: value,
-      },
-    }));
-  };
-
-  const handleSaveShipment = async (shipment) => {
-    setLoading(true);
-    setError('');
-    setMessage('');
-
-    try {
-      const draft = shipmentDrafts[shipment.id] || {};
-      await updateAdminShipment(shipment.id || shipment.trackingCode || shipment.orderCode, {
-        carrier: draft.carrier || '',
-        trackingCode: draft.trackingCode || '',
-        status: draft.status || 'pending',
-        receiverName: draft.receiverName || '',
-        receiverPhone: draft.receiverPhone || '',
-        note: draft.note || '',
-      });
-      setMessage('Đã cập nhật vận chuyển và đồng bộ trạng thái đơn.');
-      refresh();
-    } catch (updateError) {
-      setError(updateError.message || 'Không thể cập nhật vận chuyển.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDeleteShipment = async (shipment) => {
-    if (!window.confirm(`Xóa vận đơn "${shipment.trackingCode || shipment.orderCode}"?`)) return;
-
-    setLoading(true);
-    setError('');
-
-    try {
-      await deleteAdminShipment(shipment.id || shipment.trackingCode || shipment.orderCode);
-      setMessage('Đã xóa vận đơn.');
-      refresh();
-    } catch (deleteError) {
-      setError(deleteError.message || 'Không thể xóa vận đơn.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleUpdateUser = async (user, patch) => {
+    const label = user.fullName || user.email || user.id;
+    const action = patch.status
+      ? (patch.status === 'blocked' ? 'khóa' : 'mở khóa')
+      : (patch.role === 'admin' ? 'cấp quyền admin cho' : 'gỡ quyền admin của');
+    if (!window.confirm(`Xác nhận ${action} "${label}"?`)) return;
+
     setLoading(true);
     setError('');
     setMessage('');
@@ -919,7 +844,7 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
   };
 
   const handleDeleteUser = async (user) => {
-    if (!window.confirm(`Xóa người dùng "${user.fullName || user.email}"?`)) return;
+    if (!window.confirm(`Xóa vĩnh viễn người dùng "${user.fullName || user.email}"? Hành động này không thể hoàn tác.`)) return;
 
     setLoading(true);
     setError('');
@@ -987,6 +912,10 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
   };
 
   const handleUpdateQuestionStatus = async (question, status) => {
+    if (question.status === status) return;
+    const statusLabel = status === 'hidden' ? 'ẩn' : 'đưa về chờ xử lý';
+    if (!window.confirm(`Xác nhận ${statusLabel} câu hỏi này?`)) return;
+
     setLoading(true);
     setError('');
     setMessage('');
@@ -1045,6 +974,10 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
   };
 
   const handleUpdateReviewStatus = async (review, status) => {
+    if (review.status === status) return;
+    const statusLabel = status === 'approved' ? 'duyệt' : 'ẩn';
+    if (!window.confirm(`Xác nhận ${statusLabel} đánh giá này?`)) return;
+
     setLoading(true);
     setError('');
     setMessage('');
@@ -1155,18 +1088,39 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
   };
 
   const handleSaveSupportRequest = async (supportItem) => {
+    const draft = supportDrafts[supportItem.id] || {};
+    const response = String(draft.response || '').trim();
+    const adminNote = String(draft.adminNote || '').trim();
+    let status = draft.status || supportItem.status || 'new';
+    if (response && ['new', 'in_progress'].includes(status)) status = 'waiting_customer';
+
+    const hasChanges = response
+      || adminNote !== String(supportItem.adminNote || '').trim()
+      || status !== supportItem.status;
+    if (!hasChanges) {
+      setError('Chưa có thay đổi nào để lưu.');
+      return;
+    }
+
+    if (['resolved', 'closed'].includes(status) && !response && !supportItem.response) {
+      setError('Vui lòng nhập phản hồi trước khi hoàn tất yêu cầu hỗ trợ.');
+      return;
+    }
+
+    if (status === 'closed' && supportItem.status !== 'closed'
+      && !window.confirm(`Đóng yêu cầu hỗ trợ "${supportItem.requestCode}"?`)) return;
+
     setLoading(true);
     setError('');
     setMessage('');
 
     try {
-      const draft = supportDrafts[supportItem.id] || {};
       await updateAdminSupportRequest(supportItem.id || supportItem.requestCode, {
-        status: draft.status || supportItem.status || 'new',
-        adminNote: draft.adminNote || '',
-        response: draft.response?.trim() || supportItem.response || '',
+        status,
+        adminNote,
+        response: response || supportItem.response || '',
       });
-      setMessage(draft.response?.trim()
+      setMessage(response
         ? 'Đã gửi phản hồi cho khách hàng.'
         : 'Đã cập nhật yêu cầu hỗ trợ.');
       refresh();
@@ -1310,9 +1264,15 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
             <button type="button" className="admin-icon-button" onClick={refresh} disabled={loading} title="Làm mới dữ liệu">
               <AdminIcon name="refresh" />
             </button>
-            <button type="button" className="admin-icon-button admin-notification-button" title="Thông báo">
+            <button
+              type="button"
+              className="admin-icon-button admin-notification-button"
+              title={`${notificationCount} việc cần xử lý`}
+              aria-label={`${notificationCount} việc cần xử lý`}
+              onClick={() => setActiveTab('dashboard')}
+            >
               <AdminIcon name="bell" />
-              <i />
+              {notificationCount > 0 && <i />}
             </button>
             <button type="button" className="admin-account-button" onClick={onBackHome} title="Về trang chủ">
               <span>{adminName.charAt(0).toUpperCase()}</span>
@@ -1495,7 +1455,7 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                   {(summary?.recentProducts || []).map((product) => (
                     <div className="admin-list-row" key={product.id}>
                       <span className="admin-product-thumb">
-                        {product.image ? <img src={product.image} alt="" /> : <AdminIcon name="products" />}
+                        {isUsableAdminImage(product.image) ? <img src={product.image} alt="" /> : <AdminIcon name="products" />}
                       </span>
                       <div className="admin-list-content">
                         <strong>{product.name}</strong>
@@ -1511,159 +1471,16 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
           </section>
         )}
 
-        {activeTab === 'orders' && (
-          <section className="admin-section">
-            <div className="admin-card">
-              <div className="admin-card-title-row">
-                <div>
-                  <h2>Quản lý đơn hàng</h2>
-                  <p className="admin-card-subtitle">
-                    Theo dõi đơn từ lúc khách đặt COD đến xác nhận, chuẩn bị hàng, giao hàng và hoàn tất.
-                  </p>
-                </div>
-                <div className="admin-order-filters">
-                  <input
-                    value={orderSearch}
-                    onChange={(event) => setOrderSearch(event.target.value)}
-                    placeholder="Tìm mã đơn, khách, SĐT, sản phẩm..."
-                  />
-                  <select
-                    value={orderStatusFilter}
-                    onChange={(event) => setOrderStatusFilter(event.target.value)}
-                  >
-                    <option value="all">Tất cả trạng thái</option>
-                    {orderStatusOptions.map((status) => (
-                      <option key={status.value} value={status.value}>{status.label}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="admin-order-status-strip">
-                {orderStatusOptions.map((status) => (
-                  <button
-                    key={status.value}
-                    type="button"
-                    className={orderStatusFilter === status.value ? 'active' : ''}
-                    onClick={() => setOrderStatusFilter(status.value)}
-                  >
-                    <span>{status.label}</span>
-                    <strong>{ordersPayload?.statusCounts?.[status.value] || 0}</strong>
-                  </button>
-                ))}
-              </div>
-
-              <div className="admin-order-list">
-                {orders.map((order) => {
-                  const firstItem = order.items?.[0] || {};
-                  const totalQuantity = order.totals?.quantity || order.items?.reduce((sum, item) => sum + Number(item.quantity || 0), 0) || 0;
-                  const address = order.shippingAddress?.fullAddress
-                    || [
-                      order.shippingAddress?.addressLine,
-                      order.shippingAddress?.ward,
-                      order.shippingAddress?.district,
-                      order.shippingAddress?.province,
-                    ].filter(Boolean).join(', ');
-
-                  return (
-                    <article className="admin-order-row" key={order.id || order.orderCode}>
-                      <div className="admin-order-head">
-                        <div>
-                          <strong>#{order.orderCode}</strong>
-                          <span>{formatDate(order.createdAt)} · {order.shippingChoice?.label || 'COD'}</span>
-                        </div>
-                        <em className={`admin-status ${order.status}`}>{order.statusLabel || order.status}</em>
-                      </div>
-
-                      <div className="admin-order-body">
-                        <img src={firstItem.image || firstItem.thumbnail || firstItem.primaryImage} alt="" />
-                        <div>
-                          <strong>{firstItem.name || 'Đơn hàng CellphoneS'}</strong>
-                          <span>{totalQuantity} sản phẩm · {order.customer?.fullName || 'Khách hàng'} · {order.customer?.phone}</span>
-                          <span>{address || 'Chưa có địa chỉ nhận hàng'}</span>
-                        </div>
-                        <div className="admin-order-money">
-                          <span>Tổng tiền</span>
-                          <strong>{formatCurrency(order.totals?.total || order.totals?.roundedTotal)}</strong>
-                          <small>{order.payment?.methodLabel || 'Thanh toán COD'}</small>
-                          {order.payment?.transferContent && (
-                            <small>Mã CK: {order.payment.transferContent}</small>
-                          )}
-                          {order.payment?.bankReference && (
-                            <small>GD: {order.payment.bankReference}</small>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="admin-order-controls">
-                        <label>
-                          Giai đoạn đơn
-                          <select
-                            value={order.status || 'pending'}
-                            onChange={(event) => handleUpdateOrderStatus(order, event.target.value)}
-                          >
-                            {orderStatusOptions.map((status) => (
-                              <option key={status.value} value={status.value}>{status.label}</option>
-                            ))}
-                          </select>
-                        </label>
-                        <label>
-                          Thanh toán
-                          <select
-                            value={order.paymentStatus || order.payment?.status || 'unpaid'}
-                            onChange={(event) => handleUpdateOrderPayment(order, event.target.value)}
-                          >
-                            {paymentStatusOptions.map((status) => (
-                              <option key={status.value} value={status.value}>{status.label}</option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="admin-order-note">
-                          Ghi chú admin
-                          <textarea
-                            value={orderNotes[order.id] || ''}
-                            onChange={(event) => setOrderNotes((previous) => ({
-                              ...previous,
-                              [order.id]: event.target.value,
-                            }))}
-                            rows="2"
-                            placeholder="VD: Đã gọi xác nhận, chờ khách phản hồi..."
-                          />
-                        </label>
-                        <button type="button" onClick={() => handleSaveOrderNote(order)}>
-                          Lưu ghi chú
-                        </button>
-                      </div>
-
-                      <div className="admin-order-timeline">
-                        {(order.statusHistory?.length ? order.statusHistory : [{ status: order.status, label: order.statusLabel, changedAt: order.updatedAt }]).map((item, index) => (
-                          <div className="admin-order-timeline-item" key={`${order.id}-${item.status}-${index}`}>
-                            <span />
-                            <div>
-                              <strong>{item.label || item.status}</strong>
-                              <small>{formatDate(item.changedAt)}</small>
-                              {item.note && <p>{item.note}</p>}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </article>
-                  );
-                })}
-                {!orders.length && <p className="admin-empty">Chưa có đơn hàng phù hợp.</p>}
-              </div>
-            </div>
-          </section>
-        )}
+        {activeTab === 'orders' && <AdminOrdersWorkspace />}
 
         {activeTab === 'products' && (
-          <section className="admin-section admin-products-layout">
-            <form className="admin-card admin-product-form" onSubmit={handleSubmitProduct}>
+          <section className={`admin-section admin-products-layout ${productEditorOpen ? '' : 'list-only'}`}>
+            {productEditorOpen && <form className="admin-card admin-product-form" onSubmit={handleSubmitProduct}>
               <div className="admin-card-title-row">
                 <h2>{editingProduct ? 'Sửa sản phẩm' : 'Thêm sản phẩm'}</h2>
-                {editingProduct && (
-                  <button type="button" className="ghost" onClick={resetProductForm}>Hủy sửa</button>
-                )}
+                <button type="button" className="ghost" onClick={resetProductForm}>
+                  {editingProduct ? 'Hủy sửa' : 'Đóng'}
+                </button>
               </div>
 
               <label>
@@ -1734,65 +1551,19 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                 </label>
               </div>
 
-              <div className="admin-inline-inventory-box">
-                <div>
-                  <h3>Tồn kho sản phẩm</h3>
-                  <p>Nhập số lượng ở đây, không cần qua tab Tồn kho riêng.</p>
-                </div>
-                <div className="admin-form-grid">
-                  <label>
-                    Số lượng tồn
-                    <input
-                      type="number"
-                      min="0"
-                      value={productForm.stock}
-                      onChange={(event) => updateProductField('stock', event.target.value)}
-                      placeholder="100"
-                    />
-                  </label>
-                  <label>
-                    Đang giữ chỗ
-                    <input
-                      type="number"
-                      min="0"
-                      value={productForm.reservedStock}
-                      onChange={(event) => updateProductField('reservedStock', event.target.value)}
-                      placeholder="0"
-                    />
-                  </label>
-                </div>
-                <div className="admin-form-grid">
-                  <label>
-                    Đã bán
-                    <input
-                      type="number"
-                      min="0"
-                      value={productForm.soldCount}
-                      onChange={(event) => updateProductField('soldCount', event.target.value)}
-                      placeholder="0"
-                    />
-                  </label>
-                  <label>
-                    Trạng thái tồn kho
-                    <select
-                      value={productForm.inventoryStatus}
-                      onChange={(event) => updateProductField('inventoryStatus', event.target.value)}
-                    >
-                      {inventoryStatusOptions.map((status) => (
-                        <option key={status.value} value={status.value}>{status.label}</option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-                <label>
-                  Ghi chú tồn kho
-                  <input
-                    value={productForm.inventoryNote}
-                    onChange={(event) => updateProductField('inventoryNote', event.target.value)}
-                    placeholder="VD: Hàng ở kho HCM, còn 100 máy"
-                  />
-                </label>
-              </div>
+              <label className="admin-product-inventory-policy">
+                <input
+                  type="checkbox"
+                  checked={productForm.manageInventory !== false}
+                  onChange={(event) => updateProductField('manageInventory', event.target.checked)}
+                />
+                <span>
+                  <strong>Quản lý tồn kho cho sản phẩm này</strong>
+                  <small>
+                    Số lượng, giữ chỗ và đã bán được quản lý riêng tại trang Tồn kho để tránh lệch dữ liệu.
+                  </small>
+                </span>
+              </label>
 
               <label className="admin-image-upload">
                 Ảnh chính
@@ -1829,61 +1600,97 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
               <button type="submit" className="admin-primary-btn" disabled={loading}>
                 {editingProduct ? 'Lưu thay đổi' : 'Thêm sản phẩm'}
               </button>
-            </form>
+            </form>}
 
             <div className="admin-card admin-table-card">
               <div className="admin-card-title-row">
                 <h2>Danh sách sản phẩm</h2>
-                <div className="admin-search">
-                  <input
-                    value={productSearch}
-                    onChange={(event) => setProductSearch(event.target.value)}
-                    placeholder="Tìm sản phẩm..."
-                  />
+                <div className="admin-card-title-actions">
+                  <button type="button" onClick={() => {
+                    setProductForm(emptyProductForm);
+                    setEditingProduct(null);
+                    setProductEditorOpen(true);
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}>
+                    Thêm sản phẩm
+                  </button>
+                  <div className="admin-search">
+                    <input
+                      value={productSearch}
+                      onChange={(event) => {
+                        setProductSearch(event.target.value);
+                        setProductPage(1);
+                      }}
+                      placeholder="Tìm sản phẩm..."
+                    />
+                  </div>
                 </div>
               </div>
 
               <div className="admin-table">
                 {products.map((product) => {
-                  const inventoryItem = findInventoryForProduct(product, inventoryItems);
+                  const inventoryItem = product.inventorySummary;
                   return (
                     <div className="admin-product-row" key={product.id}>
-                      <img src={product.thumbnail || product.primaryImage || product.image} alt="" />
+                      {isUsableAdminImage(product.thumbnail || product.primaryImage || product.image)
+                        ? <img src={product.thumbnail || product.primaryImage || product.image} alt="" />
+                        : <AdminIcon name="products" />}
                       <div>
                         <strong>{product.name}</strong>
                         <span>{product.sku || product.slug} · {product.brand || '—'}</span>
                         <span>
-                          Tồn kho: {inventoryItem ? `${inventoryItem.availableStock}/${inventoryItem.stock}` : (product.stock ?? 'Chưa tạo')}
-                          {inventoryItem?.status ? ` · ${inventoryItem.status}` : ''}
+                          {product.manageInventory === false
+                            ? 'Không theo dõi tồn kho'
+                            : inventoryItem
+                              ? `Khả dụng ${inventoryItem.availableStock} · Tồn thực tế ${inventoryItem.stock} · Giữ chỗ ${inventoryItem.reservedStock}`
+                              : 'Chưa thiết lập tồn kho'}
                         </span>
                         <em>{formatCurrency(product.currentPrice)}</em>
                       </div>
                       <div className="admin-row-actions">
                         <button type="button" onClick={() => handleEditProduct(product)}>Sửa</button>
+                        {product.manageInventory !== false && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setInventorySearch(product.sku || product.slug || product.name || '');
+                              setInventoryPage(1);
+                              setActiveTab('inventory');
+                            }}
+                          >
+                            Tồn kho
+                          </button>
+                        )}
                         <button type="button" className="danger" onClick={() => handleDeleteProduct(product)}>Xóa</button>
                       </div>
                     </div>
                   );
                 })}
-                {!products.length && <p className="admin-empty">Không có sản phẩm phù hợp.</p>}
+                {!products.length && <p className="admin-empty">{loading ? 'Đang tải sản phẩm...' : 'Không có sản phẩm phù hợp.'}</p>}
               </div>
+              <AdminPagination
+                pagination={productsPayload?.pagination}
+                onPageChange={setProductPage}
+                noun="sản phẩm"
+                disabled={loading}
+              />
             </div>
           </section>
         )}
 
         {activeTab === 'coupons' && (
-          <section className="admin-section admin-coupons-layout">
-            <form className="admin-card admin-product-form" onSubmit={handleSubmitCoupon}>
+          <section className={`admin-section admin-coupons-layout ${couponEditorOpen ? '' : 'list-only'}`}>
+            {couponEditorOpen && <form className="admin-card admin-product-form" onSubmit={handleSubmitCoupon}>
               <div className="admin-card-title-row">
                 <div>
                   <h2>{editingCoupon ? 'Sửa mã giảm giá' : 'Thêm mã giảm giá'}</h2>
                   <p className="admin-card-subtitle">
-                    Tạo mã voucher dùng cho checkout và trang Smember.
+                    Tạo mã ưu đãi. Mã không tự vào tài khoản; người dùng phải nhập để nhận vào kho voucher.
                   </p>
                 </div>
-                {editingCoupon && (
-                  <button type="button" className="ghost" onClick={resetCouponForm}>Hủy sửa</button>
-                )}
+                <button type="button" className="ghost" onClick={resetCouponForm}>
+                  {editingCoupon ? 'Hủy sửa' : 'Đóng'}
+                </button>
               </div>
 
               <div className="admin-form-grid">
@@ -1908,14 +1715,31 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                 </label>
               </div>
 
-              <label>
-                Tên ưu đãi
-                <input
-                  value={couponForm.name}
-                  onChange={(event) => updateCouponField('name', event.target.value)}
-                  placeholder="VD: Giảm 50K cho thành viên mới"
-                />
-              </label>
+              <div className="admin-form-grid">
+                <label>
+                  Tên ưu đãi
+                  <input
+                    value={couponForm.name}
+                    onChange={(event) => updateCouponField('name', event.target.value)}
+                    placeholder="VD: Giảm 10% cho thành viên mới"
+                  />
+                </label>
+                <label>
+                  Cách nhận mã
+                  <select
+                    value={couponForm.distributionMode || 'manual_claim'}
+                    onChange={(event) => updateCouponField('distributionMode', event.target.value)}
+                  >
+                    {couponDistributionOptions.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                  <small>
+                    {couponDistributionOptions.find((option) => option.value === couponForm.distributionMode)?.hint
+                      || couponDistributionOptions[0].hint}
+                  </small>
+                </label>
+              </div>
 
               <label>
                 Mô tả
@@ -1974,14 +1798,17 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                   </select>
                 </label>
                 <label>
-                  Giá trị
+                  {couponForm.type === 'percent' ? 'Phần trăm giảm (%)' : 'Giá trị giảm'}
                   <input
                     type="number"
-                    min="0"
+                    min={couponForm.type === 'percent' ? '1' : '0'}
+                    max={couponForm.type === 'percent' ? '100' : undefined}
+                    step={couponForm.type === 'percent' ? '1' : '1000'}
                     value={couponForm.value}
                     onChange={(event) => updateCouponField('value', event.target.value)}
                     placeholder={couponForm.type === 'percent' ? 'VD: 10' : 'VD: 50000'}
                   />
+                  {couponForm.type === 'percent' && <small>Nhập từ 1 đến 100%. Có thể giới hạn bằng “Giảm tối đa”.</small>}
                 </label>
               </div>
 
@@ -2023,7 +1850,7 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                   Lượt/user
                   <input
                     type="number"
-                    min="0"
+                    min="1"
                     value={couponForm.userLimit}
                     onChange={(event) => updateCouponField('userLimit', event.target.value)}
                     placeholder="VD: 1"
@@ -2053,7 +1880,7 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
               <button type="submit" className="admin-primary-btn" disabled={loading}>
                 {editingCoupon ? 'Lưu thay đổi mã' : 'Thêm mã giảm giá'}
               </button>
-            </form>
+            </form>}
 
             <div className="admin-card admin-table-card">
               <div className="admin-card-title-row">
@@ -2063,12 +1890,25 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                     Bấm Sửa để chỉnh, Bật/Tắt để đổi trạng thái, Xóa để gỡ mã.
                   </p>
                 </div>
-                <div className="admin-search">
-                  <input
-                    value={couponSearch}
-                    onChange={(event) => setCouponSearch(event.target.value)}
-                    placeholder="Tìm mã, tên ưu đãi..."
-                  />
+                <div className="admin-card-title-actions">
+                  <button type="button" onClick={() => {
+                    setCouponForm(emptyCouponForm);
+                    setEditingCoupon(null);
+                    setCouponEditorOpen(true);
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}>
+                    Thêm mã
+                  </button>
+                  <div className="admin-search">
+                    <input
+                      value={couponSearch}
+                      onChange={(event) => {
+                        setCouponSearch(event.target.value);
+                        setCouponPage(1);
+                      }}
+                      placeholder="Tìm mã, tên ưu đãi..."
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -2079,11 +1919,11 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                       <strong>{coupon.code}</strong>
                       <span>{coupon.name || coupon.description || 'Mã giảm giá'}</span>
                       <small>
-                        Loại: {coupon.type} · Giá trị: {coupon.type === 'percent' ? `${coupon.value}%` : formatCurrency(coupon.value)}
-                        {coupon.maxDiscount ? ` · Tối đa ${formatCurrency(coupon.maxDiscount)}` : ''}
+                        Loại: {coupon.type} · Giá trị: {coupon.type === 'percent' ? `${coupon.value}%` : formatMoney(coupon.value)}
+                        {coupon.maxDiscount ? ` · Tối đa ${formatMoney(coupon.maxDiscount)}` : ''}
                       </small>
                       <small>
-                        Đơn tối thiểu: {formatCurrency(coupon.minSubtotal || 0)} · Đã dùng: {coupon.usedCount || 0}
+                        Đơn tối thiểu: {formatMoney(coupon.minSubtotal || 0)} · Đã dùng: {coupon.usedCount || 0}
                         {coupon.usageLimit ? `/${coupon.usageLimit}` : ''} · HSD: {formatDate(coupon.expiresAt)}
                       </small>
                       <div className="admin-coupon-audience-tags">
@@ -2092,6 +1932,11 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                           return <span key={audience}>{option?.label || audience}</span>;
                         })}
                         {coupon.allowWithEducationOffer === false && <span>Không cộng ưu đãi giáo dục</span>}
+                        <span>
+                          {coupon.distributionMode === 'checkout_only'
+                            ? 'Nhận tại thanh toán'
+                            : 'Người dùng nhập mã để nhận'}
+                        </span>
                       </div>
                     </div>
                     <div className="admin-coupon-actions">
@@ -2114,8 +1959,14 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                     </div>
                   </div>
                 ))}
-                {!coupons.length && <p className="admin-empty">Chưa có mã giảm giá.</p>}
+                {!coupons.length && <p className="admin-empty">{loading ? 'Đang tải mã giảm giá...' : 'Chưa có mã giảm giá.'}</p>}
               </div>
+              <AdminPagination
+                pagination={couponsPayload?.pagination}
+                onPageChange={setCouponPage}
+                noun="mã giảm giá"
+                disabled={loading}
+              />
             </div>
           </section>
         )}
@@ -2126,13 +1977,18 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
               <div className="admin-card-title-row">
                 <div>
                   <h2>Quản lý tồn kho</h2>
-                  <p className="admin-card-subtitle">Sửa số tồn, số giữ chỗ, số đã bán và trạng thái bán hàng.</p>
+                  <p className="admin-card-subtitle">
+                    Chỉ điều chỉnh tồn thực tế. Có thể bán = tồn thực tế − đang giữ chỗ; giữ chỗ và đã bán được cập nhật tự động theo đơn hàng.
+                  </p>
                 </div>
                 <div className="admin-search">
                   <input
                     value={inventorySearch}
-                    onChange={(event) => setInventorySearch(event.target.value)}
-                    placeholder="Tìm sản phẩm, SKU, key tồn kho..."
+                    onChange={(event) => {
+                      setInventorySearch(event.target.value);
+                      setInventoryPage(1);
+                    }}
+                    placeholder="Tìm sản phẩm, SKU, thương hiệu, danh mục..."
                   />
                 </div>
               </div>
@@ -2144,49 +2000,53 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                     <article className="admin-order-row" key={item.id}>
                       <div className="admin-order-head">
                         <div>
-                          <strong>{item.productName || item.productSlug || item.productSku || 'Sản phẩm'}</strong>
-                          <span>{item.key}</span>
+                          <strong>{item.productName || item.productSlug || item.productSku || 'Sản phẩm chưa xác định'}</strong>
+                          <span>
+                            {[item.productSku, item.variantName, item.colorName].filter(Boolean).join(' · ') || item.key}
+                          </span>
+                          <small>{item.key}</small>
                         </div>
                         <em className={`admin-status ${draft.status || item.status}`}>{draft.status || item.status}</em>
                       </div>
 
-                      <div className="admin-order-controls admin-compact-controls">
+                      <div className="admin-inventory-metrics">
+                        <div>
+                          <span>Tồn thực tế</span>
+                          <strong>{Number(draft.stock ?? item.stock ?? 0)}</strong>
+                        </div>
+                        <div>
+                          <span>Đang giữ chỗ</span>
+                          <strong>{Number(item.reservedStock || 0)}</strong>
+                        </div>
+                        <div>
+                          <span>Có thể bán</span>
+                          <strong>{Math.max(0, Number(draft.stock ?? item.stock ?? 0) - Number(item.reservedStock || 0))}</strong>
+                        </div>
+                        <div>
+                          <span>Đã bán</span>
+                          <strong>{Number(item.soldCount || 0)}</strong>
+                        </div>
+                      </div>
+
+                      <div className="admin-order-controls admin-compact-controls admin-inventory-controls">
                         <label>
-                          Tồn kho
+                          Điều chỉnh tồn thực tế
                           <input
                             type="number"
-                            min="0"
-                            value={draft.stock ?? 0}
+                            min={Number(item.reservedStock || 0)}
+                            value={draft.stock ?? item.stock ?? 0}
                             onChange={(event) => updateInventoryDraft(item.id, 'stock', event.target.value)}
                           />
+                          <small>Không thể thấp hơn số lượng đang giữ chỗ ({Number(item.reservedStock || 0)}).</small>
                         </label>
                         <label>
-                          Giữ chỗ
-                          <input
-                            type="number"
-                            min="0"
-                            value={draft.reservedStock ?? 0}
-                            onChange={(event) => updateInventoryDraft(item.id, 'reservedStock', event.target.value)}
-                          />
-                        </label>
-                        <label>
-                          Đã bán
-                          <input
-                            type="number"
-                            min="0"
-                            value={draft.soldCount ?? 0}
-                            onChange={(event) => updateInventoryDraft(item.id, 'soldCount', event.target.value)}
-                          />
-                        </label>
-                        <label>
-                          Trạng thái
+                          Trạng thái bán hàng
                           <select
-                            value={draft.status || item.status || 'in_stock'}
+                            value={(draft.status || item.status) === 'inactive' ? 'inactive' : 'in_stock'}
                             onChange={(event) => updateInventoryDraft(item.id, 'status', event.target.value)}
                           >
-                            {inventoryStatusOptions.map((status) => (
-                              <option key={status.value} value={status.value}>{status.label}</option>
-                            ))}
+                            <option value="in_stock">Đang bán — tự tính theo số lượng</option>
+                            <option value="inactive">Ngừng bán</option>
                           </select>
                         </label>
                         <label className="admin-order-note">
@@ -2195,190 +2055,23 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                             rows="2"
                             value={draft.note || ''}
                             onChange={(event) => updateInventoryDraft(item.id, 'note', event.target.value)}
-                            placeholder="VD: còn hàng tại kho HCM..."
+                            placeholder="VD: hàng tại kho HCM, chờ nhập thêm..."
                           />
                         </label>
-                        <button type="button" onClick={() => handleSaveInventory(item)}>Lưu tồn kho</button>
-                        <button type="button" className="danger" onClick={() => handleDeleteInventory(item)}>Xóa</button>
+                        <button type="button" onClick={() => handleSaveInventory(item)}>Lưu điều chỉnh</button>
                       </div>
                     </article>
                   );
                 })}
-                {!inventoryItems.length && <p className="admin-empty">Chưa có dữ liệu tồn kho.</p>}
-              </div>
-            </div>
-          </section>
-        )}
-
-        {activeTab === 'payments' && (
-          <section className="admin-section">
-            <div className="admin-card">
-              <div className="admin-card-title-row">
-                <div>
-                  <h2>Quản lý thanh toán</h2>
-                  <p className="admin-card-subtitle">Xác nhận chuyển khoản, hoàn tiền hoặc đánh dấu thanh toán lỗi.</p>
-                </div>
-                <div className="admin-search">
-                  <input
-                    value={paymentSearch}
-                    onChange={(event) => setPaymentSearch(event.target.value)}
-                    placeholder="Tìm mã đơn, giao dịch, ngân hàng..."
-                  />
-                </div>
+                {!inventoryItems.length && <p className="admin-empty">{loading ? 'Đang tải tồn kho...' : 'Không có sản phẩm phù hợp để quản lý tồn kho.'}</p>}
               </div>
 
-              <div className="admin-order-list">
-                {payments.map((payment) => {
-                  const draft = paymentDrafts[payment.id] || {};
-                  return (
-                    <article className="admin-order-row" key={payment.id}>
-                      <div className="admin-order-head">
-                        <div>
-                          <strong>Đơn #{payment.orderCode || '—'}</strong>
-                          <span>{payment.transactionId || 'Chưa có mã giao dịch'} · {formatDate(payment.createdAt)}</span>
-                        </div>
-                        <em className={`admin-status ${draft.status || payment.status}`}>{draft.status || payment.status}</em>
-                      </div>
-
-                      <div className="admin-order-body">
-                        <div>
-                          <strong>{formatCurrency(payment.amount)}</strong>
-                          <span>Bank ref: {payment.bankReference || '—'}</span>
-                          <span>Ghi chú: {payment.note || '—'}</span>
-                        </div>
-                      </div>
-
-                      <div className="admin-order-controls admin-compact-controls">
-                        <label>
-                          Trạng thái thanh toán
-                          <select
-                            value={draft.status || payment.status || 'pending'}
-                            onChange={(event) => updatePaymentDraft(payment.id, 'status', event.target.value)}
-                          >
-                            {paymentStatusOptions.map((status) => (
-                              <option key={status.value} value={status.value}>{status.label}</option>
-                            ))}
-                          </select>
-                        </label>
-                        <label>
-                          Mã giao dịch ngân hàng
-                          <input
-                            value={draft.bankReference || ''}
-                            onChange={(event) => updatePaymentDraft(payment.id, 'bankReference', event.target.value)}
-                            placeholder="VD: MBVCB123456"
-                          />
-                        </label>
-                        <label className="admin-order-note">
-                          Ghi chú thanh toán
-                          <textarea
-                            rows="2"
-                            value={draft.note || ''}
-                            onChange={(event) => updatePaymentDraft(payment.id, 'note', event.target.value)}
-                            placeholder="VD: Admin đã đối soát sao kê..."
-                          />
-                        </label>
-                        <button type="button" onClick={() => handleSavePayment(payment)}>Lưu thanh toán</button>
-                      </div>
-                    </article>
-                  );
-                })}
-                {!payments.length && <p className="admin-empty">Chưa có dữ liệu thanh toán.</p>}
-              </div>
-            </div>
-          </section>
-        )}
-
-        {activeTab === 'shipments' && (
-          <section className="admin-section">
-            <div className="admin-card">
-              <div className="admin-card-title-row">
-                <div>
-                  <h2>Quản lý vận chuyển</h2>
-                  <p className="admin-card-subtitle">Cập nhật đơn vị vận chuyển, mã vận đơn và trạng thái giao hàng.</p>
-                </div>
-                <div className="admin-search">
-                  <input
-                    value={shipmentSearch}
-                    onChange={(event) => setShipmentSearch(event.target.value)}
-                    placeholder="Tìm mã đơn, mã vận đơn, người nhận..."
-                  />
-                </div>
-              </div>
-
-              <div className="admin-order-list">
-                {shipments.map((shipment) => {
-                  const draft = shipmentDrafts[shipment.id] || {};
-                  return (
-                    <article className="admin-order-row" key={shipment.id}>
-                      <div className="admin-order-head">
-                        <div>
-                          <strong>Đơn #{shipment.orderCode}</strong>
-                          <span>{shipment.carrier || 'Chưa có ĐVVC'} · {shipment.trackingCode || 'Chưa có mã vận đơn'}</span>
-                        </div>
-                        <em className={`admin-status ${draft.status || shipment.status}`}>{draft.status || shipment.status}</em>
-                      </div>
-
-                      <div className="admin-order-controls admin-compact-controls">
-                        <label>
-                          Đơn vị vận chuyển
-                          <input
-                            value={draft.carrier || ''}
-                            onChange={(event) => updateShipmentDraft(shipment.id, 'carrier', event.target.value)}
-                            placeholder="VD: GHTK, GHN, Viettel Post"
-                          />
-                        </label>
-                        <label>
-                          Mã vận đơn
-                          <input
-                            value={draft.trackingCode || ''}
-                            onChange={(event) => updateShipmentDraft(shipment.id, 'trackingCode', event.target.value)}
-                            placeholder="VD: CPSGH123456"
-                          />
-                        </label>
-                        <label>
-                          Trạng thái giao hàng
-                          <select
-                            value={draft.status || shipment.status || 'pending'}
-                            onChange={(event) => updateShipmentDraft(shipment.id, 'status', event.target.value)}
-                          >
-                            {shipmentStatusOptions.map((status) => (
-                              <option key={status.value} value={status.value}>{status.label}</option>
-                            ))}
-                          </select>
-                        </label>
-                        <label>
-                          Người nhận
-                          <input
-                            value={draft.receiverName || ''}
-                            onChange={(event) => updateShipmentDraft(shipment.id, 'receiverName', event.target.value)}
-                            placeholder="Tên người nhận"
-                          />
-                        </label>
-                        <label>
-                          SĐT nhận hàng
-                          <input
-                            value={draft.receiverPhone || ''}
-                            onChange={(event) => updateShipmentDraft(shipment.id, 'receiverPhone', event.target.value)}
-                            placeholder="Số điện thoại"
-                          />
-                        </label>
-                        <label className="admin-order-note">
-                          Ghi chú vận chuyển
-                          <textarea
-                            rows="2"
-                            value={draft.note || ''}
-                            onChange={(event) => updateShipmentDraft(shipment.id, 'note', event.target.value)}
-                            placeholder="VD: Giao giờ hành chính..."
-                          />
-                        </label>
-                        <button type="button" onClick={() => handleSaveShipment(shipment)}>Lưu vận chuyển</button>
-                        <button type="button" className="danger" onClick={() => handleDeleteShipment(shipment)}>Xóa</button>
-                      </div>
-                    </article>
-                  );
-                })}
-                {!shipments.length && <p className="admin-empty">Chưa có vận đơn.</p>}
-              </div>
+              <AdminPagination
+                pagination={inventoryPayload?.pagination}
+                onPageChange={setInventoryPage}
+                noun="sản phẩm"
+                disabled={loading}
+              />
             </div>
           </section>
         )}
@@ -2396,12 +2089,18 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                 <div className="admin-order-filters">
                   <input
                     value={returnSearch}
-                    onChange={(event) => setReturnSearch(event.target.value)}
+                    onChange={(event) => {
+                      setReturnSearch(event.target.value);
+                      setReturnPage(1);
+                    }}
                     placeholder="Tìm mã đổi trả, mã đơn, sản phẩm, SĐT..."
                   />
                   <select
                     value={returnStatusFilter}
-                    onChange={(event) => setReturnStatusFilter(event.target.value)}
+                    onChange={(event) => {
+                      setReturnStatusFilter(event.target.value);
+                      setReturnPage(1);
+                    }}
                   >
                     <option value="all">Tất cả trạng thái</option>
                     {returnStatusOptions.map((status) => (
@@ -2415,7 +2114,10 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                 <button
                   type="button"
                   className={returnStatusFilter === 'all' ? 'active' : ''}
-                  onClick={() => setReturnStatusFilter('all')}
+                  onClick={() => {
+                    setReturnStatusFilter('all');
+                    setReturnPage(1);
+                  }}
                 >
                   <span>Tất cả</span>
                   <strong>{Object.values(returnsPayload?.statusCounts || {}).reduce((sum, count) => sum + Number(count || 0), 0)}</strong>
@@ -2425,7 +2127,10 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                     type="button"
                     key={status.value}
                     className={returnStatusFilter === status.value ? 'active' : ''}
-                    onClick={() => setReturnStatusFilter(status.value)}
+                    onClick={() => {
+                      setReturnStatusFilter(status.value);
+                      setReturnPage(1);
+                    }}
                   >
                     <span>{status.label}</span>
                     <strong>{returnsPayload?.statusCounts?.[status.value] || 0}</strong>
@@ -2521,7 +2226,10 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                           value={returnItem.status || 'pending'}
                           onChange={(event) => handleUpdateReturnStatus(returnItem, event.target.value)}
                         >
-                          {returnStatusOptions.map((status) => (
+                          {returnStatusOptions.filter((status) => (
+                            status.value === returnItem.status
+                            || (returnStatusTransitions[returnItem.status] || []).includes(status.value)
+                          )).map((status) => (
                             <option key={status.value} value={status.value}>{status.label}</option>
                           ))}
                         </select>
@@ -2546,12 +2254,12 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                             Tiếp nhận
                           </button>
                         )}
-                        {!['approved', 'completed'].includes(returnItem.status) && (
+                        {['pending', 'received'].includes(returnItem.status) && (
                           <button type="button" onClick={() => handleUpdateReturnStatus(returnItem, 'approved')}>
                             Duyệt yêu cầu
                           </button>
                         )}
-                        {!['rejected', 'completed', 'cancelled'].includes(returnItem.status) && (
+                        {['pending', 'received'].includes(returnItem.status) && (
                           <button type="button" className="danger-outline" onClick={() => handleUpdateReturnStatus(returnItem, 'rejected')}>
                             Từ chối
                           </button>
@@ -2564,7 +2272,13 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                         <button type="button" className="secondary" onClick={() => handleSaveReturnNote(returnItem)}>
                           Lưu ghi chú
                         </button>
-                        <button type="button" className="danger ghost-danger" onClick={() => handleDeleteReturn(returnItem)}>
+                        <button
+                          type="button"
+                          className="danger ghost-danger"
+                          disabled={loading || !['pending', 'cancelled'].includes(returnItem.status)}
+                          title={['pending', 'cancelled'].includes(returnItem.status) ? 'Xóa yêu cầu' : 'Yêu cầu đã xử lý cần được giữ lại để đối soát'}
+                          onClick={() => handleDeleteReturn(returnItem)}
+                        >
                           Xóa
                         </button>
                       </div>
@@ -2575,11 +2289,17 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                 {!returns.length && (
                   <div className="admin-return-empty">
                     <AdminIcon name="returns" size={32} />
-                    <strong>Chưa có yêu cầu đổi trả phù hợp</strong>
-                    <span>Yêu cầu mới từ Smember sẽ tự động xuất hiện tại đây.</span>
+                    <strong>{loading ? 'Đang tải yêu cầu đổi trả...' : 'Chưa có yêu cầu đổi trả phù hợp'}</strong>
+                    {!loading && <span>Yêu cầu mới từ Smember sẽ tự động xuất hiện tại đây.</span>}
                   </div>
                 )}
               </div>
+              <AdminPagination
+                pagination={returnsPayload?.pagination}
+                onPageChange={setReturnPage}
+                noun="yêu cầu"
+                disabled={loading}
+              />
             </div>
           </section>
         )}
@@ -2597,12 +2317,18 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                 <div className="admin-order-filters">
                   <input
                     value={supportSearch}
-                    onChange={(event) => setSupportSearch(event.target.value)}
+                    onChange={(event) => {
+                      setSupportSearch(event.target.value);
+                      setSupportPage(1);
+                    }}
                     placeholder="Tìm mã yêu cầu, khách hàng, email, mã đơn..."
                   />
                   <select
                     value={supportStatusFilter}
-                    onChange={(event) => setSupportStatusFilter(event.target.value)}
+                    onChange={(event) => {
+                      setSupportStatusFilter(event.target.value);
+                      setSupportPage(1);
+                    }}
                   >
                     <option value="all">Tất cả trạng thái</option>
                     {supportStatusOptions.map((status) => (
@@ -2613,12 +2339,25 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
               </div>
 
               <div className="admin-order-status-strip">
+                <button
+                  type="button"
+                  className={supportStatusFilter === 'all' ? 'active' : ''}
+                  onClick={() => {
+                    setSupportStatusFilter('all');
+                    setSupportPage(1);
+                  }}
+                >
+                  Tất cả <strong>{Object.values(supportPayload?.statusCounts || {}).reduce((sum, value) => sum + Number(value || 0), 0)}</strong>
+                </button>
                 {supportStatusOptions.map((status) => (
                   <button
                     key={status.value}
                     type="button"
                     className={supportStatusFilter === status.value ? 'active' : ''}
-                    onClick={() => setSupportStatusFilter(status.value)}
+                    onClick={() => {
+                      setSupportStatusFilter(status.value);
+                      setSupportPage(1);
+                    }}
                   >
                     <span>{status.label}</span>
                     <strong>{supportPayload?.statusCounts?.[status.value] || 0}</strong>
@@ -2744,6 +2483,8 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                         <button
                           type="button"
                           className="danger"
+                          disabled={loading || supportItem.status !== 'new'}
+                          title={supportItem.status === 'new' ? 'Xóa yêu cầu' : 'Yêu cầu đã xử lý cần được giữ lại trong lịch sử'}
                           onClick={() => handleDeleteSupportRequest(supportItem)}
                         >
                           Xóa
@@ -2753,8 +2494,14 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                   );
                 })}
 
-                {!supportRequests.length && <p className="admin-empty">Chưa có yêu cầu hỗ trợ phù hợp.</p>}
+                {!supportRequests.length && <p className="admin-empty">{loading ? 'Đang tải yêu cầu...' : 'Chưa có yêu cầu hỗ trợ phù hợp.'}</p>}
               </div>
+              <AdminPagination
+                pagination={supportPayload?.pagination}
+                onPageChange={setSupportPage}
+                noun="yêu cầu"
+                disabled={loading}
+              />
             </div>
           </section>
         )}
@@ -2762,7 +2509,7 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
         {activeTab === 'revenue' && (
           <section className="admin-section">
             <div className="admin-stat-grid">
-              <StatCard label="Doanh thu" value={formatCurrency(revenuePayload?.summary?.revenue || 0)} tone="green" />
+              <StatCard label="Doanh thu" value={formatMoney(revenuePayload?.summary?.revenue || 0)} tone="green" />
               <StatCard label="Số đơn" value={revenuePayload?.summary?.orders || 0} tone="blue" />
               <StatCard label="Số dòng sản phẩm" value={revenuePayload?.summary?.items || 0} tone="orange" />
             </div>
@@ -2776,7 +2523,7 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                       <strong>{row.date}</strong>
                       <span>{row.orders} đơn hàng</span>
                     </div>
-                    <em>{formatCurrency(row.revenue)}</em>
+                    <em>{formatMoney(row.revenue)}</em>
                   </div>
                 ))}
                 {!revenuePayload?.daily?.length && <p className="admin-empty">Chưa có dữ liệu doanh thu.</p>}
@@ -2800,8 +2547,14 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                     <em>{log.actorRole}</em>
                   </div>
                 ))}
-                {!auditLogs.length && <p className="admin-empty">Chưa có nhật ký thao tác.</p>}
+                {!auditLogs.length && <p className="admin-empty">{loading ? 'Đang tải nhật ký...' : 'Chưa có nhật ký thao tác.'}</p>}
               </div>
+              <AdminPagination
+                pagination={auditLogsPayload?.pagination}
+                onPageChange={setAuditPage}
+                noun="sự kiện"
+                disabled={loading}
+              />
             </div>
           </section>
         )}
@@ -2819,12 +2572,18 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                 <div className="admin-order-filters">
                   <input
                     value={businessSearch}
-                    onChange={(event) => setBusinessSearch(event.target.value)}
+                    onChange={(event) => {
+                      setBusinessSearch(event.target.value);
+                      setBusinessPage(1);
+                    }}
                     placeholder="Tìm công ty, MST, email, người đại diện..."
                   />
                   <select
                     value={businessStatusFilter}
-                    onChange={(event) => setBusinessStatusFilter(event.target.value)}
+                    onChange={(event) => {
+                      setBusinessStatusFilter(event.target.value);
+                      setBusinessPage(1);
+                    }}
                   >
                     <option value="all">Tất cả trạng thái</option>
                     {businessStatusOptions.map((status) => (
@@ -2835,12 +2594,25 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
               </div>
 
               <div className="admin-order-status-strip">
+                <button
+                  type="button"
+                  className={businessStatusFilter === 'all' ? 'active' : ''}
+                  onClick={() => {
+                    setBusinessStatusFilter('all');
+                    setBusinessPage(1);
+                  }}
+                >
+                  Tất cả <strong>{Object.values(businessPayload?.statusCounts || {}).reduce((sum, value) => sum + Number(value || 0), 0)}</strong>
+                </button>
                 {businessStatusOptions.map((status) => (
                   <button
                     key={status.value}
                     type="button"
                     className={businessStatusFilter === status.value ? 'active' : ''}
-                    onClick={() => setBusinessStatusFilter(status.value)}
+                    onClick={() => {
+                      setBusinessStatusFilter(status.value);
+                      setBusinessPage(1);
+                    }}
                   >
                     <span>{status.label}</span>
                     <strong>{businessPayload?.statusCounts?.[status.value] || 0}</strong>
@@ -2920,9 +2692,15 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                 ))}
 
                 {!businessVerifications.length && (
-                  <p className="admin-empty">Không có hồ sơ doanh nghiệp phù hợp.</p>
+                  <p className="admin-empty">{loading ? 'Đang tải hồ sơ...' : 'Không có hồ sơ doanh nghiệp phù hợp.'}</p>
                 )}
               </div>
+              <AdminPagination
+                pagination={businessPayload?.pagination}
+                onPageChange={setBusinessPage}
+                noun="hồ sơ"
+                disabled={loading}
+              />
             </div>
           </section>
         )}
@@ -2935,14 +2713,19 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                 <div className="admin-search">
                   <input
                     value={userSearch}
-                    onChange={(event) => setUserSearch(event.target.value)}
+                    onChange={(event) => {
+                      setUserSearch(event.target.value);
+                      setUserPage(1);
+                    }}
                     placeholder="Tìm tên, email, số điện thoại..."
                   />
                 </div>
               </div>
 
               <div className="admin-users-table">
-                {users.map((user) => (
+                {users.map((user) => {
+                  const isCurrentUser = String(user.id) === String(currentUser?.id || currentUser?._id || '');
+                  return (
                   <div className="admin-user-row" key={user.id}>
                     <div>
                       <strong>{user.fullName || 'Chưa có tên'}</strong>
@@ -2953,6 +2736,7 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                     </div>
                     <div className="admin-user-badges">
                       <em>{user.role || 'customer'}</em>
+                      {isCurrentUser && <em className="verified">Bạn</em>}
                       <em className={user.status === 'blocked' ? 'blocked' : 'active'}>
                         {user.status || 'active'}
                       </em>
@@ -2961,6 +2745,7 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                     <div className="admin-row-actions">
                       <button
                         type="button"
+                        disabled={loading || (isCurrentUser && user.status !== 'blocked')}
                         onClick={() => handleUpdateUser(user, {
                           status: user.status === 'blocked' ? 'active' : 'blocked',
                         })}
@@ -2969,20 +2754,28 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                       </button>
                       <button
                         type="button"
+                        disabled={loading || (isCurrentUser && user.role === 'admin')}
                         onClick={() => handleUpdateUser(user, {
                           role: user.role === 'admin' ? 'customer' : 'admin',
                         })}
                       >
                         {user.role === 'admin' ? 'Gỡ admin' : 'Lên admin'}
                       </button>
-                      <button type="button" className="danger" onClick={() => handleDeleteUser(user)}>
+                      <button type="button" className="danger" disabled={loading || isCurrentUser} onClick={() => handleDeleteUser(user)}>
                         Xóa
                       </button>
                     </div>
                   </div>
-                ))}
-                {!users.length && <p className="admin-empty">Chưa có người dùng phù hợp.</p>}
+                  );
+                })}
+                {!users.length && <p className="admin-empty">{loading ? 'Đang tải người dùng...' : 'Chưa có người dùng phù hợp.'}</p>}
               </div>
+              <AdminPagination
+                pagination={usersPayload?.pagination}
+                onPageChange={setUserPage}
+                noun="người dùng"
+                disabled={loading}
+              />
             </div>
           </section>
         )}
@@ -2995,7 +2788,10 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                 <div className="admin-search">
                   <input
                     value={questionSearch}
-                    onChange={(event) => setQuestionSearch(event.target.value)}
+                    onChange={(event) => {
+                      setQuestionSearch(event.target.value);
+                      setQuestionPage(1);
+                    }}
                     placeholder="Tìm sản phẩm, khách, câu hỏi..."
                   />
                 </div>
@@ -3003,15 +2799,17 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
 
               <div className="admin-interaction-list">
                 {questions.map((question) => (
-                  <article className="admin-interaction-row" key={question.id}>
-                    <div className="admin-interaction-head">
-                      <div>
-                        <strong>{question.productName || question.productSlug}</strong>
-                        <span>{question.authorName || question.email || 'Khách hàng'} · {formatDate(question.createdAt)}</span>
+                  <details className="admin-interaction-row" key={question.id}>
+                    <summary className="admin-interaction-summary">
+                      <div className="admin-interaction-head">
+                        <div>
+                          <strong>{question.productName || question.productSlug}</strong>
+                          <span>{question.authorName || question.email || 'Khách hàng'} · {formatDate(question.createdAt)}</span>
+                        </div>
+                        <em className={`admin-status ${question.status}`}>{question.status}</em>
                       </div>
-                      <em className={`admin-status ${question.status}`}>{question.status}</em>
-                    </div>
-                    <p className="admin-interaction-content">{question.question}</p>
+                      <p className="admin-interaction-content">{question.question}</p>
+                    </summary>
                     <label className="admin-reply-box">
                       Trả lời của CellphoneS
                       <textarea
@@ -3038,10 +2836,16 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                         Xóa
                       </button>
                     </div>
-                  </article>
+                  </details>
                 ))}
-                {!questions.length && <p className="admin-empty">Chưa có câu hỏi phù hợp.</p>}
+                {!questions.length && <p className="admin-empty">{loading ? 'Đang tải câu hỏi...' : 'Chưa có câu hỏi phù hợp.'}</p>}
               </div>
+              <AdminPagination
+                pagination={questionsPayload?.pagination}
+                onPageChange={setQuestionPage}
+                noun="câu hỏi"
+                disabled={loading}
+              />
             </div>
           </section>
         )}
@@ -3054,7 +2858,10 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                 <div className="admin-search">
                   <input
                     value={reviewSearch}
-                    onChange={(event) => setReviewSearch(event.target.value)}
+                    onChange={(event) => {
+                      setReviewSearch(event.target.value);
+                      setReviewPage(1);
+                    }}
                     placeholder="Tìm sản phẩm, khách, nội dung..."
                   />
                 </div>
@@ -3062,15 +2869,17 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
 
               <div className="admin-interaction-list">
                 {reviews.map((review) => (
-                  <article className="admin-interaction-row" key={review.id}>
-                    <div className="admin-interaction-head">
-                      <div>
-                        <strong>{review.productName || review.productSlug}</strong>
-                        <span>{review.authorName || review.email || 'Khách hàng'} · {formatDate(review.createdAt)}</span>
+                  <details className="admin-interaction-row" key={review.id}>
+                    <summary className="admin-interaction-summary">
+                      <div className="admin-interaction-head">
+                        <div>
+                          <strong>{review.productName || review.productSlug}</strong>
+                          <span>{review.authorName || review.email || 'Khách hàng'} · {formatDate(review.createdAt)}</span>
+                        </div>
+                        <em className={`admin-status ${review.status}`}>{review.rating}★ · {review.status}</em>
                       </div>
-                      <em className={`admin-status ${review.status}`}>{review.rating}★ · {review.status}</em>
-                    </div>
-                    <p className="admin-interaction-content">{review.content}</p>
+                      <p className="admin-interaction-content">{review.content}</p>
+                    </summary>
                     <label className="admin-reply-box">
                       Phản hồi đánh giá
                       <textarea
@@ -3097,10 +2906,16 @@ export default function AdminDashboard({ currentUser, onBackHome, onLogout, onGo
                         Xóa
                       </button>
                     </div>
-                  </article>
+                  </details>
                 ))}
-                {!reviews.length && <p className="admin-empty">Chưa có đánh giá phù hợp.</p>}
+                {!reviews.length && <p className="admin-empty">{loading ? 'Đang tải đánh giá...' : 'Chưa có đánh giá phù hợp.'}</p>}
               </div>
+              <AdminPagination
+                pagination={reviewsPayload?.pagination}
+                onPageChange={setReviewPage}
+                noun="đánh giá"
+                disabled={loading}
+              />
             </div>
           </section>
         )}

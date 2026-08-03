@@ -46,7 +46,7 @@ export function getExternalRouteTarget(route) {
 export function resolvePublicRoute(pathname = '/') {
   const path = trimPath(pathname);
   const exact = exactRoutes.get(path);
-  if (exact) return { ...exact, requestedPath: path, canonicalPath: exact.path, isAlias: false };
+  if (exact) return { ...exact, requestedPath: path, canonicalPath: exact.canonicalPath || exact.path, isAlias: false };
 
   const aliased = aliasRoutes.get(path);
   if (aliased) {
@@ -56,6 +56,21 @@ export function resolvePublicRoute(pathname = '/') {
       canonicalPath: aliased.path,
       isAlias: true,
       handling: aliased.handling === 'external' ? 'external' : 'legacy-redirect',
+    };
+  }
+
+  if ((registry.footerPagePaths || []).includes(path)) {
+    return {
+      id: `footer-page:${path}`,
+      path,
+      requestedPath: path,
+      canonicalPath: path,
+      pageType: 'content',
+      handling: 'internal',
+      appPage: 'footer-pages',
+      title: titleFromSlug(path),
+      description: 'Thông tin chính sách và dịch vụ tại CellphoneS.',
+      robots: 'index,follow',
     };
   }
 

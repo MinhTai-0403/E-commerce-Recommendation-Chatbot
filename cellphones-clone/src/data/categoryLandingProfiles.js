@@ -614,18 +614,33 @@ export function resolveCategoryLandingProfile(pathname = '/') {
     };
   }
 
-  const parentProfile = CATEGORY_LANDING_PROFILES
+  let parentProfile = CATEGORY_LANDING_PROFILES
     .filter((profile) => path.startsWith(`${profile.path.replace(/\.html$/, '')}/`))
     .sort((a, b) => b.path.length - a.path.length)[0];
 
-  if (!parentProfile) return null;
+  let matchingLink = parentProfile
+    ? [
+      ...(parentProfile.quickLinks || []),
+      ...(parentProfile.brandLinks || []),
+      ...(parentProfile.featureSection?.items || []),
+    ].find((item) => normalizePath(item.href) === path)
+    : null;
 
-  const childLinks = [
-    ...(parentProfile.quickLinks || []),
-    ...(parentProfile.brandLinks || []),
-    ...(parentProfile.featureSection?.items || []),
-  ];
-  const matchingLink = childLinks.find((item) => normalizePath(item.href) === path);
+  if (!matchingLink) {
+    const directMatch = CATEGORY_LANDING_PROFILES
+      .map((profile) => ({
+        profile,
+        link: [
+          ...(profile.quickLinks || []),
+          ...(profile.brandLinks || []),
+          ...(profile.featureSection?.items || []),
+        ].find((item) => normalizePath(item.href) === path),
+      }))
+      .find((entry) => entry.link);
+    parentProfile = directMatch?.profile;
+    matchingLink = directMatch?.link;
+  }
+
   if (!matchingLink) return null;
 
   const title = matchingLink?.landingTitle || matchingLink?.label || titleFromNestedPath(path);

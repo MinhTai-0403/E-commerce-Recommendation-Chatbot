@@ -739,8 +739,6 @@ const contextualDetailedFilterGroups = {
     'product-line': [{
       title: 'Kiểu tủ',
       options: [
-        { label: 'Ngăn đá trên', q: 'Tủ lạnh ngăn đá trên' },
-        { label: 'Ngăn đá dưới', q: 'Tủ lạnh ngăn đá dưới' },
         { label: 'Nhiều cánh', q: 'Tủ lạnh nhiều cánh' },
         { label: 'Side by Side', q: 'Tủ lạnh Side By Side' },
         { label: 'Mini', q: 'Tủ lạnh mini' },
@@ -860,7 +858,27 @@ const getOverrideValue = (overrides, page, key) => (
 
 const getActiveDetailedValue = (page, item = {}) => {
   if (item.id === 'price') {
-    return [page.priceMin, page.priceMax].filter(Boolean).join('-');
+    const activePreset = detailedFilterGroups.price[0].options.find((option) => (
+      String(option.priceMin || '') === String(page.priceMin || '')
+      && String(option.priceMax || '') === String(page.priceMax || '')
+    ));
+
+    if (activePreset) {
+      return activePreset.label;
+    }
+
+    const formatPrice = (value) => new Intl.NumberFormat('vi-VN').format(Number(value) || 0);
+    if (page.priceMin && page.priceMax) {
+      return `${formatPrice(page.priceMin)}đ - ${formatPrice(page.priceMax)}đ`;
+    }
+    if (page.priceMax) {
+      return `Dưới ${formatPrice(page.priceMax)}đ`;
+    }
+    if (page.priceMin) {
+      return `Trên ${formatPrice(page.priceMin)}đ`;
+    }
+
+    return '';
   }
 
   const paramKey = filterParamByFacet[item.facet || item.id];
@@ -2113,6 +2131,7 @@ function ListingContent({ page }) {
   // từ khóa ngắn như CPU, Case, Máy in hay Gaming không rơi vào tìm kiếm toàn kho.
   const strictTopicCategories = new Set([
     'phu kien',
+    'thiet bi mang',
     'camera',
     'do gia dung',
     'linh kien may tinh',
@@ -2170,6 +2189,7 @@ function ListingContent({ page }) {
   if (page.special) query.special = page.special;
   if (page.chip) query.chip = page.chip;
   if (page.nfc) query.nfc = page.nfc;
+  if (page.categoryMode) query.categoryMode = page.categoryMode;
   if (isPromotionLanding) {
     query.filter = 'hot-deal';
     query.sort = 'hot_deal';

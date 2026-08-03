@@ -573,11 +573,9 @@ export function HeaderPopups({
   activePopup,
   currentUser,
   filteredProvinces,
-  goAccount,
   goLogin,
   goRegister,
   handleCloseAllPopups,
-  handleLogout,
   locationSearch,
   selectedLocation,
   setLocationSearch,
@@ -649,7 +647,7 @@ export function HeaderPopups({
         </>
       )}
 
-      {(activePopup === 'location' || activePopup === 'auth') && (
+      {activePopup === 'location' && (
         <div className="location-global-overlay" onClick={handleCloseAllPopups} role="presentation" />
       )}
 
@@ -703,60 +701,6 @@ export function HeaderPopups({
         </div>
       )}
 
-      {activePopup === 'auth' && (
-        <div className="auth-modal-box">
-          <button className="auth-modal-close-x" onClick={handleCloseAllPopups} type="button">×</button>
-          <h2 className="auth-modal-title">Smember</h2>
-          <div className="auth-modal-mascot">
-            <img src="https://cellphones.com.vn/media/wysiwyg/ant-smile.png" alt="Smember Mascot" />
-          </div>
-          {currentUser ? (
-            <>
-              <p className="auth-modal-desc">
-                Xin chào <strong>{currentUser.fullName || currentUser.email}</strong>.
-                Tài khoản của bạn đã đăng nhập và sẵn sàng dùng ưu đãi Smember.
-              </p>
-              <div className="auth-modal-user-meta">
-                <span>{currentUser.email}</span>
-                <span>{currentUser.phone}</span>
-                <span>Role: {currentUser.role || 'customer'}</span>
-              </div>
-              <div className="auth-modal-actions stacked">
-                <button className="auth-btn btn-login" onClick={goAccount} type="button">Thông tin cá nhân</button>
-                <button className="auth-btn btn-register" onClick={handleLogout} type="button">Đăng xuất</button>
-              </div>
-            </>
-          ) : (
-            <>
-              <p className="auth-modal-desc">
-                Vui lòng đăng nhập tài khoản Smember để xem ưu đãi và thanh toán dễ dàng hơn.
-              </p>
-              <div className="auth-modal-actions">
-                <button
-                  className="auth-btn btn-register"
-                  onClick={() => {
-                    handleCloseAllPopups();
-                    goRegister();
-                  }}
-                  type="button"
-                >
-                  Đăng ký
-                </button>
-                <button
-                  className="auth-btn btn-login"
-                  onClick={() => {
-                    handleCloseAllPopups();
-                    goLogin();
-                  }}
-                  type="button"
-                >
-                  Đăng nhập
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      )}
     </>
   );
 }

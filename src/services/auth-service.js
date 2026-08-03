@@ -111,9 +111,11 @@ function sanitizeBusinessDocument(value = "") {
 }
 
 function validatePasswordInput(password = "") {
-  if (String(password).length < 6 || !/\d/.test(String(password))) {
+  const value = String(password);
+  if (value.trim().length < 6 || !/\d/.test(value)) {
     return "Mật khẩu tối thiểu 6 ký tự và có ít nhất 1 chữ số.";
   }
+  if (value.length > 256) return "Mật khẩu không được vượt quá 256 ký tự.";
   return "";
 }
 
@@ -1126,6 +1128,7 @@ function validateRegisterPayload(body) {
   const customerType = sanitizeCustomerType(body.customerType);
 
   if (!fullName) return { error: "Vui lòng nhập họ và tên." };
+  if (fullName.length > 120) return { error: "Họ và tên không được vượt quá 120 ký tự." };
   if (!birthday) return { error: "Vui lòng chọn ngày sinh." };
   if (!/^0\d{9}$/.test(phone)) {
     return { error: "Số điện thoại cần gồm 10 chữ số và bắt đầu bằng 0." };
@@ -1133,9 +1136,8 @@ function validateRegisterPayload(body) {
   if (!email || !validateEmail(email)) {
     return { error: "Vui lòng nhập email hợp lệ để nhận mã OTP." };
   }
-  if (password.length < 6 || !/\d/.test(password)) {
-    return { error: "Mật khẩu tối thiểu 6 ký tự và có ít nhất 1 chữ số." };
-  }
+  const passwordError = validatePasswordInput(password);
+  if (passwordError) return { error: passwordError };
 
   return {
     value: {

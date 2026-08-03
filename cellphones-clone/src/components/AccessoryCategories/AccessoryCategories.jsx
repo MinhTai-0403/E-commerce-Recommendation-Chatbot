@@ -14,7 +14,7 @@ const accessoryCategoryRouteById = {
   network: { category: 'Thiết bị mạng', segment: 'network' },
   camera: { category: 'Camera', segment: 'camera' },
   gimbal: { category: 'Camera', segment: 'gimbal' },
-  flycam: { category: 'Flycam', segment: 'flycam' },
+  flycam: { category: 'Camera', segment: 'flycam' },
   cameras: { category: 'Máy ảnh', segment: 'cameras' },
   'mouse-keyboard': { category: 'Phụ kiện', segment: 'mouse-keyboard' },
   bags: { category: 'Phụ kiện', segment: 'bags' },

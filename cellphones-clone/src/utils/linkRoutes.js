@@ -22,6 +22,42 @@ export const createSiteSlug = (value = '') => {
   return normalized || 'cellphones';
 };
 
+export const AUDIO_CATEGORY_PATHS = Object.freeze({
+  root: '/thiet-bi-am-thanh.html',
+  headphones: '/thiet-bi-am-thanh/tai-nghe.html',
+  speakers: '/thiet-bi-am-thanh/loa.html',
+  recordingMicrophone: '/thiet-bi-am-thanh/micro-thu-am.html',
+  microphone: '/thiet-bi-am-thanh/micro.html',
+  turntable: '/thiet-bi-am-thanh/dia-than.html',
+  airPods: '/thiet-bi-am-thanh/tai-nghe/apple.html',
+  bluetoothHeadphones: '/thiet-bi-am-thanh/tai-nghe/tai-nghe-bluetooth.html',
+});
+
+export const getAudioCategoryPath = (label = '') => {
+  const slug = createSiteSlug(label);
+
+  if (slug === 'am-thanh') return AUDIO_CATEGORY_PATHS.root;
+  if (slug === 'tai-nghe') return AUDIO_CATEGORY_PATHS.headphones;
+  if (slug === 'loa') return AUDIO_CATEGORY_PATHS.speakers;
+  if (slug === 'airpods') return AUDIO_CATEGORY_PATHS.airPods;
+  if (['bluetooth', 'tai-khong-day', 'tai-nghe-khong-day', 'tai-nghe-bluetooth'].includes(slug)) {
+    return AUDIO_CATEGORY_PATHS.bluetoothHeadphones;
+  }
+  if (
+    ['mic-thu-am', 'micro-thu-am', 'mic-cai-ao', 'mic-livestream'].includes(slug)
+    || slug.startsWith('mic-phong-thu')
+    || slug.startsWith('microphone-thu-am')
+  ) {
+    return AUDIO_CATEGORY_PATHS.recordingMicrophone;
+  }
+  if (['mic', 'micro', 'mic-khong-day', 'micro-khong-day', 'mic-karaoke', 'micro-karaoke'].includes(slug)) {
+    return AUDIO_CATEGORY_PATHS.microphone;
+  }
+  if (['dia-than', 'dau-dia-than'].includes(slug)) return AUDIO_CATEGORY_PATHS.turntable;
+
+  return '';
+};
+
 export const buildSearchPath = (keyword = '') => (
   `/catalogsearch/result?q=${encodeURIComponent(String(keyword || '').trim())}`
 );
@@ -34,7 +70,17 @@ const appendTruthyParam = (params, key, value) => {
 const catalogTopicRouteBySlug = {
   'micro-thu-am': '/thiet-bi-am-thanh/micro-thu-am.html',
   microphone: '/thiet-bi-am-thanh/micro-thu-am.html',
+  mic: '/thiet-bi-am-thanh/micro.html',
+  micro: '/thiet-bi-am-thanh/micro.html',
+  'mic-khong-day': '/thiet-bi-am-thanh/micro.html',
+  'micro-khong-day': '/thiet-bi-am-thanh/micro.html',
+  'mic-karaoke': '/thiet-bi-am-thanh/micro.html',
+  'micro-karaoke': '/thiet-bi-am-thanh/micro.html',
+  'dia-than': '/thiet-bi-am-thanh/dia-than.html',
+  'dau-dia-than': '/thiet-bi-am-thanh/dia-than.html',
   'tai-nghe': '/thiet-bi-am-thanh/tai-nghe.html',
+  'tai-khong-day': '/thiet-bi-am-thanh/tai-nghe/tai-nghe-bluetooth.html',
+  'tai-nghe-khong-day': '/thiet-bi-am-thanh/tai-nghe/tai-nghe-bluetooth.html',
   'tai-nghe-bluetooth': '/thiet-bi-am-thanh/tai-nghe/tai-nghe-bluetooth.html',
   'tai-nghe-chup-tai': '/thiet-bi-am-thanh/tai-nghe/headphones.html',
   'tai-nghe-nhet-tai': '/thiet-bi-am-thanh/tai-nghe/tai-nghe-nhet-tai.html',
@@ -385,6 +431,8 @@ export function buildInfoPageModel(pathname = '', search = '') {
     || categoryRoute?.keyword
     || '';
   const categoryParam = params.get('category')
+    || categoryLanding?.apiCategory
+    || categoryLanding?.queryPreset?.category
     || categoryLanding?.category
     || categoryRoute?.category
     || '';
@@ -417,6 +465,9 @@ export function buildInfoPageModel(pathname = '', search = '') {
   const special = params.get('special') || categoryLanding?.queryPreset?.special || '';
   const chip = params.get('chip') || categoryLanding?.queryPreset?.chip || '';
   const nfc = params.get('nfc') || categoryLanding?.queryPreset?.nfc || '';
+  const categoryMode = params.get('categoryMode')
+    || categoryLanding?.queryPreset?.categoryMode
+    || '';
   const titleParam = params.get('title') || '';
   const segments = pathname.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean);
   const root = resolvedRoute.pageType === 'search'
@@ -502,6 +553,7 @@ export function buildInfoPageModel(pathname = '', search = '') {
     special,
     chip,
     nfc,
+    categoryMode,
     categoryLanding,
     landingPath: categoryLanding?.landingPath || '',
     queryPreset: categoryLanding?.queryPreset || null,
