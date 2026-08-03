@@ -1,0 +1,108 @@
+.audio-landing-page .info-hero-card,
+.audio-landing-page .info-support-grid {
+  display: none;
+}
+
+.audio-category-intro {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  margin-bottom: 28px;
+}
+
+.audio-category-intro h1 {
+  margin: 0;
+  color: #111827;
+  font-size: 26px;
+  font-weight: 800;
+}
+
+.audio-category-intro h2 {
+  margin: 0 0 -8px;
+  color: #111827;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.audio-category-brand-grid {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(92px, 1fr));
+  gap: 8px;
+}
+
+.audio-category-brand-card,
+.audio-category-need-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  border: 1px solid #e0e5ef;
+  border-radius: 8px;
+  background: #fff;
+  color: #111827;
+  font-weight: 750;
+  text-decoration: none;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.audio-category-brand-card:hover,
+.audio-category-need-card:hover {
+  border-color: #e11b2e;
+  box-shadow: 0 6px 18px rgba(17, 24, 39, 0.08);
+  transform: translateY(-1px);
+}
+
+.audio-category-brand-card img {
+  width: 100%;
+  max-width: 112px;
+  max-height: 28px;
+  object-fit: contain;
+}
+
+.audio-category-card-grid {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(96px, 1fr));
+  gap: 10px;
+}
+
+.audio-category-need-card {
+  min-height: 104px;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  text-align: center;
+}
+
+.audio-category-need-card img {
+  width: 58px;
+  height: 58px;
+  object-fit: contain;
+}
+
+.audio-category-need-card span {
+  line-height: 1.25;
+}
+
+.audio-category-listing-controls {
+  margin-top: 10px;
+}
+
+@media (max-width: 1024px) {
+  .audio-category-brand-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .audio-category-card-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .audio-category-brand-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .audio-category-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

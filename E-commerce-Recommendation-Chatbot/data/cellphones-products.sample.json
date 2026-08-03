@@ -1,0 +1,429 @@
+{
+  "exportedAt": "2026-06-25T15:32:42.917Z",
+  "source": "cellphones",
+  "database": "cosarii",
+  "collection": "cellphones_products",
+  "totalProducts": 59328,
+  "sampleSize": 10,
+  "products": [
+    {
+      "url": "https://cellphones.com.vn/xperia-zl-den-cu.html",
+      "availability": {
+        "raw": "https://schema.org/OutOfStock",
+        "status": "OutOfStock"
+      },
+      "brand": null,
+      "categories": [],
+      "images": [
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/x/p/xperia-zl-black.png",
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/productnull",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/x/p/xperia-zl-black.png"
+      ],
+      "name": "Sony Xperia ZL Đen",
+      "price": 0,
+      "priceCurrency": "VND",
+      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/x/p/xperia-zl-black.png",
+      "scrapedAt": "2026-06-24T02:31:58.678Z",
+      "sku": "xperia-zl-black--old",
+      "source": "cellphones",
+      "sourceUrls": [
+        "https://cellphones.com.vn/xperia-zl-den-cu.html"
+      ],
+      "trainingLabels": {
+        "schemaVersion": 2,
+        "labelPathText": "Trang chủ - Điện thoại - Sony - Sony Xperia ZL - Sony Xperia ZL Đen",
+        "categoryPathText": "Điện thoại - Sony - Sony Xperia ZL",
+        "categoryLevel1": "Điện thoại",
+        "categoryLevel2": "Sony",
+        "categoryLevel3": "Sony Xperia ZL",
+        "section": "Điện thoại",
+        "deviceGroup": "Sony",
+        "deviceType": "Sony Xperia ZL",
+        "productName": "Sony Xperia ZL Đen",
+        "brand": "Sony",
+        "deviceBrand": "Sony",
+        "deviceLine": "Sony Xperia ZL",
+        "modelLine": "Sony Xperia ZL",
+        "modelCode": null,
+        "confidence": 0.98
+      }
+    },
+    {
+      "url": "https://cellphones.com.vn/xperia-z1-den-cu.html",
+      "availability": {
+        "raw": "https://schema.org/OutOfStock",
+        "status": "OutOfStock"
+      },
+      "brand": null,
+      "categories": [],
+      "images": [
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/x/p/xperia-z1-black_2.png",
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/productnull",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/x/p/xperia-z1-black_2.png"
+      ],
+      "name": "Sony Xperia Z1 Đen",
+      "price": 0,
+      "priceCurrency": "VND",
+      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/x/p/xperia-z1-black_2.png",
+      "scrapedAt": "2026-06-24T02:31:58.551Z",
+      "sku": "xperia-z1-black--old",
+      "source": "cellphones",
+      "sourceUrls": [
+        "https://cellphones.com.vn/xperia-z1-den-cu.html"
+      ],
+      "trainingLabels": {
+        "schemaVersion": 2,
+        "labelPathText": "Trang chủ - Điện thoại - Sony - Sony Xperia Z1 - Sony Xperia Z1 Đen",
+        "categoryPathText": "Điện thoại - Sony - Sony Xperia Z1",
+        "categoryLevel1": "Điện thoại",
+        "categoryLevel2": "Sony",
+        "categoryLevel3": "Sony Xperia Z1",
+        "section": "Điện thoại",
+        "deviceGroup": "Sony",
+        "deviceType": "Sony Xperia Z1",
+        "productName": "Sony Xperia Z1 Đen",
+        "brand": "Sony",
+        "deviceBrand": "Sony",
+        "deviceLine": "Sony Xperia Z1",
+        "modelLine": "Sony Xperia Z1",
+        "modelCode": null,
+        "confidence": 0.98
+      }
+    },
+    {
+      "url": "https://cellphones.com.vn/xperia-z-purple-old.html",
+      "availability": {
+        "raw": "https://schema.org/OutOfStock",
+        "status": "OutOfStock"
+      },
+      "brand": null,
+      "categories": [],
+      "images": [
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/x/p/xperia-z-purple_4.png",
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/productnull",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/x/p/xperia-z-purple_4.png"
+      ],
+      "name": "Sony Xperia Z Tím",
+      "price": 0,
+      "priceCurrency": "VND",
+      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/x/p/xperia-z-purple_4.png",
+      "scrapedAt": "2026-06-24T02:31:54.751Z",
+      "sku": "xperia-z-purple--old",
+      "source": "cellphones",
+      "sourceUrls": [
+        "https://cellphones.com.vn/xperia-z-purple-old.html"
+      ],
+      "trainingLabels": {
+        "schemaVersion": 2,
+        "labelPathText": "Trang chủ - Điện thoại - Sony - Sony Xperia Z - Sony Xperia Z Tím",
+        "categoryPathText": "Điện thoại - Sony - Sony Xperia Z",
+        "categoryLevel1": "Điện thoại",
+        "categoryLevel2": "Sony",
+        "categoryLevel3": "Sony Xperia Z",
+        "section": "Điện thoại",
+        "deviceGroup": "Sony",
+        "deviceType": "Sony Xperia Z",
+        "productName": "Sony Xperia Z Tím",
+        "brand": "Sony",
+        "deviceBrand": "Sony",
+        "deviceLine": "Sony Xperia Z",
+        "modelLine": "Sony Xperia Z",
+        "modelCode": null,
+        "confidence": 0.98
+      }
+    },
+    {
+      "url": "https://cellphones.com.vn/xperia-sp-trang-cu.html",
+      "availability": {
+        "raw": "https://schema.org/OutOfStock",
+        "status": "OutOfStock"
+      },
+      "brand": null,
+      "categories": [],
+      "images": [
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/x/p/xperia-sp-white_2.png",
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/productnull",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/x/p/xperia-sp-white_2.png"
+      ],
+      "name": "Sony Xperia SP Trắng",
+      "price": 0,
+      "priceCurrency": "VND",
+      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/x/p/xperia-sp-white_2.png",
+      "scrapedAt": "2026-06-24T02:31:54.197Z",
+      "sku": "xperia-sp-white--old",
+      "source": "cellphones",
+      "sourceUrls": [
+        "https://cellphones.com.vn/xperia-sp-trang-cu.html"
+      ],
+      "trainingLabels": {
+        "schemaVersion": 2,
+        "labelPathText": "Trang chủ - Điện thoại - Sony - Sony Xperia SP - Sony Xperia SP Trắng",
+        "categoryPathText": "Điện thoại - Sony - Sony Xperia SP",
+        "categoryLevel1": "Điện thoại",
+        "categoryLevel2": "Sony",
+        "categoryLevel3": "Sony Xperia SP",
+        "section": "Điện thoại",
+        "deviceGroup": "Sony",
+        "deviceType": "Sony Xperia SP",
+        "productName": "Sony Xperia SP Trắng",
+        "brand": "Sony",
+        "deviceBrand": "Sony",
+        "deviceLine": "Sony Xperia SP",
+        "modelLine": "Sony Xperia SP",
+        "modelCode": null,
+        "confidence": 0.98
+      }
+    },
+    {
+      "url": "https://cellphones.com.vn/xperia-z-cty-black-old.html",
+      "availability": {
+        "raw": "https://schema.org/OutOfStock",
+        "status": "OutOfStock"
+      },
+      "brand": null,
+      "categories": [],
+      "images": [
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/x/p/xperia-z-black_3.png",
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/productnull",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/x/p/xperia-z-black_3.png"
+      ],
+      "name": "Sony Xperia Z Chính hãng Đen",
+      "price": 0,
+      "priceCurrency": "VND",
+      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/x/p/xperia-z-black_3.png",
+      "scrapedAt": "2026-06-24T02:31:54.060Z",
+      "sku": "xperia-z-cty-black--old",
+      "source": "cellphones",
+      "sourceUrls": [
+        "https://cellphones.com.vn/xperia-z-cty-black-old.html"
+      ],
+      "trainingLabels": {
+        "schemaVersion": 2,
+        "labelPathText": "Trang chủ - Điện thoại - Sony - Sony Xperia Z - Sony Xperia Z Chính hãng Đen",
+        "categoryPathText": "Điện thoại - Sony - Sony Xperia Z",
+        "categoryLevel1": "Điện thoại",
+        "categoryLevel2": "Sony",
+        "categoryLevel3": "Sony Xperia Z",
+        "section": "Điện thoại",
+        "deviceGroup": "Sony",
+        "deviceType": "Sony Xperia Z",
+        "productName": "Sony Xperia Z Chính hãng Đen",
+        "brand": "Sony",
+        "deviceBrand": "Sony",
+        "deviceLine": "Sony Xperia Z",
+        "modelLine": "Sony Xperia Z",
+        "modelCode": null,
+        "confidence": 0.98
+      }
+    },
+    {
+      "url": "https://cellphones.com.vn/xperia-z1-cty-trang-cu.html",
+      "availability": {
+        "raw": "https://schema.org/OutOfStock",
+        "status": "OutOfStock"
+      },
+      "brand": null,
+      "categories": [],
+      "images": [
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/x/p/xperia-z1-white_2.png",
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/productnull",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/x/p/xperia-z1-white_2.png"
+      ],
+      "name": "Sony Xperia Z1 Chính hãng Trắng",
+      "price": 0,
+      "priceCurrency": "VND",
+      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/x/p/xperia-z1-white_2.png",
+      "scrapedAt": "2026-06-24T02:31:52.996Z",
+      "sku": "xperia-z1-cty-white--old",
+      "source": "cellphones",
+      "sourceUrls": [
+        "https://cellphones.com.vn/xperia-z1-cty-trang-cu.html"
+      ],
+      "trainingLabels": {
+        "schemaVersion": 2,
+        "labelPathText": "Trang chủ - Điện thoại - Sony - Sony Xperia Z1 - Sony Xperia Z1 Chính hãng Trắng",
+        "categoryPathText": "Điện thoại - Sony - Sony Xperia Z1",
+        "categoryLevel1": "Điện thoại",
+        "categoryLevel2": "Sony",
+        "categoryLevel3": "Sony Xperia Z1",
+        "section": "Điện thoại",
+        "deviceGroup": "Sony",
+        "deviceType": "Sony Xperia Z1",
+        "productName": "Sony Xperia Z1 Chính hãng Trắng",
+        "brand": "Sony",
+        "deviceBrand": "Sony",
+        "deviceLine": "Sony Xperia Z1",
+        "modelLine": "Sony Xperia Z1",
+        "modelCode": null,
+        "confidence": 0.98
+      }
+    },
+    {
+      "url": "https://cellphones.com.vn/xiaomi-mi-mix-2-special-edition-chinh-hang.html",
+      "availability": {
+        "raw": "https://schema.org/OutOfStock",
+        "status": "OutOfStock"
+      },
+      "brand": "Xiaomi",
+      "categories": [
+        "Điện thoại"
+      ],
+      "images": [
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/productno_selection",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/productno_selection"
+      ],
+      "name": "Xiaomi Mi MIX 2 Special Edition",
+      "price": 15990000,
+      "priceCurrency": "VND",
+      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/productno_selection",
+      "scrapedAt": "2026-06-24T02:31:50.295Z",
+      "sku": "Mi MIX 2 Special Edition Chính hãng",
+      "source": "cellphones",
+      "sourceUrls": [
+        "https://cellphones.com.vn/xiaomi-mi-mix-2-special-edition-chinh-hang.html"
+      ],
+      "trainingLabels": {
+        "schemaVersion": 2,
+        "labelPathText": "Trang chủ - Điện thoại - Xiaomi Mi MIX 2 Special Edition",
+        "categoryPathText": "Điện thoại",
+        "categoryLevel1": "Điện thoại",
+        "section": "Điện thoại",
+        "deviceGroup": "Điện thoại",
+        "deviceType": "Điện thoại",
+        "productName": "Xiaomi Mi MIX 2 Special Edition",
+        "brand": "Xiaomi",
+        "deviceBrand": "Xiaomi",
+        "deviceLine": "MI MIX 2",
+        "modelLine": "MI MIX 2",
+        "modelCode": null,
+        "confidence": 0.88
+      }
+    },
+    {
+      "url": "https://cellphones.com.vn/xperia-l-cty-black-old.html",
+      "availability": {
+        "raw": "https://schema.org/OutOfStock",
+        "status": "OutOfStock"
+      },
+      "brand": null,
+      "categories": [],
+      "images": [
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/l/-/l-black.png",
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/productnull",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/l/-/l-black.png"
+      ],
+      "name": "Sony Xperia L Chính hãng Đen",
+      "price": 0,
+      "priceCurrency": "VND",
+      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/l/-/l-black.png",
+      "scrapedAt": "2026-06-24T02:31:49.421Z",
+      "sku": "xperia-l-cty-black--old",
+      "source": "cellphones",
+      "sourceUrls": [
+        "https://cellphones.com.vn/xperia-l-cty-black-old.html"
+      ],
+      "trainingLabels": {
+        "schemaVersion": 2,
+        "labelPathText": "Trang chủ - Điện thoại - Sony - Sony Xperia L - Sony Xperia L Chính hãng Đen",
+        "categoryPathText": "Điện thoại - Sony - Sony Xperia L",
+        "categoryLevel1": "Điện thoại",
+        "categoryLevel2": "Sony",
+        "categoryLevel3": "Sony Xperia L",
+        "section": "Điện thoại",
+        "deviceGroup": "Sony",
+        "deviceType": "Sony Xperia L",
+        "productName": "Sony Xperia L Chính hãng Đen",
+        "brand": "Sony",
+        "deviceBrand": "Sony",
+        "deviceLine": "Sony Xperia L",
+        "modelLine": "Sony Xperia L",
+        "modelCode": null,
+        "confidence": 0.98
+      }
+    },
+    {
+      "url": "https://cellphones.com.vn/xperia-c-cty-black-old.html",
+      "availability": {
+        "raw": "https://schema.org/OutOfStock",
+        "status": "OutOfStock"
+      },
+      "brand": null,
+      "categories": [],
+      "images": [
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/x/p/xperia-c-black_2.png",
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/productnull",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/x/p/xperia-c-black_2.png"
+      ],
+      "name": "Sony Xperia C Chính hãng Đen",
+      "price": 0,
+      "priceCurrency": "VND",
+      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/x/p/xperia-c-black_2.png",
+      "scrapedAt": "2026-06-24T02:31:49.059Z",
+      "sku": "xperia-c-cty-black--old",
+      "source": "cellphones",
+      "sourceUrls": [
+        "https://cellphones.com.vn/xperia-c-cty-black-old.html"
+      ],
+      "trainingLabels": {
+        "schemaVersion": 2,
+        "labelPathText": "Trang chủ - Điện thoại - Sony - Sony Xperia C - Sony Xperia C Chính hãng Đen",
+        "categoryPathText": "Điện thoại - Sony - Sony Xperia C",
+        "categoryLevel1": "Điện thoại",
+        "categoryLevel2": "Sony",
+        "categoryLevel3": "Sony Xperia C",
+        "section": "Điện thoại",
+        "deviceGroup": "Sony",
+        "deviceType": "Sony Xperia C",
+        "productName": "Sony Xperia C Chính hãng Đen",
+        "brand": "Sony",
+        "deviceBrand": "Sony",
+        "deviceLine": "Sony Xperia C",
+        "modelLine": "Sony Xperia C",
+        "modelCode": null,
+        "confidence": 0.98
+      }
+    },
+    {
+      "url": "https://cellphones.com.vn/xperia-p-cty-silver-old.html",
+      "availability": {
+        "raw": "https://schema.org/OutOfStock",
+        "status": "OutOfStock"
+      },
+      "brand": null,
+      "categories": [],
+      "images": [
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/product/x/p/xperia-p-silver_6.png",
+        "https://cdn2.cellphones.com.vn/200x/media/catalog/productnull",
+        "https://cdn2.cellphones.com.vn/358x/media/catalog/product/x/p/xperia-p-silver_6.png"
+      ],
+      "name": "Sony Xperia P Chính hãng Bạc",
+      "price": 0,
+      "priceCurrency": "VND",
+      "primaryImage": "https://cdn2.cellphones.com.vn/200x/media/catalog/product/x/p/xperia-p-silver_6.png",
+      "scrapedAt": "2026-06-24T02:31:48.707Z",
+      "sku": "xperia-p-cty-silver--old",
+      "source": "cellphones",
+      "sourceUrls": [
+        "https://cellphones.com.vn/xperia-p-cty-silver-old.html"
+      ],
+      "trainingLabels": {
+        "schemaVersion": 2,
+        "labelPathText": "Trang chủ - Điện thoại - Sony - Sony Xperia P - Sony Xperia P Chính hãng Bạc",
+        "categoryPathText": "Điện thoại - Sony - Sony Xperia P",
+        "categoryLevel1": "Điện thoại",
+        "categoryLevel2": "Sony",
+        "categoryLevel3": "Sony Xperia P",
+        "section": "Điện thoại",
+        "deviceGroup": "Sony",
+        "deviceType": "Sony Xperia P",
+        "productName": "Sony Xperia P Chính hãng Bạc",
+        "brand": "Sony",
+        "deviceBrand": "Sony",
+        "deviceLine": "Sony Xperia P",
+        "modelLine": "Sony Xperia P",
+        "modelCode": null,
+        "confidence": 0.98
+      }
+    }
+  ]
+}

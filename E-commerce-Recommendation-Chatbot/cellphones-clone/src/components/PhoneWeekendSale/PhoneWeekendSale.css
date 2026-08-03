@@ -1,0 +1,263 @@
+.phone-weekend-sale {
+  margin-top: 26px;
+  padding: 14px 10px 12px;
+  overflow: hidden;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #ff365c 0%, #ff405d 48%, #ff4a4f 100%);
+  box-shadow: 0 10px 24px rgba(230, 36, 70, 0.18);
+}
+
+.phone-weekend-sale-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 0 10px 14px;
+  color: #fff;
+}
+
+.phone-weekend-sale-head h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  color: #fff;
+  font-size: clamp(27px, 3.1vw, 44px);
+  font-weight: 950;
+  line-height: 1;
+  letter-spacing: -1.2px;
+  text-transform: uppercase;
+  word-spacing: 0.16em;
+}
+
+.phone-weekend-sale-flame {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  border: 3px solid currentColor;
+  border-radius: 999px;
+  font-size: 25px;
+  line-height: 1;
+}
+
+.phone-weekend-sale-countdown {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  font-size: 15px;
+}
+
+.phone-weekend-sale-countdown strong {
+  white-space: nowrap;
+}
+
+.phone-weekend-sale-time {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #1f2937;
+}
+
+.phone-weekend-sale-time span {
+  display: grid;
+  place-items: center;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #fff;
+  font-size: 14px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.12);
+}
+
+.phone-weekend-sale-time b {
+  color: #fff;
+  font-size: 16px;
+}
+
+.phone-weekend-sale-sort {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 10px 12px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.phone-weekend-sale-sort::-webkit-scrollbar {
+  display: none;
+}
+
+.phone-weekend-sale-sort button {
+  flex: 0 0 auto;
+  padding: 9px 15px;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.phone-weekend-sale-sort button:hover,
+.phone-weekend-sale-sort button.active {
+  border-color: #fff;
+  background: #fff;
+  color: #174c96;
+}
+
+.phone-weekend-sale-rail-wrap {
+  position: relative;
+}
+
+.phone-weekend-sale-rail {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding: 0 0 2px;
+  scroll-behavior: smooth;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+}
+
+.phone-weekend-sale-rail::-webkit-scrollbar {
+  display: none;
+}
+
+.phone-weekend-sale-card {
+  flex: 0 0 calc((100% - 48px) / 5);
+  min-width: 205px;
+  scroll-snap-align: start;
+}
+
+.phone-weekend-sale-card .product-card {
+  border-radius: 14px;
+  box-shadow: none;
+}
+
+.phone-weekend-sale-card .product-card:hover {
+  box-shadow: 0 8px 18px rgba(91, 14, 31, 0.16);
+}
+
+.phone-weekend-sale-empty {
+  width: 100%;
+  padding: 34px 20px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #475569;
+  font-weight: 700;
+  text-align: center;
+}
+
+.phone-weekend-sale-nav {
+  position: absolute;
+  top: 50%;
+  z-index: 7;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  padding: 0 0 4px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.2);
+  color: #111827;
+  cursor: pointer;
+  font-size: 34px;
+  font-weight: 300;
+  line-height: 1;
+  transform: translateY(-50%);
+  transition: color 160ms ease, transform 160ms ease;
+}
+
+.phone-weekend-sale-nav:hover {
+  color: #d70018;
+  transform: translateY(-50%) scale(1.06);
+}
+
+.phone-weekend-sale-prev {
+  left: -7px;
+}
+
+.phone-weekend-sale-next {
+  right: -7px;
+}
+
+@media (max-width: 900px) {
+  .phone-weekend-sale-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .phone-weekend-sale-card {
+    flex-basis: calc((100% - 24px) / 3);
+  }
+}
+
+@media (max-width: 640px) {
+  .phone-weekend-sale {
+    margin-top: 18px;
+    padding: 12px 8px 10px;
+    border-radius: 14px;
+  }
+
+  .phone-weekend-sale-head {
+    padding: 0 4px 12px;
+  }
+
+  .phone-weekend-sale-head h2 {
+    gap: 7px;
+    font-size: 25px;
+    letter-spacing: -0.6px;
+  }
+
+  .phone-weekend-sale-flame {
+    width: 31px;
+    height: 31px;
+    flex-basis: 31px;
+    border-width: 2px;
+    font-size: 20px;
+  }
+
+  .phone-weekend-sale-countdown {
+    width: 100%;
+    justify-content: space-between;
+    gap: 6px;
+    font-size: 13px;
+  }
+
+  .phone-weekend-sale-time {
+    gap: 3px;
+  }
+
+  .phone-weekend-sale-time span {
+    min-width: 26px;
+    height: 26px;
+    font-size: 12px;
+  }
+
+  .phone-weekend-sale-card {
+    flex-basis: 168px;
+    min-width: 168px;
+  }
+
+  .phone-weekend-sale-nav {
+    width: 36px;
+    height: 36px;
+    font-size: 29px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .phone-weekend-sale-rail {
+    scroll-behavior: auto;
+  }
+}

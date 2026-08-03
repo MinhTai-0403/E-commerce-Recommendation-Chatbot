@@ -1,0 +1,34 @@
+.venv/
+venv/
+**/.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.env
+.vscode/
+node_modules/
+npm-debug.log*
+logs/
+data/product-details/
+
+*.pt
+*.pth
+*.ckpt
+
+# Frontend dependencies and build files
+**/node_modules/
+**/dist/
+**/build/
+
+# Generated AI data and index files
+multimodal-chatbox/index/
+multimodal-chatbox/data/products/_downloaded/
+
+# Environment and Python cache
+.env
+**/.venv/
+**/__pycache__/
+*.pyc
+
+# Test folder
+test/

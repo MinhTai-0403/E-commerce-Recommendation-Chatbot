@@ -1,0 +1,156 @@
+/* ===== APP ===== */
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.main-content {
+  flex: 1;
+  padding-top: 98px;
+  padding-bottom: 12px;
+}
+
+.main-content.product-detail-main {
+  background: #f3f4f6;
+}
+
+/* === Lớp nền mờ phủ đen toàn dự án === */
+.global-backdrop-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  z-index: 998;
+  pointer-events: auto;
+  animation: fadeIn 0.2s ease forwards;
+}
+
+.route-state-card {
+  padding: 22px 0 50px;
+}
+
+.route-state-box {
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: var(--shadow-card);
+  padding: 28px;
+  text-align: center;
+}
+
+.route-state-box h1 {
+  color: var(--text-primary);
+  font-size: 24px;
+  margin-bottom: 10px;
+}
+
+.route-state-box p {
+  color: var(--text-secondary);
+  margin-bottom: 18px;
+}
+
+.route-state-box a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 18px;
+  border-radius: 10px;
+  background: var(--primary-red);
+  color: #fff;
+  font-weight: 700;
+}
+
+/* Floating support actions */
+.floating-actions {
+  position: fixed;
+  right: 12px;
+  bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 999;
+}
+
+.floating-app {
+  position: relative;
+  width: 100px;
+  height: 100px;
+  margin-bottom: 4px;
+}
+
+.floating-app img {
+  width: 100px;
+  height: 100px;
+  object-fit: contain;
+}
+
+.floating-app > button {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 24px;
+  height: 24px;
+  border: 1px solid #e5e5e5;
+  border-radius: 50%;
+  background: #fff;
+  color: #d70018;
+  font-size: 18px;
+  line-height: 20px;
+  z-index: 1;
+}
+
+.floating-action-button {
+  width: 112px;
+  height: 48px;
+  border-radius: 12px;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.12);
+}
+
+.back-to-top {
+  background: #050505;
+  opacity: 0;
+  transform: translateY(20px);
+  transition: all var(--transition-normal);
+  pointer-events: none;
+}
+
+.back-to-top.visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: all;
+}
+
+.back-to-top:hover {
+  background: #171717;
+  transform: translateY(-3px);
+}
+
+.floating-contact {
+  background: #d70018;
+}
+
+.floating-contact:hover {
+  color: #fff;
+  background: #b8000f;
+}
+
+@media (max-width: 1023px) {
+  .main-content { padding-top: 85px; }
+}
+
+@media (max-width: 640px) {
+  .main-content { padding-top: 98px; padding-bottom: 10px; }
+  .floating-actions { right: 10px; bottom: 12px; align-items: flex-end; }
+  .floating-app { width: 93px; height: 93px; margin-right: 14px; }
+  .floating-app img { width: 93px; height: 93px; }
+  .floating-action-button { width: 48px; height: 48px; border-radius: 9px; }
+  .floating-action-button span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+}

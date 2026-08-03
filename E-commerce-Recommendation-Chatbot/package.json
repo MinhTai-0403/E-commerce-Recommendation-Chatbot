@@ -1,0 +1,42 @@
+{
+  "name": "e-commerce-recommendation-chatbot-data",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "api:start": "node src/server/api-server.js",
+    "api:dev": "node src/server/api-server.js",
+    "auth:env": "node src/tools/check-auth-env.js",
+    "auth:seed-admin": "node src/jobs/seed-admin-user.js",
+    "mongo:test": "node src/tools/connect-mongodb.js",
+    "mongo:cellphones:summary": "node src/tools/inspect-cellphones-products.js",
+    "mongo:cellphones:export-sample": "node src/tools/export-cellphones-sample.js",
+    "mongo:products:compress": "node src/jobs/compress-cellphones-products.js",
+    "mongo:products:backup-clear": "node src/jobs/backup-and-clear-cellphones-products.js --execute",
+    "mongo:products:restore": "node src/jobs/restore-cellphones-products-backup.js",
+    "mongo:products:embed-blobs": "node src/jobs/embed-cellphones-product-blobs.js",
+    "mongo:details:inline-gzip": "node src/jobs/import-product-details-inline-gzip.js",
+    "mongo:details:summary": "node src/tools/inspect-cellphones-details.js",
+    "mongo:details:backfill-facets": "node src/jobs/backfill-product-detail-facets.js",
+    "mongo:details:migrate-local": "node src/jobs/migrate-product-details-to-files.js",
+    "label:cellphones": "node src/jobs/label-cellphones-products.js",
+    "scrape:cellphones:details": "node src/scrapers/scrape-cellphones-details.js",
+    "scrape:cellphones:weak-details": "powershell -ExecutionPolicy Bypass -File scripts/scrape-cellphones-weak-details-inline.ps1",
+    "scrape:cellphones:variant-queue": "node src/jobs/build-variant-detail-queue.js",
+    "sync:cellphones:products-from-details": "node src/jobs/sync-products-from-details.js",
+    "seed:cellphones:sitemap": "node src/jobs/seed-cellphones-products-from-sitemap.js",
+    "scrape:cellphones": "node src/scrapers/scrape-cellphones.js",
+    "scrape:cellphones:full:windows": "powershell -ExecutionPolicy Bypass -File scripts/scrape-cellphones-full.ps1",
+    "scrape:cellphones:proxy": "powershell -ExecutionPolicy Bypass -File scripts/scrape-cellphones-proxy-parallel.ps1",
+    "scrape:cellphones:sample": "node src/scrapers/scrape-cellphones.js --sitemap-limit=1 --limit=10 --concurrency=2 --delay-ms=500",
+    "verify:cellphones": "node src/tools/verify-cellphones-coverage.js"
+  },
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "dotenv": "^16.4.7",
+    "fast-xml-parser": "^5.9.2",
+    "mongodb": "^6.12.0",
+    "nodemailer": "^9.0.1",
+    "undici": "^7.28.0",
+    "zod": "^4.4.3"
+  }
+}
